@@ -1,8 +1,7 @@
-import { useAtom } from 'jotai'
+import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSshKeys } from '@/features/ssh-keys'
-import { routeAtom } from '@/shared/store/ui'
 import { Button, CopyButton } from '@/shared/ui'
 import { type Project, useRetryProject, useUpdateProject } from '../hooks/use-projects'
 import { apiErrorMessage } from '../lib/api-error'
@@ -20,7 +19,7 @@ import styles from './recovery-panel.module.scss'
  */
 export function RecoveryPanel({ project }: { project: Project }) {
   const { t } = useTranslation()
-  const [, setRoute] = useAtom(routeAtom)
+  const navigate = useNavigate()
   const { data: sshKeys } = useSshKeys()
   const retry = useRetryProject()
   const update = useUpdateProject()
@@ -81,7 +80,7 @@ export function RecoveryPanel({ project }: { project: Project }) {
 
             {keys.length === 0 ? (
               <div className={styles.row}>
-                <Button type="button" onClick={() => setRoute({ name: 'ssh-keys' })}>
+                <Button type="button" onClick={() => void navigate({ to: '/ssh-keys' })}>
                   {t('projects.recovery.goToKeys')}
                 </Button>
                 <span className={styles.explain}>{t('projects.recovery.noKeysYet')}</span>
@@ -108,7 +107,7 @@ export function RecoveryPanel({ project }: { project: Project }) {
                 <button
                   type="button"
                   className={styles.link}
-                  onClick={() => setRoute({ name: 'ssh-keys' })}
+                  onClick={() => void navigate({ to: '/ssh-keys' })}
                 >
                   {t('projects.recovery.manageKeys')}
                 </button>

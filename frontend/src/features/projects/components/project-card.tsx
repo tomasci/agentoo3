@@ -1,8 +1,7 @@
-import { useAtom } from 'jotai'
+import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSshKeys } from '@/features/ssh-keys'
-import { routeAtom } from '@/shared/store/ui'
 import { Button } from '@/shared/ui'
 import {
   type Project,
@@ -22,7 +21,6 @@ export function ProjectCard({ project }: { project: Project }) {
   const update = useUpdateProject()
   const retry = useRetryProject()
   const { data: sshKeys } = useSshKeys()
-  const [, setRoute] = useAtom(routeAtom)
   const [keyId, setKeyId] = useState(project.sshKeyId ?? '')
   const [keyError, setKeyError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -68,7 +66,18 @@ export function ProjectCard({ project }: { project: Project }) {
     <article className={styles.card}>
       <div className={styles.head}>
         <div>
-          <h3 className={styles.name}>{project.name}</h3>
+          {/* The name is the link, which is what a reader reaches for first. */}
+          {project.status === 'ready' ? (
+            <Link
+              to="/projects/$projectId"
+              params={{ projectId: project.id }}
+              className={styles.nameLink}
+            >
+              <h3 className={styles.name}>{project.name}</h3>
+            </Link>
+          ) : (
+            <h3 className={styles.name}>{project.name}</h3>
+          )}
           <dl className={styles.meta}>
             <div className={styles.row}>
               <dt>{t('projects.meta.path')}</dt>
@@ -90,14 +99,13 @@ export function ProjectCard({ project }: { project: Project }) {
         </div>
         <div className={styles.right}>
           <ProjectStatusBadge project={project} />
-          {/* Only a ready project has a checkout to run a session against. */}
-          <Button
-            type="button"
-            disabled={project.status !== 'ready'}
-            onClick={() => setRoute({ name: 'project', projectId: project.id })}
-          >
-            {t('projects.open')}
-          </Button>
+          {/* Only a ready project has a checkout to run a session against, so
+              the link is not offered until then. */}
+          {project.status === 'ready' && (
+            <Link to="/projects/$projectId" params={{ projectId: project.id }}>
+              <Button type="button">{t('projects.open')}</Button>
+            </Link>
+          )}
           <Button type="button" onClick={onDelete} disabled={remove.isPending}>
             {t('common.delete')}
           </Button>

@@ -40,7 +40,7 @@ bun run hooks       # install lefthook git hooks
 
 ```
 src/
-  app/                 shell: providers, root component
+  app/                 router, root layout, providers
   features/            one directory per feature, self-contained
     projects/          hooks/ components/ model/ lib/ index.ts
     health/            hooks/ components/ index.ts
@@ -58,6 +58,27 @@ A feature owns its own `api/`, `model/`, `hooks/` and `components/`, and exposes
 a single `index.ts`. Import across features through that barrel, never by
 reaching into another feature's internals. Anything genuinely shared moves to
 `shared/`.
+
+## Routing
+
+TanStack Router, defined in code rather than by file convention
+(`src/app/router.tsx`):
+
+| URL | Page |
+|---|---|
+| `/` | redirects to `/projects` |
+| `/projects` | project list |
+| `/projects/$projectId` | one project and its sessions |
+| `/ssh-keys` | SSH keys |
+
+Code-based rather than file-based because file-based needs a Vite plugin and a
+generated `routeTree.gen.ts`, and this project already generates its API client
+at install time — one codegen step is enough.
+
+Every page has a real URL, so deep links and the back button work. That puts a
+requirement on the server: `server.ts` returns the SPA shell for unknown *routes*
+but a genuine 404 for unknown *assets*, since answering a `.js` request with HTML
+makes the browser report a MIME type error instead of the missing file.
 
 ## The API client is generated, not committed
 

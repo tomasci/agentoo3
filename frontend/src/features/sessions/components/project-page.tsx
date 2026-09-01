@@ -1,10 +1,9 @@
-import { useAtom } from 'jotai'
+import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLibraryAgents } from '@/features/library'
 import { useProjects } from '@/features/projects'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { routeAtom } from '@/shared/store/ui'
 import { Button } from '@/shared/ui'
 import { useCreateSession, useSessions } from '../hooks/use-sessions'
 import { SessionCard } from './session-card'
@@ -12,7 +11,6 @@ import styles from './sessions.module.scss'
 
 export function ProjectPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation()
-  const [, setRoute] = useAtom(routeAtom)
   const { data: projects } = useProjects()
   const { data: sessions, isPending, isError, error } = useSessions(projectId)
   const { data: agents } = useLibraryAgents()
@@ -49,9 +47,9 @@ export function ProjectPage({ projectId }: { projectId: string }) {
 
   return (
     <div className={styles.page}>
-      <button type="button" className={styles.back} onClick={() => setRoute({ name: 'projects' })}>
+      <Link to="/projects" className={styles.back}>
         ← {t('sessions.backToProjects')}
-      </button>
+      </Link>
 
       {project && (
         <div className={styles.projectHead}>

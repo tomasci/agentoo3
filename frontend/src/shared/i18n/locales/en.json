@@ -175,5 +175,9 @@
       "creating": "Creating…",
       "notReady": "The project has to finish setup first."
     }
+  },
+  "notFound": {
+    "message": "There is nothing at this address.",
+    "back": "Back to projects"
   }
 }

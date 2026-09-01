@@ -1,19 +1,17 @@
+import { Link, Outlet } from '@tanstack/react-router'
 import { useAtom } from 'jotai'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HealthBadge } from '@/features/health'
-import { ProjectsPage } from '@/features/projects'
-import { ProjectPage } from '@/features/sessions'
-import { SshKeysPage } from '@/features/ssh-keys'
 import { SUPPORTED_LANGUAGES } from '@/shared/i18n'
-import { routeAtom, themeAtom } from '@/shared/store/ui'
+import { themeAtom } from '@/shared/store/ui'
 import { Button } from '@/shared/ui'
 import styles from './app.module.scss'
 
-export function App() {
+/** Chrome shared by every page: header, nav, theme and language. */
+export function RootLayout() {
   const { t, i18n } = useTranslation()
   const [theme, setTheme] = useAtom(themeAtom)
-  const [route, setRoute] = useAtom(routeAtom)
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -23,7 +21,9 @@ export function App() {
     <div className={styles.page}>
       <header className={styles.header}>
         <div>
-          <h1 className={styles.title}>{t('app.title')}</h1>
+          <Link to="/projects" className={styles.brand}>
+            <h1 className={styles.title}>{t('app.title')}</h1>
+          </Link>
           <p className={styles.subtitle}>{t('app.subtitle')}</p>
         </div>
         <div className={styles.controls}>
@@ -47,29 +47,23 @@ export function App() {
       </header>
 
       <nav className={styles.nav}>
-        <button
-          type="button"
+        {/* activeProps rather than manual comparison: a project page is under
+            /projects, so `fuzzy` keeps the tab lit while you are inside one. */}
+        <Link
+          to="/projects"
           className={styles.navItem}
-          // A project view is still "projects" as far as the tab is concerned.
-          aria-current={route.name !== 'ssh-keys' ? 'page' : undefined}
-          onClick={() => setRoute({ name: 'projects' })}
+          activeProps={{ 'aria-current': 'page' }}
+          activeOptions={{ exact: false }}
         >
           {t('nav.projects')}
-        </button>
-        <button
-          type="button"
-          className={styles.navItem}
-          aria-current={route.name === 'ssh-keys' ? 'page' : undefined}
-          onClick={() => setRoute({ name: 'ssh-keys' })}
-        >
+        </Link>
+        <Link to="/ssh-keys" className={styles.navItem} activeProps={{ 'aria-current': 'page' }}>
           {t('nav.sshKeys')}
-        </button>
+        </Link>
       </nav>
 
       <main>
-        {route.name === 'ssh-keys' && <SshKeysPage />}
-        {route.name === 'projects' && <ProjectsPage />}
-        {route.name === 'project' && <ProjectPage projectId={route.projectId} />}
+        <Outlet />
       </main>
     </div>
   )

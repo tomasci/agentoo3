@@ -19,6 +19,16 @@ if (!existsSync(join(DIST, 'index.html'))) {
 
 const INDEX = join(DIST, 'index.html')
 
+// Paths the SPA fallback must not swallow. Deliberately an extension list
+// rather than "contains a dot", so a route segment like /projects/v1.2 still
+// resolves to the app.
+const ASSET_EXTENSIONS =
+  /\.(?:js|mjs|cjs|css|map|json|txt|xml|webmanifest|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|eot|mp4|webm)$/i
+
+function isAssetPath(pathname: string): boolean {
+  return pathname.startsWith('/assets/') || ASSET_EXTENSIONS.test(pathname)
+}
+
 function cacheHeaders(path: string): Record<string, string> {
   // Vite fingerprints everything under /assets/, so those are safe to pin.
   if (path.startsWith('/assets/')) {
@@ -49,6 +59,13 @@ const server = Bun.serve({
 
     if (existsSync(candidate) && statSync(candidate).isFile()) {
       return new Response(Bun.file(candidate), { headers: cacheHeaders(pathname) })
+    }
+
+    // A missing *asset* is a 404, not the shell. Falling back would answer a
+    // .js request with HTML, and the browser then reports a MIME type error
+    // instead of the real problem, which is that the file is not there.
+    if (isAssetPath(pathname)) {
+      return new Response('Not Found', { status: 404 })
     }
 
     // Anything else is a client-side route: hand back the shell.
