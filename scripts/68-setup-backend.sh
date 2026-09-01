@@ -30,6 +30,7 @@ app_home="$(getent passwd "$APP_USER" 2>/dev/null | cut -d: -f6 || true)"
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
   log_info "[dry-run] would ensure the service account '$APP_USER' exists"
+  log_info "[dry-run] would reassign $REPO_ROOT and the data directories to $APP_USER"
   log_info "[dry-run] would run 'bun install' and migrations in $BACKEND_DIR"
   log_info "[dry-run] would create $PROJECTS_DIR, $SOURCES_DIR and $LIBRARY_DIR"
   log_info "[dry-run] would install ${APP_NAME}-api and ${APP_NAME}-worker services"
@@ -37,6 +38,12 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
 fi
 
 run_as_app() { as_user "$APP_USER" env HOME="$app_home" PATH="/usr/local/bin:/usr/bin:/bin" "$@"; }
+
+# --- ownership ----------------------------------------------------------------
+# Before anything runs as APP_USER. An install that previously ran as root left
+# a root-owned checkout and node_modules behind, and bun cannot relink into
+# those as another user.
+reconcile_ownership "$APP_USER" "$REPO_ROOT" "$PROJECTS_DIR" "$SOURCES_DIR" "$LIBRARY_DIR"
 
 # --- dependencies -------------------------------------------------------------
 log_info "Installing dependencies (bun install)"
@@ -65,20 +72,6 @@ for dir in "$PROJECTS_DIR" "$SOURCES_DIR" "$LIBRARY_DIR/agents" "$LIBRARY_DIR/sk
   if [[ ! -d "$dir" ]]; then
     as_root install -d -o "$APP_USER" -g "$APP_USER" -m 0755 "$dir"
     log_ok "Created $dir"
-  fi
-done
-
-# Ownership is reconciled every run, not just at creation. An install that used
-# to run as root leaves root-owned checkouts, worktrees and a root-owned
-# node_modules behind; after switching to a service account the services could
-# read them but not write, which surfaces as permission errors deep inside git
-# or bun rather than anywhere useful.
-for dir in "$PROJECTS_DIR" "$SOURCES_DIR" "$LIBRARY_DIR" "$REPO_ROOT"; do
-  [[ -d "$dir" ]] || continue
-  if [[ "$(stat -c '%U' "$dir" 2>/dev/null)" != "$APP_USER" ]]; then
-    log_info "Reassigning $dir to $APP_USER"
-    as_root chown -R "$APP_USER:$APP_USER" "$dir"
-    log_ok "Reassigned $dir"
   fi
 done
 

@@ -480,3 +480,22 @@ ensure_service_user() {
     || die "Could not create the service account '$user'."
   log_ok "Created the service account $user ($home)"
 }
+
+# Hand directories to the account the services run as.
+#
+# Must happen *before* anything runs as that account. An install that used to run
+# as root leaves a root-owned node_modules behind, and bun cannot then replace
+# the symlinks in node_modules/.bin — it reports "Failed to link <pkg>: EEXIST",
+# because the symlink exists and removing it is denied. Missing directories are
+# skipped: they are created with the right owner later.
+reconcile_ownership() {
+  local user="$1"; shift
+  local dir
+  for dir in "$@"; do
+    [[ -d "$dir" ]] || continue
+    [[ "$(stat -c '%U' "$dir" 2>/dev/null)" == "$user" ]] && continue
+    log_info "Reassigning $dir to $user"
+    as_root chown -R "$user:$user" "$dir"
+    log_ok "Reassigned $dir"
+  done
+}

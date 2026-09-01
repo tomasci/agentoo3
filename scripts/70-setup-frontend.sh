@@ -55,8 +55,12 @@ fi
 # --- dependencies -------------------------------------------------------------
 # As APP_USER with HOME set, so node_modules and bun's cache are not left
 # root-owned in a tree the service user has to write to later.
-log_info "Installing dependencies (bun install)"
 run_as_app() { as_user "$APP_USER" env HOME="$app_home" PATH="/usr/local/bin:/usr/bin:/bin" "$@"; }
+
+# Before the install below runs as APP_USER — see the backend step.
+reconcile_ownership "$APP_USER" "$REPO_ROOT"
+
+log_info "Installing dependencies (bun install)"
 
 if [[ -f "$FRONTEND_DIR/bun.lock" || -f "$FRONTEND_DIR/bun.lockb" ]]; then
   # Fail rather than silently resolving different versions than were tested.
