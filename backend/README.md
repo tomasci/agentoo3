@@ -99,6 +99,31 @@ When the failure looks like an auth failure, the project moves to
 /projects/:id/retry` backs the "check again, I did the manual steps" button — if
 the repo is now on disk it is adopted rather than re-cloned.
 
+## Input that reaches a subprocess
+
+The API has no authentication — by design, the tailnet is the perimeter. That
+makes two inputs load-bearing, because a browser on the tailnet can reach the
+API even from a page the operator merely visited.
+
+**`remoteUrl` reaches `git clone`.** That is not a safe sink for an arbitrary
+string: `ext::sh -c '<cmd>'` runs a shell command through git's ext transport, a
+leading `-` is parsed as an option (`--upload-pack=<cmd>`), and `file://` reads
+the local filesystem as a repo. So the URL is checked against an allowlist of
+shapes (`https://`, `ssh://`, `user@host:path`) with whitespace, control
+characters, `::` and leading dashes rejected — and git is *additionally* invoked
+with `--` and `protocol.{ext,fd,file}.allow=never`, so a URL that somehow slipped
+past validation still cannot execute anything. Validation runs at the API
+boundary and again in the worker, because a queue payload is data.
+
+**`existingPath` becomes a symlink Claude gets full tool access to.** Arbitrary
+paths are the feature, so this is not an allowlist: it requires an absolute path,
+rejects `..` and control characters, resolves symlinks with `realpath` before
+judging the target, and refuses system roots (`/`, `/etc`, `/usr`, `/proc`, ...).
+
+**CORS is off unless `CORS_ORIGINS` is set.** Reflecting the request origin would
+let any page read this API's responses and drive its endpoints, since no
+credential gates them.
+
 ## Commands
 
 ```

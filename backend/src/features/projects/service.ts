@@ -2,10 +2,11 @@ import { rm } from 'node:fs/promises'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { projects } from '@/db/schema'
+import { checkAdoptPath } from '@/lib/adopt-path'
 import { badRequest, conflict, notFound } from '@/lib/errors'
-import { dirExists } from '@/lib/git'
 import { logger } from '@/lib/logger'
 import { assertInsideProjects, projectRepo, projectRoot, toSlug } from '@/lib/paths'
+import { checkRemoteUrl } from '@/lib/remote-url'
 import { enqueueProjectSetup } from '@/queue'
 import type { CreateProjectInput, ProjectDto } from './schema'
 
@@ -54,22 +55,31 @@ async function uniqueSlug(name: string): Promise<string> {
 }
 
 export async function createProject(input: CreateProjectInput): Promise<ProjectDto> {
-  const slug = await uniqueSlug(input.name)
-
-  if (input.existingPath) {
-    // Adopting a directory: it has to be there before we record the project,
-    // otherwise the user gets a 'ready' project pointing at nothing.
-    if (!(await dirExists(input.existingPath))) {
-      throw badRequest(`${input.existingPath} does not exist or is not a directory`)
-    }
+  // Validate before any I/O. `git clone` runs commands for some URL shapes and
+  // this endpoint has no authentication, so bad input must not reach the
+  // database, let alone a worker.
+  if (input.remoteUrl) {
+    const check = checkRemoteUrl(input.remoteUrl)
+    if (!check.ok) throw badRequest(check.reason ?? 'Invalid remote URL')
   }
+
+  let adoptPath: string | undefined
+  if (input.existingPath) {
+    // Must exist now, or the user gets a 'ready' project pointing at nothing.
+    const check = await checkAdoptPath(input.existingPath)
+    if (!check.ok) throw badRequest(check.reason ?? 'Invalid path')
+    // Hand the worker the resolved realpath, not the raw input.
+    adoptPath = check.resolved
+  }
+
+  const slug = await uniqueSlug(input.name)
 
   const [row] = await db
     .insert(projects)
     .values({
       name: input.name,
       slug,
-      source: input.existingPath ? 'existing' : 'clone',
+      source: adoptPath ? 'existing' : 'clone',
       remoteUrl: input.remoteUrl ?? null,
       status: 'pending',
     })
@@ -78,7 +88,7 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectD
   if (!row) throw new Error('Insert returned no row')
 
   // The clone can fail on auth and take a while, so it never happens inline.
-  await enqueueProjectSetup({ projectId: row.id, existingPath: input.existingPath })
+  await enqueueProjectSetup({ projectId: row.id, existingPath: adoptPath })
   logger.info(`Project ${row.slug} created (${row.source}), setup queued`)
 
   return toDto(row)

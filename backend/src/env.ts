@@ -23,6 +23,18 @@ const schema = z.object({
   // How many sessions may run at once. Each Claude Code instance wants ~4GB.
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(1),
 
+  // Comma-separated origin allowlist. Empty by default: nginx and the Vite dev
+  // proxy both make the frontend same-origin, so nothing legitimate needs CORS.
+  CORS_ORIGINS: z
+    .string()
+    .default('')
+    .transform((v) =>
+      v
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+
   LOG_LEVEL: z.coerce.number().int().min(0).max(5).default(3),
 })
 

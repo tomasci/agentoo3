@@ -3,6 +3,7 @@ import { Worker } from 'bullmq'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { projects } from '@/db/schema'
+import { checkAdoptPath } from '@/lib/adopt-path'
 import {
   currentBranch,
   dirExists,
@@ -15,6 +16,7 @@ import {
 } from '@/lib/git'
 import { logger } from '@/lib/logger'
 import { assertInsideProjects, projectPlugin, projectRepo, projectRoot } from '@/lib/paths'
+import { checkRemoteUrl, safeCloneArgs } from '@/lib/remote-url'
 import { type ProjectSetupJob, QUEUE_PROJECT_SETUP, redisConnection } from './index'
 
 async function fail(projectId: string, error: string, recovery?: string[]) {
@@ -70,12 +72,30 @@ export async function runProjectSetup(job: ProjectSetupJob): Promise<void> {
       // Adopt a directory: symlink it into place rather than copying, so the
       // user keeps working where they already were.
       if (job.existingPath && !(await dirExists(repo))) {
-        await symlink(job.existingPath, repo, 'dir')
-        logger.info(`Linked ${repo} -> ${job.existingPath}`)
+        // Re-validated on this side of the queue too: the job payload is data,
+        // and adopting a directory grants Claude full tool access to it.
+        const pathCheck = await checkAdoptPath(job.existingPath)
+        if (!pathCheck.ok || !pathCheck.resolved) {
+          await fail(project.id, `Refusing to adopt ${job.existingPath}: ${pathCheck.reason}`)
+          logger.warn(`Rejected adopt path for ${project.slug}: ${pathCheck.reason}`)
+          return
+        }
+        await symlink(pathCheck.resolved, repo, 'dir')
+        logger.info(`Linked ${repo} -> ${pathCheck.resolved}`)
       }
     } else {
       if (!project.remoteUrl) {
         await fail(project.id, 'Project has no remote URL to clone')
+        return
+      }
+
+      // Re-checked here, not only at the API boundary: this row could have been
+      // written before the check existed, and `git clone` executes commands for
+      // some URL shapes.
+      const urlCheck = checkRemoteUrl(project.remoteUrl)
+      if (!urlCheck.ok) {
+        await fail(project.id, `Refusing to clone: ${urlCheck.reason}`)
+        logger.warn(`Rejected remote for ${project.slug}: ${urlCheck.reason}`)
         return
       }
 
@@ -86,7 +106,7 @@ export async function runProjectSetup(job: ProjectSetupJob): Promise<void> {
         logger.info(`${repo} already populated; adopting it`)
       } else {
         await ensureDir(repo)
-        const result = await git(['clone', project.remoteUrl, repo])
+        const result = await git(safeCloneArgs(project.remoteUrl, repo))
         if (!result.ok) {
           const recovery = looksLikeAuthFailure(result.stderr)
             ? recoveryCommandsFor(project.remoteUrl, repo)

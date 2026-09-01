@@ -1,7 +1,7 @@
 import { OpenAPIHono } from '@hono/zod-openapi'
 import { cors } from 'hono/cors'
 import { logger as httpLogger } from 'hono/logger'
-import { hasClaudeCredential } from '@/env'
+import { env, hasClaudeCredential } from '@/env'
 import { libraryRouter } from '@/features/library/routes'
 import { projectsRouter } from '@/features/projects/routes'
 import { AppError } from '@/lib/errors'
@@ -30,9 +30,25 @@ export function createApp() {
     '*',
     httpLogger((message) => logger.debug(message)),
   )
-  // nginx serves the frontend from the same origin, so CORS is only needed for
-  // the Vite dev server on another port.
-  app.use('/api/*', cors({ origin: (origin) => origin ?? '*', credentials: true }))
+  // Cross-origin access is off unless explicitly configured, and that costs
+  // nothing: nginx serves the frontend and /api/ from one origin in production,
+  // and the Vite dev server proxies /api, so both are already same-origin.
+  //
+  // Reflecting the request origin here would have been a real hole. There is no
+  // app-level auth by design, so any page a browser on the tailnet visited could
+  // have read this API's responses and driven its endpoints — including POST
+  // /api/projects, whose remoteUrl reaches `git clone`.
+  if (env.CORS_ORIGINS.length > 0) {
+    logger.info(`CORS enabled for: ${env.CORS_ORIGINS.join(', ')}`)
+    app.use(
+      '/api/*',
+      cors({
+        origin: env.CORS_ORIGINS,
+        // No cookie or credential auth exists, so nothing needs sending.
+        credentials: false,
+      }),
+    )
+  }
 
   app.get('/api/health', (c) =>
     c.json({
