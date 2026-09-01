@@ -450,3 +450,33 @@ _on_err() {
   exit "$code"
 }
 trap _on_err ERR
+
+# ---------------------------------------------------------- service account ---
+
+# Make sure the account the services run as exists, with a home directory.
+#
+# Needed because APP_USER falls back to a dedicated account when the installer
+# would otherwise run everything as root, and that account will not exist on a
+# fresh box. A system account: no login shell, no password, nothing to log in
+# with. The home directory is not optional — bun, git and the Claude CLI all
+# write under $HOME, and a service with a home it cannot write to fails in
+# confusing ways much later.
+ensure_service_user() {
+  local user="$1" home="${2:-/home/$1}"
+
+  if id -u "$user" >/dev/null 2>&1; then
+    local existing
+    existing="$(getent passwd "$user" | cut -d: -f6)"
+    if [[ -z "$existing" || ! -d "$existing" ]]; then
+      as_root install -d -o "$user" -g "$user" -m 0755 "$home"
+      as_root usermod -d "$home" "$user"
+      log_ok "Gave $user a home directory at $home"
+    fi
+    return 0
+  fi
+
+  as_root useradd --system --create-home --home-dir "$home" \
+    --shell /usr/sbin/nologin --user-group "$user" \
+    || die "Could not create the service account '$user'."
+  log_ok "Created the service account $user ($home)"
+}

@@ -18,10 +18,18 @@ have bun || die "bun is not installed. Run: $INSTALL_SH --only bun"
 
 require_root
 
+# Services must not run as root: Claude Code refuses to bypass permissions as
+# uid 0, so every session would fail. config.sh picks a dedicated account in
+# that case; create it here if it is not there yet.
+if [[ "${DRY_RUN:-0}" != "1" ]]; then
+  ensure_service_user "$APP_USER" "/home/$APP_USER"
+fi
+
 app_home="$(getent passwd "$APP_USER" 2>/dev/null | cut -d: -f6 || true)"
 [[ -n "$app_home" ]] || die "No home directory for '$APP_USER'."
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
+  log_info "[dry-run] would ensure the service account '$APP_USER' exists"
   log_info "[dry-run] would run 'bun install' and migrations in $BACKEND_DIR"
   log_info "[dry-run] would create $PROJECTS_DIR, $SOURCES_DIR and $LIBRARY_DIR"
   log_info "[dry-run] would install ${APP_NAME}-api and ${APP_NAME}-worker services"
@@ -57,6 +65,20 @@ for dir in "$PROJECTS_DIR" "$SOURCES_DIR" "$LIBRARY_DIR/agents" "$LIBRARY_DIR/sk
   if [[ ! -d "$dir" ]]; then
     as_root install -d -o "$APP_USER" -g "$APP_USER" -m 0755 "$dir"
     log_ok "Created $dir"
+  fi
+done
+
+# Ownership is reconciled every run, not just at creation. An install that used
+# to run as root leaves root-owned checkouts, worktrees and a root-owned
+# node_modules behind; after switching to a service account the services could
+# read them but not write, which surfaces as permission errors deep inside git
+# or bun rather than anywhere useful.
+for dir in "$PROJECTS_DIR" "$SOURCES_DIR" "$LIBRARY_DIR" "$REPO_ROOT"; do
+  [[ -d "$dir" ]] || continue
+  if [[ "$(stat -c '%U' "$dir" 2>/dev/null)" != "$APP_USER" ]]; then
+    log_info "Reassigning $dir to $APP_USER"
+    as_root chown -R "$APP_USER:$APP_USER" "$dir"
+    log_ok "Reassigned $dir"
   fi
 done
 

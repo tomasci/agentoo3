@@ -4,7 +4,7 @@
 // composer walks off the bottom of a long session.
 .page {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto;
   gap: v.$space-md;
   height: 100%;
   min-height: 0;
@@ -82,3 +82,14 @@
 .hint { font-size: 0.75rem; color: var(--muted-fg); }
 .error { font-size: 0.8125rem; color: var(--danger, #c0392b); }
 .warn { font-size: 0.8125rem; color: var(--muted-fg); }
+
+.failure {
+  margin: 0;
+  padding: v.$space-md v.$space-lg;
+  border: 1px solid var(--danger, #c0392b);
+  border-radius: v.$radius;
+  background: color-mix(in srgb, var(--danger, #c0392b) 8%, transparent);
+  color: var(--danger, #c0392b);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}

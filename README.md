@@ -207,6 +207,30 @@ CLAUDE_CODE_INSTALL_METHOD=apt ...    # system-wide from Anthropic's signed apt 
 CLAUDE_CODE_VERSION=2.1.89 ...        # pin a version
 ```
 
+### The service account
+
+The API and worker run as a dedicated non-root account, `agentoo`, created by
+the installer. This is not tidiness — Claude Code **refuses to run with
+permissions bypassed as root**:
+
+```
+--dangerously-skip-permissions cannot be used with root/sudo privileges
+```
+
+Every session would fail at startup. The one-command install runs as root on a
+fresh VPS, so this is the normal case rather than an edge one, and the installer
+picks a service account whenever it would otherwise have used root. Set
+`APP_USER=someone` to choose a different one.
+
+Re-running the installer on an existing root-owned install migrates it: it
+creates the account, reassigns `projects/`, `sources/`, `library/` and the
+checkout, rewrites the units and restarts.
+
+The agent binary itself comes from the SDK, which ships a per-platform CLI in
+`node_modules`, so the service account does not need its own Claude Code
+install — verified by running the SDK with `claude` absent from `PATH`. The
+system-wide install is still what you use for `claude setup-token`.
+
 ### Authenticating on a headless server
 
 Claude Code has no credential after install and cannot make requests until you

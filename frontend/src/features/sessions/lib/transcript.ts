@@ -33,6 +33,13 @@ type Payload = Record<string, unknown>
 const str = (payload: Payload, key: string): string | undefined =>
   typeof payload[key] === 'string' ? (payload[key] as string) : undefined
 
+/**
+ * Library agents reach a session through the project's plugin, so the engine
+ * names them `agentoo:scout` rather than `scout`. Every one of them carries the
+ * same prefix, so it distinguishes nothing and is dropped for display.
+ */
+export const displayAgent = (name: string) => name.replace(/^agentoo:/, '')
+
 export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
   const roots: TranscriptNode[] = []
   // tool_use_id -> the group collecting that delegation's messages.
@@ -72,7 +79,7 @@ export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
         id: message.id,
         seq: message.seq,
         taskId: taskId ?? message.id,
-        agent: str(payload, 'subagent_type') ?? 'subagent',
+        agent: displayAgent(str(payload, 'subagent_type') ?? 'subagent'),
         title: message.title ?? str(payload, 'description') ?? 'delegated task',
         prompt: str(payload, 'prompt') ?? null,
         status: 'running',

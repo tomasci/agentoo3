@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
@@ -19,6 +19,7 @@ import {
   skillToMarkdown,
 } from '@/library'
 import { checkLibraryName } from '@/library/types'
+import { ensurePluginManifest } from '@/queue/plugin-manifest'
 import type {
   AgentDto,
   CreateAgentInput,
@@ -159,16 +160,72 @@ const pluginTarget = (slug: string, kind: 'agent' | 'skill', name: string) =>
 const librarySource = (kind: 'agent' | 'skill', name: string) =>
   kind === 'agent' ? agentPath(name) : skillDir(name)
 
-async function linkItem(slug: string, kind: 'agent' | 'skill', name: string) {
+/**
+ * Copy a library item into a project's plugin directory.
+ *
+ * These used to be symlinks, which read better — one source of truth, no
+ * copies to keep in step — but Claude Code does not load a symlinked agent
+ * *file*. Verified against the bundled CLI: with `scout.md` as a real file the
+ * session reports `agentoo:scout` among its agents; replace it with a symlink to
+ * the identical file and it silently disappears. Symlinked skill *directories*
+ * do load, so the behaviour is asymmetric, but copying both keeps one rule
+ * rather than two and a surprise later.
+ *
+ * The library file stays the source of truth. Nothing edits these copies: they
+ * are rebuilt from the library by syncProjectPlugin, which runs when the
+ * selection changes and again as a session starts, so a centrally edited agent
+ * reaches every project on its next run.
+ */
+async function materialise(slug: string, kind: 'agent' | 'skill', name: string) {
   const target = pluginTarget(slug, kind, name)
   await ensureDir(join(projectPlugin(slug), kind === 'agent' ? 'agents' : 'skills'))
   await rm(target, { force: true, recursive: true })
-  const { symlink } = await import('node:fs/promises')
-  await symlink(librarySource(kind, name), target, kind === 'agent' ? 'file' : 'dir')
+  await cp(librarySource(kind, name), target, { recursive: kind === 'skill' })
 }
 
 async function unlinkItem(slug: string, kind: 'agent' | 'skill', name: string) {
   await rm(pluginTarget(slug, kind, name), { force: true, recursive: true })
+}
+
+/**
+ * Rebuild a project's plugin directory from the library and the current
+ * selection, and drop anything no longer selected.
+ *
+ * Cheap — a handful of small markdown files — and it makes the directory a
+ * derived artefact rather than state to keep in step by hand. Anything that
+ * drifted (a failed copy, a hand-edited file, an item renamed underneath us)
+ * is corrected on the next run rather than persisting.
+ */
+export async function syncProjectPlugin(slug: string, projectId: string): Promise<void> {
+  await ensurePluginManifest(slug)
+
+  const rows = await db
+    .select({ kind: projectLibraryItems.kind, name: projectLibraryItems.name })
+    .from(projectLibraryItems)
+    .where(eq(projectLibraryItems.projectId, projectId))
+
+  for (const kind of ['agent', 'skill'] as const) {
+    const dir = join(projectPlugin(slug), kind === 'agent' ? 'agents' : 'skills')
+    await ensureDir(dir)
+
+    const wanted = new Set(rows.filter((r) => r.kind === kind).map((r) => r.name))
+    const present = await readdir(dir).catch(() => [] as string[])
+
+    for (const entry of present) {
+      const name = kind === 'agent' ? entry.replace(/\.md$/, '') : entry
+      if (!wanted.has(name)) await rm(join(dir, entry), { force: true, recursive: true })
+    }
+
+    for (const name of wanted) {
+      // A selection pointing at something no longer in the library should not
+      // fail the session; skip it and let the rest load.
+      try {
+        await materialise(slug, kind, name)
+      } catch (error) {
+        logger.warn(`Could not copy ${kind} "${name}" into ${slug}: ${String(error)}`)
+      }
+    }
+  }
 }
 
 export async function getProjectLibrary(projectId: string): Promise<ProjectLibraryDto> {
@@ -223,7 +280,7 @@ export async function setProjectLibrary(
 
   for (const { kind, added, removed } of changes) {
     for (const name of added) {
-      await linkItem(project.slug, kind, name)
+      await materialise(project.slug, kind, name)
       await db.insert(projectLibraryItems).values({ projectId, kind, name }).onConflictDoNothing()
     }
     for (const name of removed) {
@@ -272,7 +329,7 @@ async function renameItem(kind: 'agent' | 'skill', from: string, to: string): Pr
 
   for (const user of users) {
     await unlinkItem(user.slug, kind, from)
-    await linkItem(user.slug, kind, to)
+    await materialise(user.slug, kind, to)
   }
 
   await db
@@ -280,7 +337,7 @@ async function renameItem(kind: 'agent' | 'skill', from: string, to: string): Pr
     .set({ name: to })
     .where(and(eq(projectLibraryItems.kind, kind), eq(projectLibraryItems.name, from)))
 
-  logger.info(`Renamed ${kind} ${from} -> ${to}, re-linked in ${users.length} project(s)`)
+  logger.info(`Renamed ${kind} ${from} -> ${to}, refreshed in ${users.length} project(s)`)
   return to
 }
 

@@ -37,6 +37,12 @@ fi
 
 require_root
 
+# Also here, not just in the backend step, so `--only frontend` works on a box
+# where the service account has not been created yet.
+if [[ "${DRY_RUN:-0}" != "1" ]]; then
+  ensure_service_user "$APP_USER" "/home/$APP_USER"
+fi
+
 app_home="$(getent passwd "$APP_USER" 2>/dev/null | cut -d: -f6 || true)"
 [[ -n "$app_home" ]] || die "No home directory for '$APP_USER'."
 

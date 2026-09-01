@@ -12,7 +12,27 @@
 
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 
+/**
+ * Ours, not the SDK's. A turn can throw before it produces a result message —
+ * a bad orchestrator, a missing credential, the CLI refusing to start — and
+ * that has to land in the transcript like anything else, or the history simply
+ * stops with no explanation.
+ */
+export interface RunnerErrorMessage {
+  type: 'error'
+  message: string
+}
+
+export type TranscriptMessage = SDKMessage | RunnerErrorMessage
+
 const MAX = 120
+
+/**
+ * Library agents reach a session through the project's plugin, so the engine
+ * reports them namespaced — `agentoo:scout`, not `scout`. The prefix is the same
+ * for every one of them, so it is noise in a heading.
+ */
+export const displayAgent = (name: string) => name.replace(/^agentoo:/, '')
 
 /** One line, collapsed whitespace, cut on a word boundary. */
 function tidy(text: string, max = MAX): string {
@@ -36,7 +56,7 @@ interface ContentBlock {
   name?: string
 }
 
-function blocksOf(message: SDKMessage): ContentBlock[] {
+function blocksOf(message: TranscriptMessage): ContentBlock[] {
   const content = (message as { message?: { content?: unknown } }).message?.content
   return Array.isArray(content) ? (content as ContentBlock[]) : []
 }
@@ -47,7 +67,8 @@ function blocksOf(message: SDKMessage): ContentBlock[] {
  * `who` is the agent the message belongs to — the orchestrator on the main
  * thread, or a subagent's type when it came from inside a delegation.
  */
-export function titleFor(message: SDKMessage, who: string): string | null {
+export function titleFor(message: TranscriptMessage, rawWho: string): string | null {
+  const who = displayAgent(rawWho)
   if (message.type === 'system' && 'subtype' in message) {
     if (message.subtype === 'task_started') {
       const started = message as typeof message & {
@@ -59,7 +80,7 @@ export function titleFor(message: SDKMessage, who: string): string | null {
       // Housekeeping the CLI runs for itself: a live-update watcher, a cache
       // warm. The SDK flags these precisely so hosts can keep them out.
       if (started.ambient || started.skip_transcript) return null
-      const agent = started.subagent_type ?? 'task'
+      const agent = displayAgent(started.subagent_type ?? 'task')
       return tidy(`${agent}: ${started.description ?? 'starting'}`)
     }
     if (message.subtype === 'task_progress') {
@@ -70,7 +91,7 @@ export function titleFor(message: SDKMessage, who: string): string | null {
       }
       const detail = progress.summary ?? progress.last_tool_name
       if (!detail) return null
-      return tidy(`${progress.subagent_type ?? who}: ${detail}`)
+      return tidy(`${displayAgent(progress.subagent_type ?? who)}: ${detail}`)
     }
     if (message.subtype === 'init') return null
   }
@@ -96,6 +117,10 @@ export function titleFor(message: SDKMessage, who: string): string | null {
     if (tools.length > 0) return tidy(`${who}: ${describeToolUses(tools)}`)
     const thinking = blocks.some((b) => b.type === 'thinking')
     return thinking ? `${who}: thinking` : null
+  }
+
+  if (message.type === 'error') {
+    return tidy(`Turn failed: ${message.message || 'unknown error'}`)
   }
 
   if (message.type === 'result') {

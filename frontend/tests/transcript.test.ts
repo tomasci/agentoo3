@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { buildTranscript, textOf, toolCallsOf } from '../src/features/sessions/lib/transcript'
+import { buildTranscript, displayAgent, textOf, toolCallsOf } from '../src/features/sessions/lib/transcript'
 
 type M = Parameters<typeof buildTranscript>[0][number]
 let n = 0
@@ -115,4 +115,19 @@ test('text and tool calls are read out of the payload', () => {
   } as never
   expect(textOf(m)).toBe('hello\n\nworld')
   expect(toolCallsOf(m)).toEqual([{ id: 'tu1', name: 'Read', input: { file_path: '/a' } }])
+})
+
+test('the plugin namespace is dropped from an agent name', () => {
+  // The engine reports library agents as `agentoo:<name>`; every one carries it.
+  expect(displayAgent('agentoo:scout')).toBe('scout')
+  expect(displayAgent('Explore')).toBe('Explore')
+  n = 0
+  const nodes = buildTranscript([
+    msg({ type: 'system', title: 'scout: read it', payload: {
+      subtype: 'task_started', task_id: 't1', tool_use_id: 'tu1', subagent_type: 'agentoo:scout',
+    } }),
+  ])
+  const task = nodes[0]
+  if (task?.kind !== 'task') throw new Error('expected a task node')
+  expect(task.agent).toBe('scout')
 })

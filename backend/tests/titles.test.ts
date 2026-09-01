@@ -64,3 +64,17 @@ test('whitespace in a title is collapsed to one line', () => {
     { type: 'text', text: '  Reading\n\n  the   schema now.' },
   ] } }), 'orchestrator')).toBe('orchestrator: Reading the schema now.')
 })
+
+test('a namespaced subagent is titled without the plugin prefix', () => {
+  expect(
+    titleFor(m({ type: 'system', subtype: 'task_started', subagent_type: 'agentoo:scout',
+      description: 'read notes.txt' }), 'lead'),
+  ).toBe('scout: read notes.txt')
+})
+
+test('a turn that threw before producing a result still gets a row', () => {
+  // Otherwise the transcript just stops, with the reason only on the session row.
+  expect(titleFor(m({ type: 'error', message: 'Claude Code process exited with code 1' }), 'lead'))
+    .toBe('Turn failed: Claude Code process exited with code 1')
+  expect(titleFor(m({ type: 'error', message: '' }), 'lead')).toBe('Turn failed: unknown error')
+})

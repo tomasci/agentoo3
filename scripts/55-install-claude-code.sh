@@ -84,6 +84,9 @@ install_claude_apt() {
 # --- native installer (fallback) ---------------------------------------------
 install_claude_native() {
   local home
+  # The account may not exist yet: `--only claude` skips the step that creates
+  # it, and APP_USER is a dedicated account whenever the installer runs as root.
+  ensure_service_user "$APP_USER" "/home/$APP_USER" || return 1
   home="$(getent passwd "$APP_USER" | cut -d: -f6)"
   [[ -n "$home" ]] || { log_error "No home directory for '$APP_USER'."; return 1; }
 

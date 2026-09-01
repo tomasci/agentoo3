@@ -77,7 +77,9 @@ export function SessionPage({ projectId, sessionId }: { projectId: string; sessi
     <div className={styles.page}>
       <header className={styles.head}>
         <div className={styles.heading}>
-          <h1 className={styles.title}>{data.title ?? t('sessions.untitled')}</h1>
+          <h1 className={styles.title}>
+            {data.title ?? t('sessions.untitled', { id: data.id.slice(0, 8) })}
+          </h1>
           <div className={styles.meta}>
             <span>{t(`sessions.status.${data.status}`)}</span>
             {data.orchestrator && <span>{data.orchestrator}</span>}
@@ -112,6 +114,12 @@ export function SessionPage({ projectId, sessionId }: { projectId: string; sessi
           </Button>
         </div>
       </header>
+
+      {data.lastError && (
+        <p className={styles.failure} role="alert">
+          {data.lastError}
+        </p>
+      )}
 
       <div className={styles.scroll} ref={scroller} onScroll={onScroll}>
         {messages.isPending ? <p>{t('common.loading')}</p> : <Transcript messages={list} />}

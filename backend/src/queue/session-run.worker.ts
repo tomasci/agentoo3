@@ -7,25 +7,17 @@
 // never retried: by the time it can fail it has already edited files and spent
 // tokens, and running it again would repeat both.
 
-import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { Worker } from 'bullmq'
 import { and, eq, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { messages, projects, sessions } from '@/db/schema'
 import { env, hasClaudeCredential } from '@/env'
-import { titleFor } from '@/features/sessions/titles'
+import { optionsFor } from '@/features/sessions/runner-options'
+import { type TranscriptMessage, titleFor } from '@/features/sessions/titles'
 import { publishSessionEvent, subscribeControl } from '@/lib/events'
 import { logger } from '@/lib/logger'
-import { projectRepo } from '@/lib/paths'
-import { delegationEnv, withDelegationGuidance } from '@/library/delegation'
-import { getAgent } from '@/library/index'
 import { enqueueSessionRun, QUEUE_SESSION_RUN, redisConnection, type SessionRunJob } from './index'
-import { ensurePluginManifest } from './plugin-manifest'
-
-/** Deterministic ceiling on delegation, paired with the prompt-level guidance. */
-const MAX_SPAWN_DEPTH = 2
-const MAX_CONCURRENT_SUBAGENTS = 3
 
 /**
  * Allocate the next position in the transcript.
@@ -48,7 +40,7 @@ async function nextSeq(sessionId: string): Promise<number> {
 /** Persist a message, then announce it. Order matters: the row is the record. */
 export async function appendMessage(
   sessionId: string,
-  message: SDKMessage,
+  message: TranscriptMessage,
   who: string,
 ): Promise<void> {
   const seq = await nextSeq(sessionId)
@@ -82,56 +74,12 @@ async function setStatus(sessionId: string, status: string, lastError?: string |
   await publishSessionEvent({ kind: 'status', sessionId, status, lastError })
 }
 
-/**
- * Build the SDK options for this session.
- *
- * The orchestrator's markdown body becomes the system prompt, with the
- * delegation guidance appended. Its subagents are not listed here: they reach
- * the session through the project's plugin directory, which is the same set the
- * library page assigns, so what runs matches what the UI shows.
- */
-async function optionsFor(
-  session: typeof sessions.$inferSelect,
-  slug: string,
-  abortController: AbortController,
-): Promise<Options> {
-  const cwd = session.worktreePath ?? projectRepo(slug)
-  const pluginRoot = await ensurePluginManifest(slug)
-
-  const orchestrator = session.orchestrator ? await getAgent(session.orchestrator) : undefined
-  if (session.orchestrator && !orchestrator) {
-    throw new Error(`Orchestrator "${session.orchestrator}" is not in the library any more`)
-  }
-  if (orchestrator && orchestrator.role !== 'orchestrator') {
-    throw new Error(`Agent "${orchestrator.name}" is a subagent and cannot drive a session`)
-  }
-
-  return {
-    cwd,
-    abortController,
-    plugins: [{ type: 'local', path: pluginRoot }],
-    // 'project' is what loads the repo's own CLAUDE.md, which is usually the
-    // most useful context a project has.
-    settingSources: ['project'],
-    ...(orchestrator && { systemPrompt: withDelegationGuidance(orchestrator.prompt) }),
-    ...(orchestrator?.model && { model: orchestrator.model }),
-    // Full tool access, deliberately: this runs on a single-user box behind a
-    // tailnet, and prompting for permission has nobody to ask.
-    permissionMode: 'bypassPermissions',
-    // The whole point of the transcript: without this only tool_use blocks come
-    // back from subagents, and the delegated work is invisible.
-    forwardSubagentText: true,
-    ...(session.sdkSessionId && { resume: session.sdkSessionId }),
-    env: {
-      ...process.env,
-      ...delegationEnv(MAX_SPAWN_DEPTH, MAX_CONCURRENT_SUBAGENTS),
-      CLAUDE_AGENT_SDK_CLIENT_APP: 'agentoo/1.0.0',
-    },
-  }
-}
-
 /** The label a message is attributed to, tracked as tasks start and finish. */
-function attribution(message: SDKMessage, tasks: Map<string, string>, fallback: string): string {
+function attribution(
+  message: TranscriptMessage,
+  tasks: Map<string, string>,
+  fallback: string,
+): string {
   if ('parent_tool_use_id' in message && message.parent_tool_use_id) {
     return tasks.get(message.parent_tool_use_id as string) ?? 'subagent'
   }
@@ -272,6 +220,10 @@ async function runTurn(job: SessionRunJob): Promise<void> {
     }
     const detail = error instanceof Error ? error.message : String(error)
     logger.error(`Session ${sessionId} failed: ${detail}`)
+    // Recorded in the transcript as well as on the session: a failure that only
+    // shows up as a red line on the sessions list is invisible from inside the
+    // session, which is where someone reading the history actually is.
+    await appendMessage(sessionId, { type: 'error', message: detail }, orchestratorName)
     // Anything still pending stays pending. Draining it now would replay the
     // same failure against every queued message in turn.
     await setStatus(sessionId, 'failed', detail)

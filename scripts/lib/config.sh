@@ -13,8 +13,21 @@ _AGENTOO_CONFIG_LOADED=1
 # ------------------------------------------------------------ identity ------
 
 APP_NAME="${APP_NAME:-agentoo}"
-# Under sudo this is the human who invoked the installer, not root.
+
+# The account the services run as. Under sudo this is normally the human who
+# invoked the installer.
+#
+# It must not be root. Claude Code refuses to run with bypassed permissions as
+# uid 0 — "--dangerously-skip-permissions cannot be used with root/sudo
+# privileges" — and every session would fail at startup. The one-command install
+# is run as root on a fresh VPS, where both SUDO_USER and `id -un` are root, so
+# that is the common case rather than an edge one. There is an IS_SANDBOX=1
+# escape hatch in the CLI, but setting it on a real box only disables the check
+# that is protecting the box.
 APP_USER="${APP_USER:-${SUDO_USER:-$(id -un)}}"
+if [[ "$APP_USER" == "root" ]]; then
+  APP_USER="$APP_NAME"
+fi
 
 # --------------------------------------------------------------- services ---
 # Both bind to loopback; nginx is the only thing listening publicly.

@@ -152,6 +152,18 @@ TXT
     need_root
   fi
 
+  # git refuses to operate on a tree owned by someone else ("detected dubious
+  # ownership"). That is exactly the state here: the installer hands the tree to
+  # the service account, and this runs as root. Marking it safe is what lets a
+  # second run update the clone at all.
+  if [[ -d "$TARGET_DIR/.git" ]]; then
+    if ! "${SUDO[@]+${SUDO[@]}}" git config --global --get-all safe.directory 2>/dev/null \
+         | grep -qxF "$TARGET_DIR"; then
+      "${SUDO[@]+${SUDO[@]}}" git config --global --add safe.directory "$TARGET_DIR"
+      info "Marked $TARGET_DIR as a safe git directory for root"
+    fi
+  fi
+
   if [[ -d "$TARGET_DIR/.git" ]]; then
     info "Existing clone found; updating"
     "${SUDO[@]+${SUDO[@]}}" git "${GIT_AUTH[@]+${GIT_AUTH[@]}}" -C "$TARGET_DIR" \
