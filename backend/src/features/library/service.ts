@@ -40,15 +40,21 @@ async function exists(path: string): Promise<boolean> {
 
 // --- agents -------------------------------------------------------------------
 
+/** A 400 naming the rule beats a 500 from the path guard below it. */
+function assertName(name: string): void {
+  const check = checkLibraryName(name)
+  if (!check.ok) throw badRequest(check.reason ?? 'Invalid name')
+}
+
 export async function getAgentOrThrow(name: string): Promise<AgentDto> {
+  assertName(name)
   const agent = await getAgent(name)
   if (!agent) throw notFound('Agent')
   return agent
 }
 
 export async function createAgent(input: CreateAgentInput): Promise<AgentDto> {
-  const check = checkLibraryName(input.name)
-  if (!check.ok) throw badRequest(check.reason ?? 'Invalid name')
+  assertName(input.name)
 
   await ensureDir(AGENTS_DIR())
   const path = agentPath(input.name)
@@ -61,6 +67,7 @@ export async function createAgent(input: CreateAgentInput): Promise<AgentDto> {
 }
 
 export async function updateAgent(name: string, input: UpdateAgentInput): Promise<AgentDto> {
+  assertName(name)
   const path = agentPath(name)
   if (!(await exists(path))) throw notFound('Agent')
   await writeFile(path, agentToMarkdown(input), 'utf8')
@@ -69,6 +76,7 @@ export async function updateAgent(name: string, input: UpdateAgentInput): Promis
 }
 
 export async function deleteAgent(name: string): Promise<void> {
+  assertName(name)
   const path = agentPath(name)
   if (!(await exists(path))) throw notFound('Agent')
 
@@ -82,14 +90,14 @@ export async function deleteAgent(name: string): Promise<void> {
 // --- skills -------------------------------------------------------------------
 
 export async function getSkillOrThrow(name: string): Promise<SkillDto> {
+  assertName(name)
   const skill = (await listSkills()).find((s) => s.name === name)
   if (!skill) throw notFound('Skill')
   return skill
 }
 
 export async function createSkill(input: CreateSkillInput): Promise<SkillDto> {
-  const check = checkLibraryName(input.name)
-  if (!check.ok) throw badRequest(check.reason ?? 'Invalid name')
+  assertName(input.name)
 
   const dir = skillDir(input.name)
   if (await exists(join(dir, 'SKILL.md'))) {
@@ -107,6 +115,7 @@ export async function createSkill(input: CreateSkillInput): Promise<SkillDto> {
 }
 
 export async function updateSkill(name: string, input: UpdateSkillInput): Promise<SkillDto> {
+  assertName(name)
   const file = join(skillDir(name), 'SKILL.md')
   if (!(await exists(file))) throw notFound('Skill')
   await writeFile(file, skillToMarkdown(name, input.description, input.body), 'utf8')
@@ -115,6 +124,7 @@ export async function updateSkill(name: string, input: UpdateSkillInput): Promis
 }
 
 export async function deleteSkill(name: string): Promise<void> {
+  assertName(name)
   const dir = skillDir(name)
   if (!(await exists(join(dir, 'SKILL.md')))) throw notFound('Skill')
 

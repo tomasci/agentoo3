@@ -1,5 +1,5 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
-import { basename, join } from 'node:path'
+import { basename, join, resolve, sep } from 'node:path'
 import matter from 'gray-matter'
 import { z } from 'zod'
 import { env } from '@/env'
@@ -8,8 +8,29 @@ import { agentFrontmatterSchema, type LibraryAgent, type LibrarySkill } from './
 
 export const AGENTS_DIR = () => join(env.LIBRARY_DIR, 'agents')
 export const SKILLS_DIR = () => join(env.LIBRARY_DIR, 'skills')
-export const agentPath = (name: string) => join(AGENTS_DIR(), `${name}.md`)
-export const skillDir = (name: string) => join(SKILLS_DIR(), name)
+
+/**
+ * Build a path inside a library directory, refusing anything that escapes it.
+ *
+ * The check lives here rather than only at the API boundary because this is the
+ * one place every caller passes through. Validation on create alone was not
+ * enough: the routes that take a name as a *path parameter* skipped it, which
+ * made `PUT /library/agents/../../../../etc/cron.d/x` an arbitrary file write
+ * and the skill delete an `rm -rf` of an arbitrary directory. Callers still
+ * validate the name for a good error message; this makes the unsafe operation
+ * impossible regardless of who forgets.
+ */
+function insideLibrary(dir: string, child: string): string {
+  const root = resolve(dir)
+  const target = resolve(join(root, child))
+  if (target !== root && !target.startsWith(root + sep)) {
+    throw new Error(`Refusing to touch ${target}, which is outside ${root}`)
+  }
+  return target
+}
+
+export const agentPath = (name: string) => insideLibrary(AGENTS_DIR(), `${name}.md`)
+export const skillDir = (name: string) => insideLibrary(SKILLS_DIR(), name)
 
 /** A one-line reason, rather than a wall of Zod issue JSON in the log. */
 function describeError(error: unknown): string {
