@@ -227,20 +227,42 @@ Set `NGINX_DOMAIN` only to override the detected name with a domain of your own.
 
 ## What gets exposed
 
-### Moving SSH behind the VPN
+The firewall runs **last**, deliberately, so every port is known by then.
+Nothing is published on the public interface except a way in.
 
-Once Tailscale is confirmed working:
+| Port | Reachable from | Why |
+|---|---|---|
+| SSH (detected, usually 22) | tailnet only, once Tailscale is up | rate-limited with `ufw limit` while still public |
+| 41641/udp | anywhere | Tailscale WireGuard — this is what makes the rest reachable |
+| 80 (nginx), backend 8000, frontend 3000 | **`tailscale0` only** | the app is served over the tailnet |
+| PostgreSQL 5432, Redis 6379 | **nothing** — loopback only | never exposed |
 
-```
-sudo UFW_TAILSCALE_ONLY=1 /opt/agentoo/install.sh --only ufw
-```
+80 and 443 are **closed** on the public interface. Set
+`UFW_PUBLIC_PORTS="80/tcp 443/tcp"` to publish the site to the internet instead.
 
-This restricts SSH to `tailscale0`. It **refuses to apply** unless Tailscale is
-actually connected, and warns before cutting a session that arrived over a public
-address — getting this wrong on a remote VPS is unrecoverable without console
-access.
+PostgreSQL and Redis bind to `127.0.0.1`. Redis also gets a generated password —
+that stops a local process, or an SSRF bug in the app, from talking to it
+unauthenticated.
 
-Rules are additive. Trimming `UFW_PUBLIC_PORTS` later does not delete existing
+### SSH and the VPN
+
+`UFW_TAILSCALE_ONLY` decides whether SSH stays on the public interface. It
+defaults to `auto`, which resolves against reality rather than intent:
+
+| Value | Behaviour |
+|---|---|
+| `auto` (default) | Lock SSH to `tailscale0` **when Tailscale is verified connected**. When it is not, leave SSH public and say so — a half-provisioned host is never stranded. It locks down by itself on the next run. |
+| `1` | Always. **Refuses** and fails the step while Tailscale is down, rather than risk a permanent lockout. |
+| `0` | Never. SSH stays public, rate-limited. |
+
+So on a fresh box with `TAILSCALE_AUTHKEY` set, everything ends up VPN-only in
+one pass. Without a key, you keep a public SSH way in to finish joining the
+tailnet, and the next run closes it.
+
+Before cutting a session that arrived over a public address, the step warns and
+asks. `--yes` accepts the disconnect; `UFW_TAILSCALE_ONLY=0` keeps SSH public.
+
+Rules are additive. Widening `UFW_PUBLIC_PORTS` later does not delete existing
 rules; inspect with `ufw status numbered` and `ufw delete <n>`.
 
 ## Configuration
@@ -264,6 +286,9 @@ NGINX_DOMAIN=ai.example.com /opt/agentoo/install.sh --only nginx
 
 # non-standard SSH port, if detection ever gets it wrong
 SSH_PORT=2222 /opt/agentoo/install.sh --only ufw
+
+# publish the site to the internet as well as the tailnet
+UFW_PUBLIC_PORTS="80/tcp 443/tcp" /opt/agentoo/install.sh --only ufw
 ```
 
 Adding a package means appending to `PKGS_UTILS` in that file — nothing else.

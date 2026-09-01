@@ -90,21 +90,46 @@ if have tailscale && tailscale status >/dev/null 2>&1; then
   [[ -n "$tailscale_ip" ]] && tailscale_up=1
 fi
 
+# ------------------------------------------------------ resolve the mode -----
+# 'auto' is decided against reality rather than intent: lock SSH to the VPN when
+# the VPN demonstrably works, and leave a public way in when it does not, so a
+# half-provisioned host is never stranded.
+case "$UFW_TAILSCALE_ONLY" in
+  auto)
+    if (( tailscale_up )); then
+      lockdown=1
+      log_ok "Tailscale is up ($tailscale_ip) — SSH will be restricted to the VPN."
+    else
+      lockdown=0
+      log_warn "Tailscale is not connected, so SSH stays publicly reachable for now."
+      log_warn "It moves behind the VPN by itself once the node joins — re-run:"
+      log_warn "    sudo $INSTALL_SH --only ufw"
+    fi
+    ;;
+  1) lockdown=1 ;;
+  0) lockdown=0 ;;
+  *) die "UFW_TAILSCALE_ONLY must be 'auto', '1' or '0' (got '$UFW_TAILSCALE_ONLY')." ;;
+esac
+
 # ---------------------------------------------------- lockdown safety gate ---
-if [[ "$UFW_TAILSCALE_ONLY" == "1" ]]; then
-  log_warn "UFW_TAILSCALE_ONLY=1 — SSH will be reachable ONLY over the VPN."
+if (( lockdown )); then
+  log_warn "SSH will be reachable ONLY over the VPN."
   if (( ! tailscale_up )); then
     die "Refusing: Tailscale is not connected, so this would lock you out permanently.
     Bring the node up first ('sudo tailscale up'), then re-run:
-      $INSTALL_SH --only ufw"
+      $INSTALL_SH --only ufw
+    Or use UFW_TAILSCALE_ONLY=auto to lock down automatically once it is."
   fi
-  log_ok "Tailscale is up ($tailscale_ip)"
 
   # Are we about to cut the cable we are sitting on?
   if [[ -n "${SSH_CONNECTION:-}" && "${live_ssh_server_ip:-}" != 100.* ]]; then
     log_warn "Your current SSH session arrived on ${live_ssh_server_ip:-a public address},"
     log_warn "NOT over Tailscale. Applying this will disconnect you."
-    confirm "Continue anyway?" || die "Aborted. Reconnect over Tailscale ('ssh $tailscale_ip') and re-run."
+    if ! confirm "Continue anyway?"; then
+      die "Aborted — nothing was changed.
+    Reconnect over Tailscale ('ssh $tailscale_ip') and re-run, or pass --yes to
+    accept the disconnect, or UFW_TAILSCALE_ONLY=0 to keep SSH public."
+    fi
   fi
 fi
 
@@ -117,7 +142,7 @@ as_root ufw --force default allow outgoing
 # ------------------------------------------------------------------- rules ---
 # SSH first, always, before anything can enable the firewall.
 for port in "${ssh_ports[@]}"; do
-  if [[ "$UFW_TAILSCALE_ONLY" == "1" ]]; then
+  if (( lockdown )); then
     log_info "Allowing SSH on $port over tailscale0 only"
     as_root ufw allow in on tailscale0 to any port "$port" proto tcp
   elif [[ "$UFW_LIMIT_SSH" == "1" ]]; then
@@ -129,11 +154,16 @@ for port in "${ssh_ports[@]}"; do
   fi
 done
 
-# Public web ports.
-for spec in $UFW_PUBLIC_PORTS; do
-  log_info "Allowing public $spec"
-  as_root ufw allow "$spec" comment "$APP_NAME public"
-done
+# Public web ports. Empty by default: the app is served over the tailnet, so
+# nothing needs to listen on the public interface.
+if [[ -z "${UFW_PUBLIC_PORTS// }" ]]; then
+  log_info "No public web ports (the app is reached over Tailscale)"
+else
+  for spec in $UFW_PUBLIC_PORTS; do
+    log_info "Allowing public $spec"
+    as_root ufw allow "$spec" comment "$APP_NAME public"
+  done
+fi
 
 # Any extra ports the operator wants exposed directly.
 for spec in $UFW_APP_PORTS; do
@@ -152,7 +182,7 @@ if [[ "$UFW_ALLOW_TAILSCALE" == "1" ]]; then
 fi
 
 # Remove the public SSH rules that lockdown mode supersedes.
-if [[ "$UFW_TAILSCALE_ONLY" == "1" ]]; then
+if (( lockdown )); then
   for port in "${ssh_ports[@]}"; do
     log_info "Removing any public SSH rule for $port"
     as_root ufw delete limit "$port/tcp" >/dev/null 2>&1 || true
@@ -184,8 +214,12 @@ as_root ufw status verbose 2>&1 | while IFS= read -r line; do
   printf '  %s\n' "$line" >&2
 done
 
-if [[ "$UFW_TAILSCALE_ONLY" != "1" ]]; then
-  log_info "SSH is reachable publicly. To move it behind the VPN once Tailscale works:"
+if (( lockdown )); then
+  log_ok "SSH is now reachable only over Tailscale."
+  [[ -n "$tailscale_ip" ]] && log_info "Reconnect with:  ssh $(id -un)@$tailscale_ip"
+else
+  log_info "SSH is still reachable publicly (rate-limited)."
+  log_info "To force it behind the VPN now:"
   log_info "  sudo UFW_TAILSCALE_ONLY=1 $INSTALL_SH --only ufw"
-  log_info "That choice is remembered; later runs keep it unless you pass UFW_TAILSCALE_ONLY=0."
+  log_info "That choice is remembered; pass UFW_TAILSCALE_ONLY=0 to undo it."
 fi

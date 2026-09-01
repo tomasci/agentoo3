@@ -176,16 +176,20 @@ TAILSCALE_CODENAME_FALLBACK="${TAILSCALE_CODENAME_FALLBACK:-noble}"
 # ------------------------------------------------------------------- ufw ----
 
 SSH_PORT="${SSH_PORT:-}"                       # empty -> detected from sshd
-# Public web ports. Nothing needs these when the system is reached over
-# Tailscale — set UFW_PUBLIC_PORTS="" to close them and serve only on the
-# tailnet. They stay open by default because that was the original brief.
-UFW_PUBLIC_PORTS="${UFW_PUBLIC_PORTS:-80/tcp 443/tcp}"
+# Nothing is published on the public interface. The app is reached over the
+# tailnet, so 80/443 have no reason to be open. Set e.g. "80/tcp 443/tcp" to
+# expose the site to the internet.
+UFW_PUBLIC_PORTS="${UFW_PUBLIC_PORTS:-}"
 UFW_APP_PORTS="${UFW_APP_PORTS:-}"             # extra public ports, e.g. "8080/tcp"
 UFW_ALLOW_TAILSCALE="${UFW_ALLOW_TAILSCALE:-1}"  # allow all inbound on tailscale0
-# Lockdown: SSH reachable only over the VPN. Refuses to apply unless Tailscale
-# is actually up, because getting this wrong ends the session permanently.
+# Whether SSH is reachable only over the VPN.
+#   auto - lock down when Tailscale is verified connected, otherwise leave SSH
+#          public so the host stays reachable, and lock down on a later run.
+#      1 - always. Refuses to apply while Tailscale is down rather than risk a
+#          permanent lockout, which fails the step.
+#      0 - never.
 UFW_TAILSCALE_ONLY_EXPLICIT="${UFW_TAILSCALE_ONLY+1}"   # set by the operator this run?
-UFW_TAILSCALE_ONLY="${UFW_TAILSCALE_ONLY:-0}"
+UFW_TAILSCALE_ONLY="${UFW_TAILSCALE_ONLY:-auto}"
 UFW_LIMIT_SSH="${UFW_LIMIT_SSH:-1}"            # rate-limit SSH against brute force
 UFW_LOGGING="${UFW_LOGGING:-low}"
 
