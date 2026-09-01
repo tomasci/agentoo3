@@ -1,0 +1,18 @@
+@use '@/styles/variables' as v;
+
+.button {
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: v.$radius-sm;
+  background: var(--accent);
+  color: var(--accent-fg);
+  padding: 0.5rem 0.875rem;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+
+  &:hover:not(:disabled) { opacity: 0.9; }
+  &:disabled { opacity: 0.5; cursor: not-allowed; }
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+}

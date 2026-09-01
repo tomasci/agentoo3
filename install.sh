@@ -36,6 +36,7 @@ STEPS=(
   "redis:62-install-redis.sh:Redis, localhost-only, password-protected"
   "tailscale:64-install-tailscale.sh:Tailscale VPN"
   "nginx:66-install-nginx.sh:nginx reverse proxy on the tailnet"
+  "frontend:68-setup-frontend.sh:Build the frontend and run it as a service"
   "ufw:80-configure-ufw.sh:Firewall rules (runs last)"
   "summary:90-summary.sh:Verify and report"
 )

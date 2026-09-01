@@ -27,7 +27,7 @@ build/
 .next/
 .turbo/
 *.tsbuildinfo
-bun.lockb
+# bun.lock is committed on purpose: the installer uses --frozen-lockfile
 
 # editors / os
 .DS_Store

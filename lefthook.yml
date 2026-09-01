@@ -1,0 +1,21 @@
+# Git hooks live at the repository root, so this config does too; each command
+# declares the directory it actually runs in.
+
+pre-commit:
+  parallel: true
+  commands:
+    frontend-check:
+      root: "frontend/"
+      glob: "frontend/**/*.{ts,tsx,js,jsx,json,jsonc}"
+      run: bunx biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+    frontend-types:
+      root: "frontend/"
+      glob: "frontend/**/*.{ts,tsx}"
+      run: bun run typecheck
+
+pre-push:
+  commands:
+    frontend-build:
+      root: "frontend/"
+      run: bun run build

@@ -1,0 +1,47 @@
+@use '@/styles/variables' as v;
+
+.card {
+  padding: v.$space-lg;
+  border: 1px solid var(--border);
+  border-radius: v.$radius;
+  background: var(--surface);
+}
+
+.heading {
+  margin: 0 0 v.$space-sm;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: v.$space-sm;
+}
+
+.label {
+  font-size: 0.8125rem;
+  color: var(--muted-fg);
+}
+
+.input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: v.$radius-sm;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+}
+
+.error {
+  color: var(--warn);
+  font-size: 0.8125rem;
+}
+
+.result {
+  margin: v.$space-md 0 0;
+  font-weight: 500;
+}

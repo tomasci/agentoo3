@@ -1,0 +1,51 @@
+{
+  "name": "agentoo-frontend",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "start": "bun run server.ts",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "codegen": "kubb generate",
+    "hooks": "lefthook install"
+  },
+  "dependencies": {
+    "@ark-ui/react": "5.39.1",
+    "@hookform/resolvers": "5.9.1",
+    "@tanstack/react-query": "5.102.8",
+    "axios": "1.20.0",
+    "consola": "3.4.2",
+    "i18next": "26.4.1",
+    "i18next-browser-languagedetector": "8.2.1",
+    "jotai": "2.20.3",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-hook-form": "7.87.0",
+    "react-i18next": "17.0.13",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.11",
+    "@kubb/adapter-oas": "5.0.5",
+    "@kubb/cli": "5.0.5",
+    "@kubb/plugin-react-query": "5.0.1",
+    "@kubb/plugin-ts": "5.0.0",
+    "@kubb/plugin-zod": "5.1.2",
+    "@tanstack/react-query-devtools": "5.102.8",
+    "@types/bun": "1.4.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "@vitejs/plugin-react": "6.1.1",
+    "kubb": "5.0.5",
+    "lefthook": "2.1.12",
+    "sass": "1.103.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.2"
+  }
+}

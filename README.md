@@ -85,10 +85,11 @@ scripts/
   62-install-redis.sh   Redis, localhost-only, password-protected
   64-install-tailscale.sh Tailscale VPN
   66-install-nginx.sh   nginx on the tailnet (+ tailscale serve for HTTPS)
+  68-setup-frontend.sh  bun install, production build, systemd service
   80-configure-ufw.sh   firewall — runs last, once all ports are known
   90-summary.sh         verify everything and report
-backend/                Python service
-frontend/               web UI (Bun)
+backend/                Python service (not implemented yet)
+frontend/               React + Vite SPA, served by Bun — see frontend/README.md
 config/  docs/
 logs/                   install.log (gitignored)
 .state/                 step markers + remembered settings (gitignored)
@@ -115,6 +116,18 @@ From inside the install directory. After a bootstrap install, prefix with
 
 If a step fails the script stops, names the step, and prints the exact command
 to resume with. Full transcript in `logs/install.log`.
+
+## Frontend
+
+Built and run as a service by step `frontend`: `bun install --frozen-lockfile`,
+`bun run build`, then a systemd unit (`agentoo-frontend`) serving `dist/` with
+Bun on `FRONTEND_PORT`. Production build, not a dev server.
+
+nginx proxies `/` to it, so a fresh install stops returning 502. `/api/` still
+502s until the backend exists — that is expected, and the placeholder UI says so
+rather than looking broken.
+
+Stack and layout: `frontend/README.md`.
 
 ## Claude Code
 
@@ -302,8 +315,8 @@ Adding a package means appending to `PKGS_UTILS` in that file — nothing else.
 1. Write `scripts/NN-thing.sh`, sourcing `lib/common.sh` and `lib/config.sh`.
 2. Add one line to the `STEPS` array in `install.sh`.
 
-Numbers leave gaps on purpose: `68` app setup (venv, `bun install`), `72`
-systemd units for the backend and frontend.
+Numbers leave gaps on purpose: `70` backend setup (venv, `uv sync`) and its
+systemd unit, once the backend exists.
 
 ## Notes
 

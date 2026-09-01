@@ -1,0 +1,11 @@
+// Layout scale. Colours live as CSS custom properties in global.scss so they
+// can switch with the theme at runtime; these are build-time constants.
+$space-sm: 0.5rem;
+$space-md: 0.75rem;
+$space-lg: 1.25rem;
+$space-xl: 2rem;
+
+$radius-sm: 6px;
+$radius: 10px;
+
+$content-width: 42rem;

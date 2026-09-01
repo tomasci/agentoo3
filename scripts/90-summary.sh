@@ -95,6 +95,7 @@ svc_report postgres postgresql
 svc_report redis    redis-server
 svc_report nginx    nginx
 svc_report tailscale tailscaled
+svc_report frontend "${APP_NAME}-frontend"
 printf '\n' >&2
 
 # --- network ------------------------------------------------------------------
@@ -114,6 +115,14 @@ if have tailscale; then
     log_warn "Tailscale is installed but this node has not joined a tailnet."
     log_warn "Run: sudo tailscale up"
   fi
+fi
+
+# The whole point of the frontend service is that this stops being a 502.
+if curl -fsS -o /dev/null --max-time 3 "http://${FRONTEND_HOST}:${FRONTEND_PORT}/" 2>/dev/null; then
+  log_ok "Frontend answering on http://${FRONTEND_HOST}:${FRONTEND_PORT}/"
+else
+  log_warn "Nothing answering on ${FRONTEND_HOST}:${FRONTEND_PORT} — nginx will return 502."
+  log_warn "Run: sudo $INSTALL_SH --only frontend"
 fi
 
 if [[ -f "$SETTINGS_FILE" ]]; then

@@ -1,0 +1,26 @@
+{
+  "app": {
+    "title": "agentoo",
+    "subtitle": "Placeholder frontend. The stack is wired up; the app is not built yet."
+  },
+  "status": {
+    "heading": "Backend status",
+    "loading": "Checking…",
+    "online": "Backend is reachable",
+    "offline": "Backend is not reachable yet",
+    "hint": "Expected until the backend is implemented — nginx has nothing to proxy to on /api/.",
+    "retry": "Check again"
+  },
+  "greeting": {
+    "heading": "Say hello",
+    "nameLabel": "Your name",
+    "namePlaceholder": "Ada Lovelace",
+    "submit": "Greet",
+    "result": "Hello, {{name}}!",
+    "errors": {
+      "tooShort": "At least 2 characters",
+      "tooLong": "At most 40 characters"
+    }
+  },
+  "language": { "label": "Language" }
+}

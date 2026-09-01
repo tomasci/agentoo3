@@ -1,0 +1,38 @@
+@use './variables' as v;
+
+:root {
+  --bg: #ffffff;
+  --surface: #f7f7f8;
+  --fg: #16161a;
+  --muted-fg: #6b6b76;
+  --muted: #c9c9d1;
+  --border: #e2e2e8;
+  --accent: #2f6feb;
+  --accent-fg: #ffffff;
+  --ok: #1f9d55;
+  --warn: #c2721a;
+}
+
+:root[data-theme='dark'] {
+  --bg: #0f1013;
+  --surface: #17181d;
+  --fg: #ececf1;
+  --muted-fg: #9a9aa6;
+  --muted: #4a4a55;
+  --border: #2a2b33;
+  --accent: #5b8def;
+  --accent-fg: #0f1013;
+  --ok: #3fbf72;
+  --warn: #e0a458;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
