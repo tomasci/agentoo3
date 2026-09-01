@@ -113,8 +113,6 @@ export function ProjectSessions({ projectId }: { projectId: string }) {
         </div>
       </section>
 
-      <p className={styles.notice}>{t('sessions.notImplemented')}</p>
-
       <div>
         <h3 className={styles.heading}>{t('sessions.heading')}</h3>
         {isError && (

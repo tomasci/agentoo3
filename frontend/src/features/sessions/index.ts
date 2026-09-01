@@ -1,2 +1,3 @@
 export { ProjectSessions } from './components/project-sessions'
-export { type Session, useSessions } from './hooks/use-sessions'
+export { SessionPage } from './components/session-page'
+export { type Session, type SessionMessage, useSessions } from './hooks/use-sessions'

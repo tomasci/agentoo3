@@ -175,14 +175,13 @@
     "heading": "Sessions",
     "backToProjects": "All projects",
     "empty": "No sessions yet. Create one above — it gets its own git worktree and branch, so it will not collide with anything else running on this project.",
-    "loadFailed": "Could not load sessions",
+    "loadFailed": "Could not load the session",
     "createFailed": "Could not create the session",
     "deleteFailed": "Could not delete the session",
     "deleteConfirm": "Delete this session? Its worktree is removed, but the branch is kept so the work is not lost.",
     "untitled": "Session {{id}}",
     "isolated": "own worktree",
     "shared": "shared checkout",
-    "notImplemented": "Sessions currently reserve a worktree and a branch. Running agents in them, and streaming their output here, is the next piece of work — nothing executes yet.",
     "status": {
       "idle": "Idle",
       "queued": "Queued",
@@ -211,7 +210,27 @@
       "notReady": "The project has to finish setup first."
     },
     "deleteTitle": "Delete session?",
-    "actionsFor": "Actions for {{name}}"
+    "actionsFor": "Actions for {{name}}",
+    "open": "Open",
+    "live": "Live",
+    "reconnecting": "Reconnecting…",
+    "stop": "Stop",
+    "send": "Send",
+    "sending": "Sending…",
+    "backToList": "All sessions",
+    "sendHint": "Enter to send, Shift+Enter for a new line",
+    "willQueue": "A turn is running — this will be sent as soon as it finishes",
+    "composerPlaceholder": "Tell the orchestrator what to do…",
+    "needsOrchestrator": "This session has no orchestrator, so it cannot run. Set one from the sessions list.",
+    "sendFailed": "Could not send the message",
+    "pendingPrompts_one": "{{count}} message waiting",
+    "pendingPrompts_other": "{{count}} messages waiting",
+    "transcript": {
+      "you": "You",
+      "empty": "Nothing yet. Send a message to start the session.",
+      "noContent": "No content",
+      "delegatedPrompt": "Prompt given to {{agent}}"
+    }
   },
   "notFound": {
     "message": "There is nothing at this address.",

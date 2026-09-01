@@ -20,6 +20,7 @@ import { assertInsideProjects, projectPlugin, projectRepo, projectRoot } from '@
 import { checkRemoteUrl, safeCloneArgs } from '@/lib/remote-url'
 import { gitSshCommand } from '@/lib/ssh'
 import { type ProjectSetupJob, QUEUE_PROJECT_SETUP, redisConnection } from './index'
+import { ensurePluginManifest } from './plugin-manifest'
 
 async function fail(projectId: string, error: string, recovery?: string[]) {
   await db
@@ -69,10 +70,14 @@ export async function runProjectSetup(job: ProjectSetupJob): Promise<void> {
     await ensureDir(projectPlugin(project.slug))
     await ensureDir(`${projectPlugin(project.slug)}/agents`)
     await ensureDir(`${projectPlugin(project.slug)}/skills`)
+    // Claude Code only recognises a directory as a plugin if it holds
+    // .claude-plugin/plugin.json. Without it the symlinked agents and skills
+    // are silently ignored at session time.
+    await ensurePluginManifest(project.slug)
 
     if (project.source === 'empty') {
       // A fresh repository: worktrees need git, and an unborn HEAD is fine —
-      // addWorktree is guarded by hasCommits().
+      // git infers --orphan there.
       if (!(await dirExists(repo))) {
         await ensureDir(repo)
         const init = await git(['init', '-q', '-b', 'main', repo])

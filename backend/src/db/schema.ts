@@ -1,6 +1,7 @@
 import { relations } from 'drizzle-orm'
 import {
   boolean,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -143,6 +144,12 @@ export const sessions = pgTable(
     maxBudgetUsd: integer('max_budget_usd'),
     lastError: text('last_error'),
 
+    // Rolling totals across every turn, from each run's result message.
+    totalCostUsd: doublePrecision('total_cost_usd').notNull().default(0),
+    // Next seq to hand out. Kept on the session so a turn can allocate without
+    // a max(seq) scan, and so gaps never appear after a failed insert.
+    nextSeq: integer('next_seq').notNull().default(0),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -164,10 +171,19 @@ export const messages = pgTable(
     // Monotonic per session, so the stream can be replayed in order and a
     // reconnecting client can ask for everything after a known point.
     seq: integer('seq').notNull(),
-    // SDK message type: 'assistant' | 'user' | 'system' | 'result' | ...
+    // SDK message type: 'assistant' | 'user' | 'system' | 'result' | ... plus
+    // 'prompt', ours, for a message the human typed. The SDK never emits that
+    // type, so the two cannot be confused.
     type: text('type').notNull(),
+    // True on a 'prompt' row that no turn has answered yet. This is the queue of
+    // messages sent while a turn was already running.
+    pending: boolean('pending').notNull().default(false),
     // Set when the message came from inside a subagent's context.
     parentToolUseId: text('parent_tool_use_id'),
+    // Collapsed-row heading, derived from the SDK's own signals at write time
+    // (task_started.description, task_progress.summary, tool_use_summary) and
+    // stored so history renders identically without re-deriving it.
+    title: text('title'),
     payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

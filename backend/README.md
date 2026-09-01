@@ -156,9 +156,47 @@ Deleting a session removes its worktree but **keeps the branch**: it holds
 whatever the session did, and deleting a session should not silently discard
 work.
 
-**Not yet implemented:** nothing runs in a session. The Agent SDK loop, message
-persistence and SSE streaming are the next piece; the schema and the endpoints
-that reserve a worktree are what exist today.
+### Running a turn
+
+A **turn** is the unit of work, not a session. `POST /sessions/{id}/messages`
+records the prompt and, if nothing is already running, moves the session to
+`queued` and enqueues one job. The worker claims it with a conditional
+`UPDATE ... WHERE status = 'queued'` — that update is the mutex, so a duplicate
+delivery finds nothing to do — runs `query()` to completion, and persists every
+SDK message as it arrives.
+
+The SDK's `resume` carries the conversation across turns, so the worker holds no
+state between them and a restart costs at most the turn in flight. A turn is
+never retried: by the time it can fail it has already edited files and spent
+tokens.
+
+A message sent while a turn is running is not rejected. It is stored `pending`,
+and the running turn drains whatever accumulated behind it when it finishes. On
+failure the queue is deliberately *not* drained — replaying the same failure
+against every waiting message helps nobody — so those stay pending until the
+next send.
+
+Two SDK options do most of the work in the UI:
+
+- `forwardSubagentText: true` forwards a subagent's whole conversation with
+  `parent_tool_use_id` set. Without it only tool_use blocks come back and
+  delegated work is invisible.
+- `task_started` carries `subagent_type`, `description` and the `prompt` the
+  orchestrator wrote. That is where the row headings and the visible delegation
+  prompts come from — they are read off the stream, not generated.
+
+### Streaming it out
+
+Every message is persisted, then published to `agentoo:session:<id>`. The API
+and the worker are separate processes, so Redis bridges them.
+
+Delivery is best-effort on purpose. Each event carries its `seq`, and
+`GET /sessions/{id}/events?after=<seq>` replays from the database before going
+live, so a client that misses events recovers by asking for what it lacks. The
+pub/sub connections are **not** BullMQ's: BullMQ needs
+`maxRetriesPerRequest: null` because it blocks waiting for jobs, and that exact
+setting means a publish to a Redis that is down never rejects — it waits, inside
+the turn that called it. These use a bounded retry instead.
 
 ## SSH keys
 

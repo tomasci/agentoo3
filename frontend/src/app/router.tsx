@@ -4,7 +4,12 @@ import { AgentEditorPage, LibraryPage, SkillEditorPage } from '@/features/librar
 import { ProjectsPage } from '@/features/projects'
 import { SshKeysPage } from '@/features/ssh-keys'
 import { ProjectLayout } from './project-layout'
-import { ProjectLibraryRoute, ProjectOverviewRoute, ProjectSessionsRoute } from './project-routes'
+import {
+  ProjectLibraryRoute,
+  ProjectOverviewRoute,
+  ProjectSessionsRoute,
+  SessionRoute,
+} from './project-routes'
 import { RootLayout } from './root-layout'
 
 // Code-based routes rather than the file-based convention: file-based needs a
@@ -46,6 +51,14 @@ const projectSessionsRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: '/sessions',
   component: ProjectSessionsRoute,
+})
+
+// One session, with its transcript. A child of the project layout, so the
+// sidebar keeps showing which project you are in.
+const sessionRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/sessions/$sessionId',
+  component: SessionRoute,
 })
 
 const projectLibraryRoute = createRoute({
@@ -101,7 +114,12 @@ const sshKeysRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   projectsRoute,
-  projectRoute.addChildren([projectOverviewRoute, projectSessionsRoute, projectLibraryRoute]),
+  projectRoute.addChildren([
+    projectOverviewRoute,
+    projectSessionsRoute,
+    sessionRoute,
+    projectLibraryRoute,
+  ]),
   // `new` before `$name`, or "new" would be read as a name.
   newAgentRoute,
   agentRoute,

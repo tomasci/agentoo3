@@ -1,3 +1,4 @@
+import { Link, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
@@ -7,6 +8,7 @@ import styles from './sessions.module.scss'
 
 export function SessionCard({ session, projectId }: { session: Session; projectId: string }) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const remove = useDeleteSession(projectId)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -15,7 +17,13 @@ export function SessionCard({ session, projectId }: { session: Session; projectI
       <div className={styles.sessionHead}>
         <div>
           <h4 className={styles.sessionTitle}>
-            {session.title ?? t('sessions.untitled', { id: session.id.slice(0, 8) })}
+            <Link
+              to="/projects/$projectId/sessions/$sessionId"
+              params={{ projectId, sessionId: session.id }}
+              className={styles.sessionLink}
+            >
+              {session.title ?? t('sessions.untitled', { id: session.id.slice(0, 8) })}
+            </Link>
           </h4>
           <dl className={styles.meta}>
             <div className={styles.metaRow}>
@@ -47,6 +55,15 @@ export function SessionCard({ session, projectId }: { session: Session; projectI
           <ActionsMenu
             label={t('sessions.actionsFor', { name: session.title ?? session.id.slice(0, 8) })}
             actions={[
+              {
+                id: 'open',
+                label: t('sessions.open'),
+                onSelect: () =>
+                  void navigate({
+                    to: '/projects/$projectId/sessions/$sessionId',
+                    params: { projectId, sessionId: session.id },
+                  }),
+              },
               {
                 id: 'delete',
                 label: t('common.delete'),

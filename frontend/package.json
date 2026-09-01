@@ -13,7 +13,8 @@
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
     "codegen": "kubb generate",
-    "hooks": "lefthook install"
+    "hooks": "lefthook install",
+    "test": "bun test tests/"
   },
   "dependencies": {
     "@ark-ui/react": "5.39.1",

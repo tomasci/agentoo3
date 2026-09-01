@@ -36,3 +36,11 @@ pre-push:
     backend-types:
       root: "backend/"
       run: bun run typecheck
+    # Seconds, not milliseconds — the event-bus tests stand up a fake Redis — so
+    # these run on push rather than on every commit.
+    backend-tests:
+      root: "backend/"
+      run: bun test tests/
+    frontend-tests:
+      root: "frontend/"
+      run: bun test tests/

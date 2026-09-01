@@ -1,15 +1,43 @@
-import { count, desc, eq } from 'drizzle-orm'
+import { and, count, desc, eq, gt, inArray, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { messages, projects, sessions } from '@/db/schema'
 import { badRequest, conflict, notFound } from '@/lib/errors'
+import { publishControl, publishSessionEvent } from '@/lib/events'
 import { addWorktree, dirExists, ensureDir, isGitRepo, removeWorktree } from '@/lib/git'
 import { logger } from '@/lib/logger'
 import { projectRepo, projectRoot, projectWorktree } from '@/lib/paths'
-import type { CreateSessionInput, SessionDto, UpdateSessionInput } from './schema'
+import { enqueueSessionRun } from '@/queue'
+import type {
+  CreateSessionInput,
+  SessionDto,
+  SessionMessageDto,
+  UpdateSessionInput,
+} from './schema'
+
+type MessageRow = typeof messages.$inferSelect
+
+function toMessageDto(row: MessageRow): SessionMessageDto {
+  return {
+    id: row.id,
+    sessionId: row.sessionId,
+    seq: row.seq,
+    type: row.type,
+    parentToolUseId: row.parentToolUseId,
+    title: row.title,
+    pending: row.pending,
+    payload: row.payload,
+    createdAt: row.createdAt.toISOString(),
+  }
+}
 
 type SessionRow = typeof sessions.$inferSelect
 
-function toDto(row: SessionRow, repoPath: string, messageCount: number): SessionDto {
+function toDto(
+  row: SessionRow,
+  repoPath: string,
+  messageCount: number,
+  pendingPrompts = 0,
+): SessionDto {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -25,6 +53,8 @@ function toDto(row: SessionRow, repoPath: string, messageCount: number): Session
     maxBudgetUsd: row.maxBudgetUsd,
     lastError: row.lastError,
     messageCount,
+    totalCostUsd: row.totalCostUsd,
+    pendingPrompts,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }
@@ -36,11 +66,23 @@ async function requireProject(projectId: string) {
   return project
 }
 
+/** Pending prompt counts, so the UI can say how many messages are waiting. */
+async function pendingFor(sessionIds: string[]): Promise<Map<string, number>> {
+  if (sessionIds.length === 0) return new Map()
+  const rows = await db
+    .select({ sessionId: messages.sessionId, n: count() })
+    .from(messages)
+    .where(and(inArray(messages.sessionId, sessionIds), eq(messages.pending, true)))
+    .groupBy(messages.sessionId)
+  return new Map(rows.map((r) => [r.sessionId, Number(r.n)]))
+}
+
 async function countsFor(sessionIds: string[]): Promise<Map<string, number>> {
   if (sessionIds.length === 0) return new Map()
   const rows = await db
     .select({ sessionId: messages.sessionId, n: count() })
     .from(messages)
+    .where(inArray(messages.sessionId, sessionIds))
     .groupBy(messages.sessionId)
   return new Map(rows.map((r) => [r.sessionId, Number(r.n)]))
 }
@@ -52,17 +94,18 @@ export async function listSessions(projectId: string): Promise<SessionDto[]> {
     .from(sessions)
     .where(eq(sessions.projectId, projectId))
     .orderBy(desc(sessions.createdAt))
-  const counts = await countsFor(rows.map((r) => r.id))
+  const ids = rows.map((r) => r.id)
+  const [counts, pending] = await Promise.all([countsFor(ids), pendingFor(ids)])
   const repo = projectRepo(project.slug)
-  return rows.map((r) => toDto(r, repo, counts.get(r.id) ?? 0))
+  return rows.map((r) => toDto(r, repo, counts.get(r.id) ?? 0, pending.get(r.id) ?? 0))
 }
 
 export async function getSession(id: string): Promise<SessionDto> {
   const [row] = await db.select().from(sessions).where(eq(sessions.id, id)).limit(1)
   if (!row) throw notFound('Session')
   const project = await requireProject(row.projectId)
-  const counts = await countsFor([row.id])
-  return toDto(row, projectRepo(project.slug), counts.get(row.id) ?? 0)
+  const [counts, pending] = await Promise.all([countsFor([row.id]), pendingFor([row.id])])
+  return toDto(row, projectRepo(project.slug), counts.get(row.id) ?? 0, pending.get(row.id) ?? 0)
 }
 
 /** Short, readable, and unique enough for a branch name. */
@@ -182,4 +225,94 @@ export async function deleteSession(id: string): Promise<void> {
   }
 
   await db.delete(sessions).where(eq(sessions.id, id))
+}
+
+// --- running ------------------------------------------------------------------
+
+/**
+ * Append a prompt and make sure a turn is coming.
+ *
+ * The message is always recorded. Whether it starts a turn now or waits depends
+ * on the session: a conditional update moves an idle session to 'queued', and a
+ * busy one simply leaves the row pending for the running turn to pick up when it
+ * finishes. That is why this never rejects a message for being too early.
+ */
+export async function sendMessage(sessionId: string, text: string): Promise<SessionMessageDto> {
+  const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1)
+  if (!session) throw notFound('Session')
+
+  const project = await requireProject(session.projectId)
+  if (project.status !== 'ready') {
+    throw conflict(`Project is "${project.status}"; it has to finish setup first`)
+  }
+  if (!session.orchestrator) {
+    throw badRequest('This session has no orchestrator. Choose one before sending a message.')
+  }
+
+  const [seqRow] = await db
+    .update(sessions)
+    .set({ nextSeq: sql`${sessions.nextSeq} + 1`, updatedAt: new Date() })
+    .where(eq(sessions.id, sessionId))
+    .returning({ seq: sessions.nextSeq })
+  if (!seqRow) throw notFound('Session')
+
+  const [row] = await db
+    .insert(messages)
+    .values({
+      sessionId,
+      seq: seqRow.seq - 1,
+      type: 'prompt',
+      pending: true,
+      title: null,
+      payload: { text },
+    })
+    .returning()
+  if (!row) throw new Error('Insert returned no row')
+
+  await publishSessionEvent({ kind: 'message', sessionId, seq: row.seq, message: row })
+
+  // Start a turn only if nothing is already running. The running turn drains
+  // whatever accumulated behind it.
+  const [started] = await db
+    .update(sessions)
+    .set({ status: 'queued', updatedAt: new Date() })
+    .where(
+      and(
+        eq(sessions.id, sessionId),
+        inArray(sessions.status, ['idle', 'completed', 'failed', 'interrupted']),
+      ),
+    )
+    .returning()
+
+  if (started) {
+    await enqueueSessionRun({ sessionId })
+    await publishSessionEvent({ kind: 'status', sessionId, status: 'queued' })
+  }
+
+  return toMessageDto(row)
+}
+
+/** Ask a running turn to stop. The worker holds the AbortController, not us. */
+export async function interruptSession(sessionId: string): Promise<SessionDto> {
+  const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1)
+  if (!session) throw notFound('Session')
+  if (session.status !== 'running' && session.status !== 'queued') {
+    throw conflict(`Session is "${session.status}", not running`)
+  }
+  await publishControl(sessionId, { kind: 'interrupt' })
+  logger.info(`Requested an interrupt for session ${sessionId}`)
+  return getSession(sessionId)
+}
+
+export async function listMessages(sessionId: string, after = -1): Promise<SessionMessageDto[]> {
+  const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1)
+  if (!session) throw notFound('Session')
+
+  const rows = await db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.sessionId, sessionId), gt(messages.seq, after)))
+    .orderBy(messages.seq)
+
+  return rows.map(toMessageDto)
 }

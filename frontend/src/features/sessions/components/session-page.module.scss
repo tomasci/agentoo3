@@ -1,0 +1,84 @@
+@use '@/styles/variables' as v;
+
+// The transcript scrolls; the header and composer stay put. Without this the
+// composer walks off the bottom of a long session.
+.page {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  gap: v.$space-md;
+  height: 100%;
+  min-height: 0;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: v.$space-md;
+  padding: v.$space-md v.$space-lg;
+  border: 1px solid var(--border);
+  border-radius: v.$radius;
+  background: var(--surface);
+}
+
+.heading { display: grid; gap: 0.25rem; min-width: 0; }
+.title { margin: 0; font-size: 1.05rem; font-weight: 600; }
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: v.$space-md;
+  font-size: 0.8125rem;
+  color: var(--muted-fg);
+}
+
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; }
+
+.controls { display: flex; align-items: center; gap: v.$space-sm; flex: none; }
+
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--muted-fg);
+}
+
+.dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--muted-fg); }
+.dotLive { background: var(--accent); }
+
+.scroll { overflow-y: auto; min-height: 0; padding-right: v.$space-sm; }
+
+.composer {
+  display: grid;
+  gap: v.$space-sm;
+  padding: v.$space-md;
+  border: 1px solid var(--border);
+  border-radius: v.$radius;
+  background: var(--surface);
+}
+
+.input {
+  width: 100%;
+  min-height: 4.5rem;
+  max-height: 16rem;
+  resize: vertical;
+  padding: v.$space-md;
+  border: 1px solid var(--border);
+  border-radius: v.$radius-sm;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  line-height: 1.5;
+}
+
+.composerFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: v.$space-md;
+}
+
+.hint { font-size: 0.75rem; color: var(--muted-fg); }
+.error { font-size: 0.8125rem; color: var(--danger, #c0392b); }
+.warn { font-size: 0.8125rem; color: var(--muted-fg); }

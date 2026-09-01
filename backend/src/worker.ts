@@ -1,13 +1,14 @@
 // Worker process. Owns anything that outlives an HTTP request: project setup
-// now, Claude sessions next.
+// and the session turns that run Claude.
 
 import { env } from '@/env'
 import { logger } from '@/lib/logger'
 import { startProjectSetupWorker } from '@/queue/project-setup.worker'
+import { startSessionRunWorker } from '@/queue/session-run.worker'
 
 logger.info(`Worker starting (concurrency ${env.WORKER_CONCURRENCY})`)
 
-const workers = [startProjectSetupWorker()]
+const workers = [startProjectSetupWorker(), startSessionRunWorker()]
 
 async function shutdown(signal: string) {
   logger.info(`${signal} received, draining workers`)
