@@ -101,7 +101,12 @@
   },
   "nav": {
     "projects": "Projects",
-    "sshKeys": "SSH keys"
+    "sshKeys": "SSH keys",
+    "project": "Project",
+    "workspace": "Workspace",
+    "sessions": "Sessions",
+    "noneOpen": "None open",
+    "noProjects": "No projects yet."
   },
   "sshKeys": {
     "heading": "Your keys",
@@ -182,7 +187,8 @@
   },
   "status": {
     "keys": "{{count}} key",
-    "keys_plural": "{{count}} keys"
+    "keys_plural": "{{count}} keys",
+    "project": "{{name}}"
   },
   "theme": {
     "toggle": "Toggle theme"

@@ -1,8 +1,8 @@
 import { Link } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLibraryAgents } from '@/features/library'
-import { useProjects } from '@/features/projects'
+import { useCurrentProject, useProjects } from '@/features/projects'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import { Button } from '@/shared/ui'
 import { useCreateSession, useSessions } from '../hooks/use-sessions'
@@ -12,6 +12,7 @@ import styles from './sessions.module.scss'
 export function ProjectPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation()
   const { data: projects } = useProjects()
+  const { setCurrentProjectId } = useCurrentProject()
   const { data: sessions, isPending, isError, error } = useSessions(projectId)
   const { data: agents } = useLibraryAgents()
   const create = useCreateSession(projectId)
@@ -22,6 +23,12 @@ export function ProjectPage({ projectId }: { projectId: string }) {
   const [formError, setFormError] = useState<string | null>(null)
 
   const project = (projects ?? []).find((p) => p.id === projectId)
+
+  // Opening a project is what selects it; it then stays selected as you move
+  // around, the way an IDE keeps a project open.
+  useEffect(() => {
+    setCurrentProjectId(projectId)
+  }, [projectId, setCurrentProjectId])
   const orchestrators = (agents ?? []).filter((a) => a.role === 'orchestrator')
 
   const onCreate = () => {

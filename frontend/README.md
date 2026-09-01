@@ -80,6 +80,19 @@ the sidebar and status bar stay put **without `position: fixed`** — which avoi
 the overlap and scroll-locking bugs fixed positioning brings. Language and theme
 sit at the foot of the sidebar because they are preferences, not navigation.
 
+### The open project
+
+Opening a project selects it, and it stays selected as you move around — the way
+an IDE keeps a project open rather than treating it as a page you visited. The
+sidebar shows it with a switcher, offers project-scoped navigation beneath it,
+and the status bar names it.
+
+Only the **id** is persisted, never the project itself, so a rename or a status
+change is picked up for free. A selection pointing at a project that no longer
+exists is cleared — but only once the list has actually loaded, or a cold start
+would drop the selection every time. Only `ready` projects are offered in the
+switcher: one still cloning has no checkout to work in.
+
 The status bar answers "is this working": backend reachable, whether a Claude
 credential is present, project and key counts, version. A reader should not have
 to open a page to discover the backend is down.

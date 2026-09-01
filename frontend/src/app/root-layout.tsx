@@ -2,15 +2,18 @@ import { Link, Outlet } from '@tanstack/react-router'
 import { useAtom } from 'jotai'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useCurrentProject } from '@/features/projects'
 import { SUPPORTED_LANGUAGES } from '@/shared/i18n'
 import { themeAtom } from '@/shared/store/ui'
 import { Button } from '@/shared/ui'
 import styles from './layout.module.scss'
+import { ProjectSwitcher } from './project-switcher'
 import { StatusBar } from './status-bar'
 
 export function RootLayout() {
   const { t, i18n } = useTranslation()
   const [theme, setTheme] = useAtom(themeAtom)
+  const { current } = useCurrentProject()
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -24,21 +27,44 @@ export function RootLayout() {
           <p className={styles.tagline}>{t('app.subtitle')}</p>
         </Link>
 
-        <nav className={styles.nav}>
-          {/* activeOptions exact:false keeps Projects lit while you are inside
-              a project, since /projects/$id sits under it. */}
-          <Link
-            to="/projects"
-            className={styles.navItem}
-            activeProps={{ 'aria-current': 'page' }}
-            activeOptions={{ exact: false }}
-          >
-            {t('nav.projects')}
-          </Link>
-          <Link to="/ssh-keys" className={styles.navItem} activeProps={{ 'aria-current': 'page' }}>
-            {t('nav.sshKeys')}
-          </Link>
-        </nav>
+        <ProjectSwitcher />
+
+        {/* Project-scoped navigation, shown only when one is open. */}
+        {current && (
+          <nav className={styles.nav}>
+            <Link
+              to="/projects/$projectId"
+              params={{ projectId: current.id }}
+              className={styles.navItem}
+              activeProps={{ 'aria-current': 'page' }}
+            >
+              {t('nav.sessions')}
+            </Link>
+          </nav>
+        )}
+
+        <div className={styles.sidebarSection}>
+          <span className={styles.sectionLabel}>{t('nav.workspace')}</span>
+          <nav className={styles.nav}>
+            {/* exact:true, or this stays lit while inside a project and competes
+                with the Sessions link above it. */}
+            <Link
+              to="/projects"
+              className={styles.navItem}
+              activeProps={{ 'aria-current': 'page' }}
+              activeOptions={{ exact: true }}
+            >
+              {t('nav.projects')}
+            </Link>
+            <Link
+              to="/ssh-keys"
+              className={styles.navItem}
+              activeProps={{ 'aria-current': 'page' }}
+            >
+              {t('nav.sshKeys')}
+            </Link>
+          </nav>
+        </div>
 
         {/* Preferences, not navigation, so they sit at the foot. */}
         <div className={styles.sidebarFoot}>

@@ -102,7 +102,12 @@
   },
   "nav": {
     "projects": "Проекты",
-    "sshKeys": "SSH-ключи"
+    "sshKeys": "SSH-ключи",
+    "project": "Проект",
+    "workspace": "Рабочая область",
+    "sessions": "Сессии",
+    "noneOpen": "Не выбран",
+    "noProjects": "Проектов пока нет."
   },
   "sshKeys": {
     "heading": "Ваши ключи",
@@ -184,7 +189,8 @@
   "status": {
     "keys": "{{count}} ключ",
     "keys_few": "{{count}} ключа",
-    "keys_many": "{{count}} ключей"
+    "keys_many": "{{count}} ключей",
+    "project": "{{name}}"
   },
   "theme": {
     "toggle": "Сменить тему"

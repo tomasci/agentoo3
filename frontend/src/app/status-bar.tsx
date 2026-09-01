@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useHealth } from '@/features/health'
-import { useProjects } from '@/features/projects'
+import { useCurrentProject, useProjects } from '@/features/projects'
 import { useSshKeys } from '@/features/ssh-keys'
 import styles from './layout.module.scss'
 
@@ -16,6 +16,7 @@ export function StatusBar() {
   const { t } = useTranslation()
   const { data: health, isPending, isError } = useHealth()
   const { data: projects } = useProjects()
+  const { current } = useCurrentProject()
   const { data: keys } = useSshKeys()
 
   // Three states, because "backend down" and "backend up but agents cannot run"
@@ -42,10 +43,20 @@ export function StatusBar() {
         {label}
       </span>
 
-      {projects && (
-        <Link to="/projects" className={`${styles.statusItem} ${styles.statusLink}`}>
-          {t('projects.count', { count: projects.length })}
+      {current ? (
+        <Link
+          to="/projects/$projectId"
+          params={{ projectId: current.id }}
+          className={`${styles.statusItem} ${styles.statusLink}`}
+        >
+          {t('status.project', { name: current.name })}
         </Link>
+      ) : (
+        projects && (
+          <Link to="/projects" className={`${styles.statusItem} ${styles.statusLink}`}>
+            {t('projects.count', { count: projects.length })}
+          </Link>
+        )
       )}
 
       {keys && (
