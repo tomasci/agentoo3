@@ -96,6 +96,8 @@ svc_report redis    redis-server
 svc_report nginx    nginx
 svc_report tailscale tailscaled
 svc_report frontend "${APP_NAME}-frontend"
+svc_report api      "${APP_NAME}-api"
+svc_report worker   "${APP_NAME}-worker"
 printf '\n' >&2
 
 # --- network ------------------------------------------------------------------
@@ -128,6 +130,17 @@ if have tailscale; then
     log_warn "Tailscale is installed but this node has not joined a tailnet."
     log_warn "Run: sudo tailscale up"
   fi
+fi
+
+if curl -fsS --max-time 3 "http://${BACKEND_HOST}:${BACKEND_PORT}/api/health" 2>/dev/null | grep -q '"status":"ok"'; then
+  log_ok "Backend answering on http://${BACKEND_HOST}:${BACKEND_PORT}/api/health"
+  if ! curl -fsS --max-time 3 "http://${BACKEND_HOST}:${BACKEND_PORT}/api/health" 2>/dev/null \
+       | grep -q '"claudeCredential":true'; then
+    log_warn "Backend has NO Claude credential — agents cannot run. See the README."
+  fi
+else
+  log_warn "Nothing answering on ${BACKEND_HOST}:${BACKEND_PORT} — /api/ will 502."
+  log_warn "Run: sudo $INSTALL_SH --only backend"
 fi
 
 # The whole point of the frontend service is that this stops being a 502.

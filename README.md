@@ -86,10 +86,12 @@ scripts/
   64-install-tailscale.sh Tailscale VPN
   66-install-nginx.sh   nginx on the tailnet (+ tailscale serve for HTTPS)
   68-setup-frontend.sh  bun install, production build, systemd service
+  70-setup-backend.sh   bun install, migrations, API + worker services
   80-configure-ufw.sh   firewall — runs last, once all ports are known
   90-summary.sh         verify everything and report
-backend/                Python service (not implemented yet)
+backend/                Hono API + worker driving the Claude Agent SDK
 frontend/               React + Vite SPA, served by Bun — see frontend/README.md
+library.example/        seed agents/skills, copied to LIBRARY_DIR on first install
 config/  docs/
 logs/                   install.log (gitignored)
 .state/                 step markers + remembered settings (gitignored)
@@ -116,6 +118,22 @@ From inside the install directory. After a bootstrap install, prefix with
 
 If a step fails the script stops, names the step, and prints the exact command
 to resume with. Full transcript in `logs/install.log`.
+
+## Backend
+
+Two services, because a Claude session outlives any HTTP request: `agentoo-api`
+(Hono, REST + SSE) and `agentoo-worker` (project setup, Claude sessions).
+Restarting the API never kills a running agent.
+
+Agents and skills are markdown in `LIBRARY_DIR`, marked `role: orchestrator` or
+`role: subagent` so you can see which drive a session and which are only reached
+by delegation. Orchestrators get Anthropic's documented delegation instruction
+injected automatically — Opus 5 over-delegates otherwise, and Claude Code's own
+safeguard does not apply to custom system prompts.
+
+Projects live one-per-directory under `PROJECTS_DIR`, each session on its own git
+worktree and branch. Details and the private-repo recovery flow:
+`backend/README.md`.
 
 ## Frontend
 

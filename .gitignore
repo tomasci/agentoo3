@@ -2,6 +2,10 @@
 /logs/
 /.state/
 
+# runtime data: cloned projects, and the agent/skill library (its own git repo)
+/projects/
+/library/
+
 # generated secrets
 config/*.local
 config/secrets*

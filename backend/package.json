@@ -1,0 +1,37 @@
+{
+  "name": "agentoo-backend",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "dev:worker": "bun --watch src/worker.ts",
+    "start": "bun src/index.ts",
+    "start:worker": "bun src/worker.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.252",
+    "@hono/zod-openapi": "1.6.1",
+    "bullmq": "6.3.4",
+    "consola": "3.4.2",
+    "drizzle-orm": "0.45.2",
+    "gray-matter": "4.0.3",
+    "hono": "4.13.5",
+    "ioredis": "6.0.0",
+    "postgres": "3.4.9",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.11",
+    "@types/bun": "1.4.0",
+    "drizzle-kit": "0.31.10",
+    "typescript": "7.0.2"
+  }
+}

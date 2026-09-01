@@ -27,7 +27,11 @@ FRONTEND_PORT="${FRONTEND_PORT:-3000}"
 
 BACKEND_DIR="${BACKEND_DIR:-$REPO_ROOT/backend}"
 FRONTEND_DIR="${FRONTEND_DIR:-$REPO_ROOT/frontend}"
-VENV_DIR="${VENV_DIR:-$BACKEND_DIR/.venv}"
+# Where cloned/adopted projects and the shared agent+skill library live.
+PROJECTS_DIR="${PROJECTS_DIR:-$REPO_ROOT/projects}"
+LIBRARY_DIR="${LIBRARY_DIR:-$REPO_ROOT/library}"
+# Each Claude Code instance wants ~4GB, so concurrency is deliberately low.
+WORKER_CONCURRENCY="${WORKER_CONCURRENCY:-1}"
 # Generated credentials and connection strings are written here.
 ENV_FILE="${ENV_FILE:-$REPO_ROOT/.env}"
 

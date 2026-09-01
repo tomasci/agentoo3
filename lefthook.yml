@@ -13,9 +13,22 @@ pre-commit:
       root: "frontend/"
       glob: "frontend/**/*.{ts,tsx}"
       run: bun run typecheck
+    backend-check:
+      root: "backend/"
+      glob: "backend/**/*.{ts,json,jsonc}"
+      run: bunx biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+    backend-types:
+      root: "backend/"
+      glob: "backend/**/*.ts"
+      run: bun run typecheck
 
 pre-push:
+  parallel: true
   commands:
     frontend-build:
       root: "frontend/"
       run: bun run build
+    backend-types:
+      root: "backend/"
+      run: bun run typecheck
