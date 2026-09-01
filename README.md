@@ -138,7 +138,15 @@ worktree and branch. Details and the private-repo recovery flow:
 ## SSH keys
 
 Generate ed25519 deploy keys for private repositories from the UI, copy the
-public half, test it against the host, and select it when adding a project. Keys
+public half, test it against the host, and select it when adding a project — or
+change it later on the project card, since the key is the thing you most often
+discover you got wrong.
+
+Worth knowing: **SSH is never anonymous.** GitHub and GitLab require a key even
+for a *public* repository, so an ssh remote fails without one regardless. When a
+clone fails, the recovery panel offers three routes — attach a key, switch the
+remote to https (which needs no credential for a public repo), or clone it by
+hand and press check again. Keys
 are passphraseless and there is no ssh-agent — `backend/README.md` explains why
 neither is an oversight. The private key never leaves the server: no API response
 contains it.

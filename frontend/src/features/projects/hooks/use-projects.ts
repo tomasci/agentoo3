@@ -4,6 +4,7 @@ import {
   getApiProjectsQueryKey,
   getApiProjectsQueryOptions,
 } from '@/shared/api/generated/hooks/useGetApiProjects'
+import { patchApiProjectsIdMutationOptions } from '@/shared/api/generated/hooks/usePatchApiProjectsId'
 import { postApiProjectsMutationOptions } from '@/shared/api/generated/hooks/usePostApiProjects'
 import { postApiProjectsIdRetryMutationOptions } from '@/shared/api/generated/hooks/usePostApiProjectsIdRetry'
 import type { GetApiProjectsStatus200 } from '@/shared/api/generated/types/GetApiProjects'
@@ -43,6 +44,14 @@ export function useRetryProject() {
   const invalidate = useInvalidateProjects()
   return useMutation({
     ...postApiProjectsIdRetryMutationOptions(),
+    onSuccess: () => invalidate(),
+  })
+}
+
+export function useUpdateProject() {
+  const invalidate = useInvalidateProjects()
+  return useMutation({
+    ...patchApiProjectsIdMutationOptions(),
     onSuccess: () => invalidate(),
   })
 }

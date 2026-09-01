@@ -64,14 +64,31 @@
       "confirmExisting": "Remove \"{{name}}\"? The folder itself is yours and will be left alone."
     },
     "recovery": {
-      "heading": "This repository needs authentication",
-      "explain": "The server never prompts for credentials, so a private repository cannot be cloned unattended. Run the commands below over SSH — git will ask you for the passphrase or token there — then press Check again.",
+      "heading": "Setup could not authenticate",
+      "private": "Private repo",
+      "public": "Public repo",
+      "manual": "By hand",
+      "keyTitle": "Use an SSH key",
+      "keyExplain": "SSH is never anonymous — GitHub and GitLab require a key on their ssh endpoint even for a public repository. Pick a key that has been added to the host as a deploy key, or create one first.",
+      "noKeysYet": "No keys yet — generate one, then add it to the host as a deploy key.",
+      "useKeyAndRetry": "Use this key and retry",
+      "manageKeys": "Manage keys",
+      "goToKeys": "Go to SSH keys",
+      "httpsTitle": "Switch to HTTPS instead",
+      "httpsExplain": "If the repository is public, https needs no credential at all and is the simpler fix. This rewrites the remote and clears the key.",
+      "useHttpsAndRetry": "Use HTTPS and retry",
+      "manualTitle": "I will do it myself",
+      "manualExplain": "Clone it over SSH yourself, where git can prompt you for a passphrase, then check again. Anything already present at the target path is adopted rather than re-cloned.",
       "copy": "Copy commands",
-      "checkAgain": "Check again, I did the manual steps",
+      "checkAgain": "I did the manual steps — check again",
       "checking": "Checking…",
-      "suggestKey": "This is an ssh remote with no key attached. Generating a deploy key is usually easier than cloning by hand.",
-      "goToKeys": "Go to SSH keys"
-    }
+      "working": "Working…",
+      "failed": "That did not work"
+    },
+    "savingKey": "Saving…",
+    "keySaved": "Saved",
+    "keyChangeFailed": "Could not change the key",
+    "keyRetryHint": "Changing the key does not re-clone; use retry if you need to."
   },
   "language": {
     "label": "Language"

@@ -8,7 +8,7 @@ import { logger } from '@/lib/logger'
 import { assertInsideProjects, projectRepo, projectRoot, toSlug } from '@/lib/paths'
 import { checkRemoteUrl } from '@/lib/remote-url'
 import { enqueueProjectSetup } from '@/queue'
-import type { CreateProjectInput, ProjectDto } from './schema'
+import type { CreateProjectInput, ProjectDto, UpdateProjectInput } from './schema'
 
 type ProjectRow = typeof projects.$inferSelect
 
@@ -94,6 +94,42 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectD
   logger.info(`Project ${row.slug} created (${row.source}), setup queued`)
 
   return toDto(row)
+}
+
+/**
+ * Change a project's remote or ssh key after the fact.
+ *
+ * Both are things you discover you got wrong only when a clone fails: the repo
+ * needed a key, or the key was the wrong one, or the remote should have been
+ * https. Requiring the project to be deleted and recreated to fix that would be
+ * hostile.
+ */
+export async function updateProject(id: string, input: UpdateProjectInput): Promise<ProjectDto> {
+  const [row] = await db.select().from(projects).where(eq(projects.id, id)).limit(1)
+  if (!row) throw notFound('Project')
+
+  if (input.remoteUrl) {
+    const check = checkRemoteUrl(input.remoteUrl)
+    if (!check.ok) throw badRequest(check.reason ?? 'Invalid remote URL')
+    if (row.source === 'existing') {
+      throw badRequest('This project adopted a directory; it has no remote to change')
+    }
+  }
+
+  const [updated] = await db
+    .update(projects)
+    .set({
+      ...(input.name !== undefined && { name: input.name }),
+      ...(input.remoteUrl !== undefined && { remoteUrl: input.remoteUrl }),
+      ...(input.sshKeyId !== undefined && { sshKeyId: input.sshKeyId }),
+      updatedAt: new Date(),
+    })
+    .where(eq(projects.id, id))
+    .returning()
+
+  if (!updated) throw new Error('Update returned no row')
+  logger.info(`Project ${updated.slug} updated`)
+  return toDto(updated)
 }
 
 /** "Check again, I did the manual steps" — re-queue setup for a stuck project. */

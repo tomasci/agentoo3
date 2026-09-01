@@ -40,3 +40,16 @@ export const errorSchema = z.object({
   error: z.string(),
   recoveryCommands: z.array(z.string()).optional(),
 })
+
+// Everything here is optional: a PATCH that only swaps the ssh key should not
+// have to restate the name. `sshKeyId: null` clears it back to ssh defaults,
+// which is why it is nullable rather than merely optional.
+export const updateProjectSchema = z
+  .object({
+    name: z.string().min(1).max(120).optional(),
+    remoteUrl: z.string().min(1).optional(),
+    sshKeyId: z.string().uuid().nullable().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update' })
+
+export type UpdateProjectInput = z.infer<typeof updateProjectSchema>

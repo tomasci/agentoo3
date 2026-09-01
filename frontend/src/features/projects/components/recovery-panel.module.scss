@@ -8,21 +8,10 @@
   background: color-mix(in srgb, var(--warn) 8%, transparent);
 }
 
-.heading {
-  margin: 0 0 v.$space-sm;
-  font-size: 0.875rem;
-  font-weight: 600;
-}
-
-.explain {
-  margin: 0 0 v.$space-sm;
-  font-size: 0.8125rem;
-  color: var(--muted-fg);
-  line-height: 1.55;
-}
+.heading { margin: 0 0 v.$space-sm; font-size: 0.875rem; font-weight: 600; }
 
 .error {
-  margin: 0 0 v.$space-sm;
+  margin: 0 0 v.$space-md;
   padding: v.$space-sm;
   border-radius: v.$radius-sm;
   background: var(--bg);
@@ -33,6 +22,62 @@
   word-break: break-word;
   max-height: 8rem;
   overflow-y: auto;
+}
+
+.options { display: grid; gap: v.$space-sm; }
+
+.option {
+  padding: v.$space-md;
+  border: 1px solid var(--border);
+  border-radius: v.$radius-sm;
+  background: var(--bg);
+}
+
+.optionHead {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.badge {
+  flex: none;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-fg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+}
+
+.recommended {
+  color: var(--accent-fg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.optionTitle { margin: 0; font-size: 0.875rem; font-weight: 600; }
+
+.explain {
+  margin: 0 0 v.$space-sm;
+  font-size: 0.8125rem;
+  color: var(--muted-fg);
+  line-height: 1.55;
+}
+
+.row { display: flex; gap: v.$space-sm; align-items: center; flex-wrap: wrap; }
+
+.select {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: v.$radius-sm;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.8125rem;
+  min-width: 12rem;
 }
 
 .commands {
@@ -49,10 +94,10 @@
   code { display: block; white-space: pre; }
 }
 
-.actions {
-  display: flex;
-  gap: v.$space-sm;
-  flex-wrap: wrap;
+.mono {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
 }
 
 .link {
@@ -65,3 +110,5 @@
   text-decoration: underline;
   cursor: pointer;
 }
+
+.failure { margin: v.$space-sm 0 0; color: var(--warn); font-size: 0.8125rem; }

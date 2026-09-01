@@ -146,6 +146,13 @@ failures".
 no response schema contains it. This service has no authentication, so the only
 safe design is for the secret to have no route out.
 
+**SSH is never anonymous.** GitHub, GitLab and Bitbucket all require a key on
+their ssh endpoint even for a *public* repository — anonymous access is
+HTTPS-only. So `git@github.com:user/public-repo.git` fails without a key exactly
+like a private one would, which is why the recovery UI offers switching the
+remote to https as well as attaching a key: for a public repo, https needs no
+credential at all.
+
 `POST /ssh-keys/{id}/test` runs `ssh -T` against a host. GitHub and GitLab refuse
 a shell and **exit non-zero even on success**, so the exit code is useless — the
 greeting on stderr is what gets inspected.

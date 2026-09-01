@@ -1,6 +1,10 @@
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSshKeys } from '@/features/ssh-keys'
 import { Button } from '@/shared/ui'
-import { type Project, useDeleteProject } from '../hooks/use-projects'
+import { type Project, useDeleteProject, useUpdateProject } from '../hooks/use-projects'
+import { apiErrorMessage } from '../lib/api-error'
+import { isSshRemote } from '../lib/remote-url'
 import styles from './project-card.module.scss'
 import { ProjectStatusBadge } from './project-status'
 import { RecoveryPanel } from './recovery-panel'
@@ -8,6 +12,33 @@ import { RecoveryPanel } from './recovery-panel'
 export function ProjectCard({ project }: { project: Project }) {
   const { t } = useTranslation()
   const remove = useDeleteProject()
+  const update = useUpdateProject()
+  const { data: sshKeys } = useSshKeys()
+  const [keyId, setKeyId] = useState(project.sshKeyId ?? '')
+  const [keyError, setKeyError] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  // Keep the select honest if the project changes under us (a poll, or the
+  // recovery panel swapping the key).
+  useEffect(() => {
+    setKeyId(project.sshKeyId ?? '')
+  }, [project.sshKeyId])
+
+  const changeKey = (next: string) => {
+    setKeyId(next)
+    setKeyError(null)
+    setSaved(false)
+    update.mutate(
+      { path: { id: project.id }, body: { sshKeyId: next || null } },
+      {
+        onSuccess: () => {
+          setSaved(true)
+          setTimeout(() => setSaved(false), 2000)
+        },
+        onError: (error) => setKeyError(apiErrorMessage(error, t('projects.keyChangeFailed'))),
+      },
+    )
+  }
 
   const onDelete = () => {
     // A cloned project's files live under PROJECTS_DIR and we can remove them;
@@ -55,6 +86,34 @@ export function ProjectCard({ project }: { project: Project }) {
           </Button>
         </div>
       </div>
+
+      {/* Always available, not only on failure: the key is the thing you most
+          often discover you got wrong, and re-creating the project to change it
+          would be absurd. */}
+      {project.source === 'clone' && isSshRemote(project.remoteUrl) && (
+        <div className={styles.keyRow}>
+          <span>{t('projects.form.sshKey')}</span>
+          <select
+            className={styles.select}
+            value={keyId}
+            onChange={(e) => changeKey(e.target.value)}
+            disabled={update.isPending}
+            aria-label={t('projects.form.sshKey')}
+          >
+            <option value="">{t('projects.form.sshKeyNone')}</option>
+            {(sshKeys ?? []).map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.name}
+                {k.comment ? ` — ${k.comment}` : ''}
+              </option>
+            ))}
+          </select>
+          {update.isPending && <span>{t('projects.savingKey')}</span>}
+          {saved && <span className={styles.saved}>{t('projects.keySaved')}</span>}
+          {keyError && <span className={styles.error}>{keyError}</span>}
+          {project.status === 'ready' && <span>{t('projects.keyRetryHint')}</span>}
+        </div>
+      )}
 
       {project.status === 'needs_manual' && <RecoveryPanel project={project} />}
 

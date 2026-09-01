@@ -1,7 +1,14 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import { AppError } from '@/lib/errors'
-import { createProjectSchema, errorSchema, projectSchema } from './schema'
-import { createProject, deleteProject, getProject, listProjects, retryProject } from './service'
+import { createProjectSchema, errorSchema, projectSchema, updateProjectSchema } from './schema'
+import {
+  createProject,
+  deleteProject,
+  getProject,
+  listProjects,
+  retryProject,
+  updateProject,
+} from './service'
 
 const idParam = z.object({
   id: z
@@ -57,6 +64,26 @@ projectsRouter.openapi(
     responses: { 200: json(projectSchema, 'Project'), 404: json(errorSchema, 'Not found') },
   }),
   async (c) => c.json(await getProject(c.req.valid('param').id), 200),
+)
+
+projectsRouter.openapi(
+  createRoute({
+    method: 'patch',
+    path: '/projects/{id}',
+    tags: ['projects'],
+    summary: "Change a project's remote or SSH key",
+    description:
+      'For fixing what a failed clone revealed: the repo needed a key, the key ' +
+      'was the wrong one, or the remote should have been https. Does not re-run ' +
+      'setup; call retry afterwards.',
+    request: { params: idParam, body: json(updateProjectSchema, 'Fields to change') },
+    responses: {
+      200: json(projectSchema, 'Updated'),
+      400: json(errorSchema, 'Invalid input'),
+      404: json(errorSchema, 'Not found'),
+    },
+  }),
+  async (c) => c.json(await updateProject(c.req.valid('param').id, c.req.valid('json')), 200),
 )
 
 projectsRouter.openapi(

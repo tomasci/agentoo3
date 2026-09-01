@@ -50,3 +50,28 @@
   color: var(--warn);
   overflow-wrap: anywhere;
 }
+
+.keyRow {
+  display: flex;
+  align-items: center;
+  gap: v.$space-sm;
+  flex-wrap: wrap;
+  margin-top: v.$space-md;
+  padding-top: v.$space-md;
+  border-top: 1px solid var(--border);
+  font-size: 0.8125rem;
+  color: var(--muted-fg);
+}
+
+.select {
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: v.$radius-sm;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.8125rem;
+  min-width: 11rem;
+}
+
+.saved { color: var(--ok); }
