@@ -66,72 +66,6 @@ Run as root, or as a user with `sudo` — it authenticates once up front rather
 than stalling halfway through an upgrade. It is **idempotent**: re-running skips
 whatever is already in place, and re-uses already-generated passwords.
 
-## Updating an existing install
-
-Re-running the bootstrap updates the clone and installs whatever is new — steps
-are idempotent, so anything already in place is skipped. Generated Postgres and
-Redis passwords are reused, not regenerated.
-
-Run just the step you added:
-
-```
-curl -fsSL https://raw.githubusercontent.com/tomasci/agentoo3/main/bootstrap.sh \
-  | sudo bash -s -- --only claude
-```
-
-Or the whole thing, which also re-runs the (slow) `full-upgrade`:
-
-```
-curl -fsSL https://raw.githubusercontent.com/tomasci/agentoo3/main/bootstrap.sh | sudo bash
-```
-
-From the server itself, without going through the bootstrap:
-
-```
-cd /opt/agentoo && sudo git pull && sudo ./install.sh --only claude
-```
-
-One thing to know before a **full** re-run: local edits under `/opt/agentoo`
-block the update. The bootstrap uses a fast-forward-only merge and refuses
-rather than clobbering your changes — pass `--force` to discard them. `.env` is
-gitignored, so credentials never conflict.
-
-### Remembered settings
-
-Choices that a plain re-run would otherwise silently undo are persisted to
-`.state/settings.env` and restored automatically:
-
-| Setting | Undoing it would... |
-|---|---|
-| `UFW_TAILSCALE_ONLY` | re-open public SSH after you moved it behind the VPN |
-| `NGINX_DOMAIN` | rewrite the site as a catch-all `server_name _` |
-| `NGINX_ENABLE_TLS`, `NGINX_TLS_EMAIL` | drop the TLS block certbot added, taking the site back to HTTP |
-
-So this, once:
-
-```
-sudo UFW_TAILSCALE_ONLY=1 /opt/agentoo/install.sh --only ufw
-```
-
-survives every later `bootstrap.sh | sudo bash`. The installer says so when it
-happens:
-
-```
-INFO  Using remembered UFW_TAILSCALE_ONLY=1 (set on an earlier run)
-```
-
-To change one, set it explicitly — an explicit value always wins and replaces
-what was stored:
-
-```
-sudo UFW_TAILSCALE_ONLY=0 /opt/agentoo/install.sh --only ufw
-```
-
-A value is stored only after the step it belongs to succeeds, so a failed run
-remembers nothing. `install.sh --only summary` prints the whole file. Deleting
-`.state/` forgets everything and returns to the defaults in
-`scripts/lib/config.sh`.
-
 ## Layout
 
 ```
@@ -149,8 +83,8 @@ scripts/
   55-install-claude-code.sh  Claude Code CLI (signed apt repo)
   60-install-postgres.sh  PostgreSQL + role + database + pgvector
   62-install-redis.sh   Redis, localhost-only, password-protected
-  64-install-nginx.sh   nginx reverse proxy (+ optional Let's Encrypt)
-  70-install-tailscale.sh Tailscale VPN
+  64-install-tailscale.sh Tailscale VPN
+  66-install-nginx.sh   nginx on the tailnet (+ tailscale serve for HTTPS)
   80-configure-ufw.sh   firewall — runs last, once all ports are known
   90-summary.sh         verify everything and report
 backend/                Python service
@@ -184,23 +118,24 @@ to resume with. Full transcript in `logs/install.log`.
 
 ## Claude Code
 
-Installed from Anthropic's **signed apt repository**, not the
-`curl https://claude.ai/install.sh | bash` native installer. On a server the
-apt package is system-wide, so a systemd unit can exec `claude`; the native
-installer is per-user and would strand the binary in `/root` when provisioning
-runs as root. The signing key fingerprint is verified against
-`31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE` before the repo is trusted — a
-truncated or wrong download is refused rather than silently becoming a package
-source.
+Installed with Anthropic's native installer, which keeps itself updated in the
+background. Claude Code ships often, so that matters more here than the
+alternative's tidiness.
 
-Trade-off: apt installs do not self-update the way native installs do. They
-upgrade with everything else, so `install.sh --only upgrade` keeps Claude Code
-current.
+The native install is per-user (`~/.local/bin/claude`), so the step runs it as
+the deploy user rather than root — provisioning runs as root, and a root-owned
+install would sit in `/root` where the account running the app cannot see it.
+If a systemd unit needs it, either set `Environment=PATH=...` in the unit or
+symlink it once (the link survives auto-updates, which replace the target):
+
+```
+sudo ln -sfn /home/<user>/.local/bin/claude /usr/local/bin/claude
+```
 
 ```
 CLAUDE_CODE_CHANNEL=latest ...        # every release, instead of ~1-week-old stable
-CLAUDE_CODE_INSTALL_METHOD=native ... # per-user ~/.local/bin, self-updating
-CLAUDE_CODE_VERSION=2.1.89 ...        # pin (native method only)
+CLAUDE_CODE_INSTALL_METHOD=apt ...    # system-wide from Anthropic's signed apt repo
+CLAUDE_CODE_VERSION=2.1.89 ...        # pin a version
 ```
 
 ### Authenticating on a headless server
@@ -265,21 +200,32 @@ redeploys, so prefer it on a server.
 
 Claude Code asks for 4 GB RAM; the step warns below that but does not fail.
 
+## Serving over Tailscale
+
+There is no certbot and no Let's Encrypt. The system is reached over Tailscale,
+and WireGuard already encrypts every byte between client and host, so plain HTTP
+on `tailscale0` is not traffic in the clear.
+
+nginx runs after Tailscale so it can pick up the node's identity, and the site's
+`server_name` is filled in automatically:
+
+```
+OK    Detected tailnet identity: agentoo.tailnet-abc.ts.net 100.79.119.5 fd7a:...
+```
+
+Reach it at `http://<magicdns-name>/` or `http://<tailnet-ip>/`. If Tailscale
+has not joined yet, the site is a catch-all — re-run `--only nginx` afterwards
+and it fixes itself.
+
+For a browser padlock, `tailscale serve` publishes nginx over HTTPS on the
+MagicDNS name with a certificate Tailscale provisions and renews. It is on by
+default (`TAILSCALE_SERVE=0` disables it) and needs **HTTPS Certificates**
+enabled for the tailnet in the admin console under DNS. If that is off, the step
+says so and leaves nginx serving plain HTTP.
+
+Set `NGINX_DOMAIN` only to override the detected name with a domain of your own.
+
 ## What gets exposed
-
-The firewall runs **last**, deliberately, so every port is known by then.
-
-| Port                         | Reachable from       | Why                                     |
-|------------------------------|----------------------|-----------------------------------------|
-| SSH (detected, usually 22)   | anywhere, rate-limited | `ufw limit` blunts brute-force attempts |
-| 80/tcp                       | anywhere             | ACME HTTP-01 validation, HTTP→HTTPS redirect |
-| 443/tcp                      | anywhere             | the app, once TLS is issued             |
-| 8000 backend, 3000 frontend  | **`tailscale0` only** | nginx already fronts them; no reason to publish them |
-| 41641/udp                    | anywhere             | Tailscale WireGuard                     |
-
-PostgreSQL and Redis bind to `127.0.0.1` and are never opened. Redis also gets a
-generated password — that stops a local process, or an SSRF bug in the app, from
-talking to it unauthenticated.
 
 ### Moving SSH behind the VPN
 
@@ -313,9 +259,8 @@ INSTALL_UV=0 /opt/agentoo/install.sh
 # unattended tailnet join (create a reusable auth key in the Tailscale admin)
 TAILSCALE_AUTHKEY=tskey-auth-... /opt/agentoo/install.sh --only tailscale
 
-# TLS, once DNS already points at this host
-NGINX_DOMAIN=ai.example.com NGINX_ENABLE_TLS=1 NGINX_TLS_EMAIL=me@example.com \
-  /opt/agentoo/install.sh --only nginx
+# override the auto-detected tailnet server_name
+NGINX_DOMAIN=ai.example.com /opt/agentoo/install.sh --only nginx
 
 # non-standard SSH port, if detection ever gets it wrong
 SSH_PORT=2222 /opt/agentoo/install.sh --only ufw
@@ -328,7 +273,7 @@ Adding a package means appending to `PKGS_UTILS` in that file — nothing else.
 1. Write `scripts/NN-thing.sh`, sourcing `lib/common.sh` and `lib/config.sh`.
 2. Add one line to the `STEPS` array in `install.sh`.
 
-Numbers leave gaps on purpose: `66` app setup (venv, `bun install`), `68`
+Numbers leave gaps on purpose: `68` app setup (venv, `bun install`), `72`
 systemd units for the backend and frontend.
 
 ## Notes

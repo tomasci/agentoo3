@@ -34,8 +34,8 @@ STEPS=(
   "claude:55-install-claude-code.sh:Claude Code CLI"
   "postgres:60-install-postgres.sh:PostgreSQL + role/database (+ pgvector)"
   "redis:62-install-redis.sh:Redis, localhost-only, password-protected"
-  "nginx:64-install-nginx.sh:nginx reverse proxy (+ optional TLS)"
-  "tailscale:70-install-tailscale.sh:Tailscale VPN"
+  "tailscale:64-install-tailscale.sh:Tailscale VPN"
+  "nginx:66-install-nginx.sh:nginx reverse proxy on the tailnet"
   "ufw:80-configure-ufw.sh:Firewall rules (runs last)"
   "summary:90-summary.sh:Verify and report"
 )
@@ -73,8 +73,7 @@ ${C_BOLD}Environment overrides${C_RESET} (see scripts/lib/config.sh):
   INSTALL_UV=0            Skip the uv install
   CLAUDE_CODE_CHANNEL=latest  Track every Claude Code release
   TAILSCALE_AUTHKEY=...   Join the tailnet unattended
-  NGINX_DOMAIN=x.com      server_name for the site
-  NGINX_ENABLE_TLS=1      Issue a Let's Encrypt cert (needs DNS + NGINX_DOMAIN)
+  NGINX_DOMAIN=x.com      Override the auto-detected MagicDNS server_name
   UFW_TAILSCALE_ONLY=1    Move SSH behind the VPN (Tailscale must be up)
 TXT
 }

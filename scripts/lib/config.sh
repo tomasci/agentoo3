@@ -146,15 +146,13 @@ REDIS_MAXMEMORY_POLICY="${REDIS_MAXMEMORY_POLICY:-noeviction}"
 # ----------------------------------------------------------------- nginx ----
 
 NGINX_DOMAIN_EXPLICIT="${NGINX_DOMAIN+1}"   # set by the operator this run?
-NGINX_DOMAIN="${NGINX_DOMAIN:-}"               # empty -> catch-all server_name _
+# Empty -> auto-detected from Tailscale (MagicDNS name + tailnet IPs) at render
+# time. Set this only to override with a domain of your own.
+NGINX_DOMAIN="${NGINX_DOMAIN:-}"
 NGINX_SITE_NAME="${NGINX_SITE_NAME:-$APP_NAME}"
 NGINX_CLIENT_MAX_BODY_SIZE="${NGINX_CLIENT_MAX_BODY_SIZE:-50m}"
 # Long timeouts: model responses routinely outlive nginx's 60s default.
 NGINX_PROXY_READ_TIMEOUT="${NGINX_PROXY_READ_TIMEOUT:-300s}"
-NGINX_ENABLE_TLS_EXPLICIT="${NGINX_ENABLE_TLS+1}"   # set by the operator this run?
-NGINX_ENABLE_TLS="${NGINX_ENABLE_TLS:-0}"      # needs NGINX_DOMAIN + DNS already pointed here
-NGINX_TLS_EMAIL_EXPLICIT="${NGINX_TLS_EMAIL+1}"   # set by the operator this run?
-NGINX_TLS_EMAIL="${NGINX_TLS_EMAIL:-}"
 
 # ------------------------------------------------------------- tailscale ----
 
@@ -167,6 +165,10 @@ TAILSCALE_SSH="${TAILSCALE_SSH:-0}"
 TAILSCALE_ACCEPT_DNS="${TAILSCALE_ACCEPT_DNS:-false}"
 TAILSCALE_ACCEPT_ROUTES="${TAILSCALE_ACCEPT_ROUTES:-false}"
 TAILSCALE_UP_EXTRA_ARGS="${TAILSCALE_UP_EXTRA_ARGS:-}"
+# `tailscale serve` publishes nginx over HTTPS on the node's MagicDNS name,
+# with a certificate Tailscale provisions and renews. Replaces certbot entirely.
+TAILSCALE_SERVE="${TAILSCALE_SERVE:-1}"
+TAILSCALE_SERVE_PORT="${TAILSCALE_SERVE_PORT:-80}"   # local port to publish (nginx)
 # Tailscale publishes per-codename apt repos; a brand-new Ubuntu may not have one
 # yet, so fall back to the newest LTS. The packages are static binaries.
 TAILSCALE_CODENAME_FALLBACK="${TAILSCALE_CODENAME_FALLBACK:-noble}"
@@ -174,8 +176,9 @@ TAILSCALE_CODENAME_FALLBACK="${TAILSCALE_CODENAME_FALLBACK:-noble}"
 # ------------------------------------------------------------------- ufw ----
 
 SSH_PORT="${SSH_PORT:-}"                       # empty -> detected from sshd
-# Port 80 is included because ACME HTTP-01 validation and the HTTP->HTTPS
-# redirect both need it. Drop it if you terminate TLS elsewhere.
+# Public web ports. Nothing needs these when the system is reached over
+# Tailscale — set UFW_PUBLIC_PORTS="" to close them and serve only on the
+# tailnet. They stay open by default because that was the original brief.
 UFW_PUBLIC_PORTS="${UFW_PUBLIC_PORTS:-80/tcp 443/tcp}"
 UFW_APP_PORTS="${UFW_APP_PORTS:-}"             # extra public ports, e.g. "8080/tcp"
 UFW_ALLOW_TAILSCALE="${UFW_ALLOW_TAILSCALE:-1}"  # allow all inbound on tailscale0
@@ -191,9 +194,10 @@ UFW_LOGGING="${UFW_LOGGING:-low}"
 # 'stable' trails 'latest' by about a week and skips releases with major
 # regressions — the right default for a server that is not babysat.
 CLAUDE_CODE_CHANNEL="${CLAUDE_CODE_CHANNEL:-stable}"          # stable | latest
-# apt: system-wide, signed, upgrades with the rest of the system.
-# native: per-user in ~/.local/bin, self-updating in the background.
-CLAUDE_CODE_INSTALL_METHOD="${CLAUDE_CODE_INSTALL_METHOD:-apt}"
+# native: per-user in ~/.local/bin, and updates itself in the background —
+# which matters, because Claude Code ships often.
+# apt: system-wide and signed, but only moves on a system upgrade.
+CLAUDE_CODE_INSTALL_METHOD="${CLAUDE_CODE_INSTALL_METHOD:-native}"
 CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-}"                # native only, e.g. 2.1.89
 # Anthropic's release signing key, from https://code.claude.com/docs/en/setup.
 # Checked before the keyring is installed.

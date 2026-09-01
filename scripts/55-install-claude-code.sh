@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Claude Code CLI.
 #
-# Installed from Anthropic's signed apt repository rather than the
-# `curl https://claude.ai/install.sh | bash` native installer, because on a
-# server the apt package is system-wide (so a systemd service can exec it),
-# while the native installer is per-user and lands in ~/.local/bin — which
-# would strand the binary in /root when provisioning runs as root.
+# Uses Anthropic's native installer, which updates itself in the background —
+# worth having, because Claude Code ships often.
 #
-# Trade-off: apt installs do not self-update. They upgrade with the rest of the
-# system, so `install.sh --only upgrade` keeps Claude Code current too.
+# The native install is per-user (~/.local/bin/claude), so it runs as APP_USER,
+# not root: provisioning runs as root, and a root-owned install would sit in
+# /root where the account that actually runs the app cannot see it.
+#
+# CLAUDE_CODE_INSTALL_METHOD=apt switches to Anthropic's signed apt repository:
+# system-wide and GPG-verified, but it only moves on a system upgrade.
 #
 # Docs: https://code.claude.com/docs/en/setup
 
@@ -148,9 +149,21 @@ report_auth() {
 
 }
 
-# --- already present? ---------------------------------------------------------
-if have claude; then
-  log_ok "claude $(claude --version 2>/dev/null | head -1) already installed at $(command -v claude)"
+# --- locating the binary ------------------------------------------------------
+# A native install lives in APP_USER's home, which is not on root's PATH, so
+# `have claude` alone would miss it and report a fresh install as a failure.
+app_home="$(getent passwd "$APP_USER" 2>/dev/null | cut -d: -f6 || true)"
+
+claude_path() {
+  if have claude; then command -v claude; return 0; fi
+  if [[ -n "$app_home" && -x "$app_home/.local/bin/claude" ]]; then
+    printf '%s' "$app_home/.local/bin/claude"; return 0
+  fi
+  return 1
+}
+
+if claude_bin="$(claude_path)"; then
+  log_ok "claude $("$claude_bin" --version 2>/dev/null | head -1) already installed at $claude_bin"
   installed_already=1
 else
   installed_already=0
@@ -177,10 +190,20 @@ if (( ! installed_already )); then
   hash -r
 fi
 
-have claude || die "claude is not on PATH after install."
-log_ok "claude $(claude --version 2>/dev/null | head -1)"
+claude_bin="$(claude_path)" || die "claude not found after install (looked on PATH and in $app_home/.local/bin)."
+log_ok "claude $("$claude_bin" --version 2>/dev/null | head -1) at $claude_bin"
+
+# A per-user install is only useful if the things that call it can find it.
+if ! have claude; then
+  log_warn "$claude_bin is not on root's PATH. For '$APP_USER' it is picked up by"
+  log_warn "$app_home/.profile picks it up on login, but a systemd unit does not — set"
+  log_warn "    Environment=PATH=$app_home/.local/bin:/usr/local/bin:/usr/bin:/bin"
+  log_warn "in the unit, or call the absolute path. To put it on everyone's PATH:"
+  log_warn "    sudo ln -sfn $claude_bin /usr/local/bin/claude"
+  log_warn "(that symlink survives auto-updates, which replace the target, not the link)"
+fi
 
 report_auth
 
-log_info "Diagnose the install any time with: claude doctor"
+log_info "Diagnose the install any time with: $claude_bin doctor"
 log_ok "Claude Code ready"

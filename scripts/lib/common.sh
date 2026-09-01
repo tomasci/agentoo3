@@ -297,8 +297,8 @@ env_fix_owner() {
 # Some choices must not evaporate between runs. Without this, a deliberate
 #   UFW_TAILSCALE_ONLY=1 ./install.sh --only ufw
 # would be undone by a later plain `bootstrap.sh | sudo bash`, silently
-# re-opening public SSH. Same for NGINX_DOMAIN: re-running without it would
-# rewrite the site as a catch-all and drop the TLS block certbot added.
+# re-opening public SSH. Same for a hand-set NGINX_DOMAIN, which a later run
+# would otherwise replace with the auto-detected tailnet name.
 #
 # config.sh records "<NAME>_EXPLICIT" before applying its default, so we can
 # tell "the operator asked for this" apart from "this is just the default".
