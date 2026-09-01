@@ -19,6 +19,22 @@ log_step "Frontend"
 [[ -f "$FRONTEND_DIR/package.json" ]] || die "No package.json in $FRONTEND_DIR."
 have bun || die "bun is not installed. Run: $INSTALL_SH --only bun"
 
+# kubb reads the spec the backend step renders. Checked before anything else so
+# a dry run reports it, and so a real run says what is wrong instead of failing
+# later with a wall of "Cannot find module".
+spec="$BACKEND_DIR/openapi.json"
+if [[ ! -f "$spec" ]]; then
+  if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    log_warn "No $spec yet — the backend step renders it, and it runs first."
+  else
+    die "No $spec — the backend step renders it.
+    Run:  $INSTALL_SH --only backend
+    then: $INSTALL_SH --only frontend"
+  fi
+else
+  log_ok "Found $spec"
+fi
+
 require_root
 
 app_home="$(getent passwd "$APP_USER" 2>/dev/null | cut -d: -f6 || true)"
@@ -47,15 +63,6 @@ fi
 log_ok "Dependencies installed"
 
 # --- API client ---------------------------------------------------------------
-# kubb reads the spec the backend step rendered. Without it the build would fail
-# with a wall of "Cannot find module" errors, so say what is actually wrong.
-spec="$BACKEND_DIR/openapi.json"
-if [[ ! -f "$spec" ]]; then
-  die "No $spec — the backend step renders it.
-    Run:  $INSTALL_SH --only backend
-    then: $INSTALL_SH --only frontend"
-fi
-
 log_info "Generating the API client from $spec"
 run_as_app bash -c "cd '$FRONTEND_DIR' && KUBB_DISABLE_TELEMETRY=1 bun run codegen" \
   || die "API client generation failed."
