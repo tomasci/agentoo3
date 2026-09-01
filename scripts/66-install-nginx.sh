@@ -31,14 +31,12 @@ SITE_ENABLED="/etc/nginx/sites-enabled/$NGINX_SITE_NAME"
 
 # --- who are we on the tailnet? ----------------------------------------------
 ts_names=()
+ts_dns=""
 if have tailscale && tailscale status >/dev/null 2>&1; then
-  # DNSName comes back fully qualified with a trailing dot.
-  ts_dns="$(tailscale status --json 2>/dev/null \
-            | jq -r '.Self.DNSName // empty' 2>/dev/null | sed 's/\.$//')"
-  [[ -n "$ts_dns" ]] && ts_names+=("$ts_dns")
-  while read -r ip; do
-    [[ -n "$ip" ]] && ts_names+=("$ip")
-  done < <(tailscale ip 2>/dev/null || true)
+  ts_dns="$(tailscale_dns_name || true)"
+  while read -r endpoint; do
+    [[ -n "$endpoint" ]] && ts_names+=("$endpoint")
+  done < <(tailscale_endpoints)
 fi
 
 if [[ -n "$NGINX_DOMAIN" ]]; then
@@ -187,9 +185,6 @@ if (( ${#ts_names[@]} )); then
     log_info "    https://${ts_dns}/"
   fi
   for n in "${ts_names[@]}"; do
-    case "$n" in
-      *:*) log_info "    http://[$n]/" ;;   # IPv6 needs brackets in a URL
-      *)   log_info "    http://$n/" ;;
-    esac
+    log_info "    $(tailscale_url "$n")"
   done
 fi

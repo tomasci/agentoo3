@@ -228,9 +228,24 @@ nginx runs after Tailscale so it can pick up the node's identity, and the site's
 OK    Detected tailnet identity: agentoo.tailnet-abc.ts.net 100.79.119.5 fd7a:...
 ```
 
-Reach it at `http://<magicdns-name>/` or `http://<tailnet-ip>/`. If Tailscale
-has not joined yet, the site is a catch-all — re-run `--only nginx` afterwards
-and it fixes itself.
+Reach it at `http://<magicdns-name>/` or `http://<tailnet-ip>/`. The installer
+prints both, from the tailscale step, the nginx step, and the final summary:
+
+```
+OK    MagicDNS name: agentoo.tailnet-abc.ts.net
+OK    Reachable on the tailnet at:
+    http://agentoo.tailnet-abc.ts.net/
+    http://100.93.193.37/
+```
+
+If Tailscale has not joined yet, the site is a catch-all — re-run `--only nginx`
+afterwards and it fixes itself. If no MagicDNS name appears, enable MagicDNS in
+the tailnet admin console under DNS.
+
+Plain HTTP is not a downgrade here: the tailnet is WireGuard, so the traffic is
+already encrypted end to end. Do not point a public domain at a `100.x` address
+expecting a CDN to proxy it — that range is CGNAT and unroutable from the
+internet, so Cloudflare and friends physically cannot reach it.
 
 For a browser padlock, `tailscale serve` publishes nginx over HTTPS on the
 MagicDNS name with a certificate Tailscale provisions and renews. It is on by

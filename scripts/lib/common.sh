@@ -370,6 +370,47 @@ managed_block() {
   rm -f "$tmp"
 }
 
+# ------------------------------------------------------------ tailscale -----
+
+# The node's MagicDNS name (host.tailnet-xxxx.ts.net), with the trailing dot
+# Tailscale reports stripped. Non-zero when Tailscale is down or MagicDNS is off.
+tailscale_dns_name() {
+  have tailscale || return 1
+  local json name
+  json="$(tailscale status --json 2>/dev/null)" || return 1
+  [[ -n "$json" ]] || return 1
+  if have jq; then
+    name="$(printf '%s' "$json" | jq -r '.Self.DNSName // empty' 2>/dev/null)"
+  fi
+  # jq is installed by the utils step, but do not depend on it having run.
+  if [[ -z "${name:-}" ]]; then
+    name="$(printf '%s' "$json" | tr ',' '\n' | grep -m1 '"DNSName"' \
+            | sed -n 's/.*"DNSName"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  fi
+  name="${name%.}"
+  [[ -n "$name" ]] || return 1
+  printf '%s\n' "$name"
+}
+
+# Every address this node answers on: MagicDNS name first, then IPs.
+tailscale_endpoints() {
+  local name ip
+  name="$(tailscale_dns_name || true)"
+  [[ -n "$name" ]] && printf '%s\n' "$name"
+  while read -r ip; do
+    [[ -n "$ip" ]] && printf '%s\n' "$ip"
+  done < <(tailscale ip 2>/dev/null || true)
+}
+
+# Format one endpoint as a URL, bracketing IPv6 as the syntax requires.
+tailscale_url() {
+  local host="$1" scheme="${2:-http}"
+  case "$host" in
+    *:*) printf '%s://[%s]/\n' "$scheme" "$host" ;;
+    *)   printf '%s://%s/\n' "$scheme" "$host" ;;
+  esac
+}
+
 # ------------------------------------------------------------- services -----
 
 # systemd is absent in most containers; degrade to a warning rather than dying,

@@ -109,8 +109,21 @@ if have ufw; then
 fi
 
 if have tailscale; then
-  if ts_ip="$(tailscale ip -4 2>/dev/null | head -1)" && [[ -n "$ts_ip" ]]; then
-    log_ok "Tailscale IPv4: $ts_ip  ->  http://${ts_ip}/"
+  ts_endpoints=()
+  while read -r endpoint; do
+    [[ -n "$endpoint" ]] && ts_endpoints+=("$endpoint")
+  done < <(tailscale_endpoints)
+
+  if (( ${#ts_endpoints[@]} )); then
+    if ts_name="$(tailscale_dns_name)"; then
+      log_ok "MagicDNS name: $ts_name"
+    else
+      log_warn "No MagicDNS name — enable MagicDNS in the tailnet admin console for a nicer URL."
+    fi
+    log_ok "Reachable on the tailnet at:"
+    for endpoint in "${ts_endpoints[@]}"; do
+      printf '    %s\n' "$(tailscale_url "$endpoint")" >&2
+    done
   else
     log_warn "Tailscale is installed but this node has not joined a tailnet."
     log_warn "Run: sudo tailscale up"

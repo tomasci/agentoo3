@@ -86,8 +86,28 @@ fi
 have tailscale || die "tailscale is not on PATH after install."
 svc_enable_now tailscaled
 
+# --- where this node can be reached ------------------------------------------
+report_endpoints() {
+  local name ip
+  if name="$(tailscale_dns_name)"; then
+    log_ok "MagicDNS name: $name"
+  elif tailscale status >/dev/null 2>&1; then
+    log_warn "No MagicDNS name. Enable MagicDNS in the admin console (DNS) for a"
+    log_warn "readable hostname instead of a bare 100.x address."
+  fi
+  ip="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+  [[ -n "$ip" ]] && log_ok "Tailscale IPv4: $ip"
+
+  if [[ -n "${name:-}${ip:-}" ]]; then
+    log_info "Once the services are running, reach the app privately at:"
+    [[ -n "${name:-}" ]] && log_info "    $(tailscale_url "$name")"
+    [[ -n "${ip:-}" ]]   && log_info "    $(tailscale_url "$ip")"
+  fi
+}
+
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
   log_info "[dry-run] would run 'tailscale up'"
+  report_endpoints
   exit 0
 fi
 
@@ -129,9 +149,6 @@ else
   fi
 fi
 
-if ts_ip="$(tailscale ip -4 2>/dev/null | head -1)" && [[ -n "$ts_ip" ]]; then
-  log_ok "Tailscale IPv4: $ts_ip"
-  log_info "Reach the app privately at http://${ts_ip}/ once the services are running."
-fi
+report_endpoints
 
 log_ok "Tailscale step complete"
