@@ -131,3 +131,44 @@ test('the plugin namespace is dropped from an agent name', () => {
   if (task?.kind !== 'task') throw new Error('expected a task node')
   expect(task.agent).toBe('scout')
 })
+
+test('progress pings do not leak beside the orchestrator steps', () => {
+  n = 0
+  // The reported bug: task_progress has no parentToolUseId, so each ping became
+  // a top-level "architect: Bash" row duplicating work already nested below.
+  const nodes = buildTranscript([
+    msg({ type: 'assistant', title: 'orchestrator: delegating' }),
+    msg({ type: 'system', title: 'architect: investigate', payload: {
+      subtype: 'task_started', task_id: 't1', tool_use_id: 'tu1',
+      subagent_type: 'architect', description: 'investigate',
+    } }),
+    msg({ type: 'assistant', parentToolUseId: 'tu1', title: 'architect: reading' }),
+    msg({ type: 'system', title: 'architect: Bash', payload: {
+      subtype: 'task_progress', task_id: 't1', subagent_type: 'architect', last_tool_name: 'Bash',
+    } }),
+    msg({ type: 'system', title: 'architect: Bash', payload: {
+      subtype: 'task_progress', task_id: 't1', subagent_type: 'architect', summary: 'listing files',
+    } }),
+  ])
+
+  expect(nodes.map((x) => x.kind)).toEqual(['event', 'task'])
+  const task = nodes[1]
+  if (task?.kind !== 'task') throw new Error('expected a task node')
+  // The pings become progress on the group, not rows of their own.
+  expect(task.progress).toBe('listing files')
+  expect(task.children.length).toBe(1)
+})
+
+test('a task heading is the description alone, since the badge names the agent', () => {
+  n = 0
+  const nodes = buildTranscript([
+    msg({ type: 'system', title: 'architect: investigate project structure', payload: {
+      subtype: 'task_started', task_id: 't1', tool_use_id: 'tu1',
+      subagent_type: 'architect', description: 'investigate project structure',
+    } }),
+  ])
+  const task = nodes[0]
+  if (task?.kind !== 'task') throw new Error('expected a task node')
+  expect(task.agent).toBe('architect')
+  expect(task.title).toBe('investigate project structure')
+})

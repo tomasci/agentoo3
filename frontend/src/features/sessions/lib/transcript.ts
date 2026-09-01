@@ -24,6 +24,8 @@ export type TranscriptNode =
       /** What the orchestrator actually asked for. The point of the whole tree. */
       prompt: string | null
       status: 'running' | 'completed' | 'failed' | 'killed'
+      /** Latest progress ping, shown while the task is still running. */
+      progress: string | null
       children: TranscriptNode[]
     }
 
@@ -80,14 +82,27 @@ export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
         seq: message.seq,
         taskId: taskId ?? message.id,
         agent: displayAgent(str(payload, 'subagent_type') ?? 'subagent'),
-        title: message.title ?? str(payload, 'description') ?? 'delegated task',
+        // The description alone: the badge beside it already names the agent,
+        // and "ARCHITECT | architect: investigate" says it twice.
+        title: str(payload, 'description') ?? message.title ?? 'delegated task',
         prompt: str(payload, 'prompt') ?? null,
         status: 'running',
+        progress: null,
         children: [],
       }
       listFor(parent).push(group)
       if (toolUseId) groups.set(toolUseId, group)
       if (taskId) byTaskId.set(taskId, group)
+      continue
+    }
+
+    // Progress pings arrive at the top level with no parentToolUseId, so they
+    // would otherwise sit beside the orchestrator's own steps, repeating work
+    // that is already nested inside the group. They belong to their task.
+    if (payload.subtype === 'task_progress') {
+      const taskId = str(payload, 'task_id')
+      const group = taskId ? byTaskId.get(taskId) : undefined
+      if (group) group.progress = str(payload, 'summary') ?? str(payload, 'last_tool_name') ?? null
       continue
     }
 

@@ -43,6 +43,9 @@ function tidy(text: string, max = MAX): string {
   return `${(space > max * 0.6 ? cut.slice(0, space) : cut).trimEnd()}…`
 }
 
+/** The delegation tools. Named `Agent` today, `Task` in older transcripts. */
+const isSpawn = (name: string) => name === 'Agent' || name === 'Task'
+
 /** `Read x3, Grep, Edit` — what a turn did, when it said nothing about it. */
 function describeToolUses(names: string[]): string {
   const counts = new Map<string, number>()
@@ -83,16 +86,13 @@ export function titleFor(message: TranscriptMessage, rawWho: string): string | n
       const agent = displayAgent(started.subagent_type ?? 'task')
       return tidy(`${agent}: ${started.description ?? 'starting'}`)
     }
-    if (message.subtype === 'task_progress') {
-      const progress = message as typeof message & {
-        subagent_type?: string
-        summary?: string
-        last_tool_name?: string
-      }
-      const detail = progress.summary ?? progress.last_tool_name
-      if (!detail) return null
-      return tidy(`${displayAgent(progress.subagent_type ?? who)}: ${detail}`)
-    }
+    // Deliberately no row. A progress ping is emitted at the top level with no
+    // parent_tool_use_id, so titling one puts "architect: Bash" beside the
+    // orchestrator's own steps while the architect's real messages are nested
+    // inside its group — the same work, listed twice, in two places. The SDK
+    // calls these approximate progress for spinners; the transcript renders
+    // them as live progress on the group instead.
+    if (message.subtype === 'task_progress') return null
     if (message.subtype === 'init') return null
   }
 
@@ -114,6 +114,10 @@ export function titleFor(message: TranscriptMessage, rawWho: string): string | n
       return tidy(`${who}: ${sentence}`)
     }
     const tools = blocks.filter((b) => b.type === 'tool_use' && b.name).map((b) => b.name as string)
+    // A turn that only spawns subagents needs no row: each spawn becomes its own
+    // group directly below, holding the prompt and everything it did. A bare
+    // "orchestrator: Agent" above that says strictly less.
+    if (tools.length > 0 && tools.every(isSpawn)) return null
     if (tools.length > 0) return tidy(`${who}: ${describeToolUses(tools)}`)
     const thinking = blocks.some((b) => b.type === 'thinking')
     return thinking ? `${who}: thinking` : null

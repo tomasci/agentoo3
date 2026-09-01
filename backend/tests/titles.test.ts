@@ -17,12 +17,33 @@ test('housekeeping tasks get no row', () => {
     description: 'cache' }), 'orchestrator')).toBeNull()
 })
 
-test('progress prefers the rolling summary, then the last tool', () => {
+test('a progress ping gets no row of its own', () => {
+  // It is emitted at the top level with no parent_tool_use_id, so a row here
+  // lands beside the orchestrator's steps and repeats work already nested in
+  // the subagent's group. The transcript shows these as progress on the group.
   expect(titleFor(m({ type: 'system', subtype: 'task_progress', subagent_type: 'reviewer',
-    summary: 'checking the SSE endpoint' }), 'x')).toBe('reviewer: checking the SSE endpoint')
+    summary: 'checking the SSE endpoint' }), 'x')).toBeNull()
   expect(titleFor(m({ type: 'system', subtype: 'task_progress', subagent_type: 'reviewer',
-    last_tool_name: 'Grep' }), 'x')).toBe('reviewer: Grep')
-  expect(titleFor(m({ type: 'system', subtype: 'task_progress' }), 'x')).toBeNull()
+    last_tool_name: 'Grep' }), 'x')).toBeNull()
+})
+
+test('a turn that only spawns subagents gets no row', () => {
+  // The group below it carries the prompt and the work; "orchestrator: Agent"
+  // adds nothing.
+  expect(titleFor(m({ type: 'assistant', message: { content: [
+    { type: 'tool_use', name: 'Agent' },
+  ] } }), 'orchestrator')).toBeNull()
+  expect(titleFor(m({ type: 'assistant', message: { content: [
+    { type: 'tool_use', name: 'Task' }, { type: 'tool_use', name: 'Task' },
+  ] } }), 'orchestrator')).toBeNull()
+  // But a spawn alongside real work still counts as work.
+  expect(titleFor(m({ type: 'assistant', message: { content: [
+    { type: 'tool_use', name: 'Agent' }, { type: 'tool_use', name: 'Read' },
+  ] } }), 'orchestrator')).toBe('orchestrator: Agent, Read')
+  // And text always wins over tools.
+  expect(titleFor(m({ type: 'assistant', message: { content: [
+    { type: 'text', text: 'Delegating this.' }, { type: 'tool_use', name: 'Agent' },
+  ] } }), 'orchestrator')).toBe('orchestrator: Delegating this.')
 })
 
 test('an assistant turn is titled by its first sentence', () => {

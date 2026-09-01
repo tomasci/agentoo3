@@ -9,6 +9,7 @@ function Collapsible({
   title,
   badge,
   badgeClass,
+  note,
   className,
   defaultOpen = false,
   children,
@@ -16,6 +17,7 @@ function Collapsible({
   title: string
   badge?: string
   badgeClass?: string
+  note?: string | null
   className?: string
   defaultOpen?: boolean
   children: React.ReactNode
@@ -34,6 +36,7 @@ function Collapsible({
         </span>
         {badge && <span className={`${styles.agent} ${badgeClass ?? ''}`}>{badge}</span>}
         <span className={styles.title}>{title}</span>
+        {note && <span className={styles.note}>{note}</span>}
       </button>
       {open && <div className={styles.body}>{children}</div>}
     </div>
@@ -96,6 +99,9 @@ function Node({ node }: { node: TranscriptNode }) {
       title={node.title}
       badge={node.agent}
       badgeClass={badgeClass}
+      // Live progress, but only while it means something: on a finished task the
+      // last ping is just whatever it happened to be doing when it stopped.
+      note={node.status === 'running' ? node.progress : null}
       className={styles.task}
     >
       {/* The instruction the orchestrator wrote. Shown first and in full: it is

@@ -80,6 +80,16 @@
   font-size: 0.875rem;
 }
 
+.note {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: var(--muted-fg);
+}
+
 .body {
   padding: v.$space-md;
   border-top: 1px solid var(--border);
