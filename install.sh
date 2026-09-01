@@ -52,7 +52,7 @@ usage() {
 ${C_BOLD}install.sh${C_RESET} — prepare an Ubuntu server for ${APP_NAME}
 
 ${C_BOLD}Usage:${C_RESET}
-  ./install.sh [options]
+  $INSTALL_SH [options]
 
 ${C_BOLD}Options:${C_RESET}
   -l, --list              List the steps and exit
@@ -166,7 +166,7 @@ for entry in "${STEPS[@]}"; do
   else
     rc=$?
     log_error "Step '$name' ($descr) failed with exit $rc."
-    log_error "Fix the cause, then resume with:  ./install.sh --from $name"
+    log_error "Fix the cause, then resume with:  $INSTALL_SH --from $name"
     log_error "Full log: $LOG_FILE"
     exit "$rc"
   fi

@@ -17,6 +17,21 @@ curl -fsSL https://raw.githubusercontent.com/tomasci/agentoo3/main/bootstrap.sh 
 
 It installs git, clones the repo to `/opt/agentoo`, and runs `install.sh`.
 
+**Your shell is not left in that directory.** Everything afterwards takes an
+absolute path — the installer prints these for you, so you can copy them
+straight out of its output:
+
+```
+sudo /opt/agentoo/install.sh --only ufw
+```
+
+Optional, if you would rather type less:
+
+```
+sudo ln -sfn /opt/agentoo/install.sh /usr/local/bin/agentoo
+sudo agentoo --only ufw
+```
+
 The repo URL is baked into `DEFAULT_REPO_URL` at the top of `bootstrap.sh`;
 override it with `--repo` or `REPO_URL` to install from a fork.
 
@@ -84,6 +99,9 @@ its own, because each sources the shared library itself.
 
 ## Usage
 
+From inside the install directory. After a bootstrap install, prefix with
+`/opt/agentoo/` — or `cd /opt/agentoo` first.
+
 ```
 ./install.sh --list             # show the steps
 ./install.sh --dry-run          # print what would happen, change nothing
@@ -118,7 +136,7 @@ talking to it unauthenticated.
 Once Tailscale is confirmed working:
 
 ```
-UFW_TAILSCALE_ONLY=1 ./install.sh --only ufw
+sudo UFW_TAILSCALE_ONLY=1 /opt/agentoo/install.sh --only ufw
 ```
 
 This restricts SSH to `tailscale0`. It **refuses to apply** unless Tailscale is
@@ -134,20 +152,23 @@ rules; inspect with `ufw status numbered` and `ufw delete <n>`.
 `scripts/lib/config.sh` holds every knob, and each one reads from the
 environment first, so nothing needs editing to change a value:
 
+Shown with the absolute path, since after a bootstrap install you will not be
+inside the directory. Drop the prefix if you are.
+
 ```
-NODE_MAJOR=22 ./install.sh --only node
-BUN_VERSION=1.1.38 ./install.sh --only bun
-INSTALL_UV=0 ./install.sh
+NODE_MAJOR=22 /opt/agentoo/install.sh --only node
+BUN_VERSION=1.1.38 /opt/agentoo/install.sh --only bun
+INSTALL_UV=0 /opt/agentoo/install.sh
 
 # unattended tailnet join (create a reusable auth key in the Tailscale admin)
-TAILSCALE_AUTHKEY=tskey-auth-... ./install.sh --only tailscale
+TAILSCALE_AUTHKEY=tskey-auth-... /opt/agentoo/install.sh --only tailscale
 
 # TLS, once DNS already points at this host
 NGINX_DOMAIN=ai.example.com NGINX_ENABLE_TLS=1 NGINX_TLS_EMAIL=me@example.com \
-  ./install.sh --only nginx
+  /opt/agentoo/install.sh --only nginx
 
 # non-standard SSH port, if detection ever gets it wrong
-SSH_PORT=2222 ./install.sh --only ufw
+SSH_PORT=2222 /opt/agentoo/install.sh --only ufw
 ```
 
 Adding a package means appending to `PKGS_UTILS` in that file — nothing else.

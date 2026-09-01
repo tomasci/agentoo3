@@ -77,7 +77,7 @@ if have ufw; then
     log_ok "Firewall active. Open ports:"
     ${_SUDO[@]+"${_SUDO[@]}"} ufw status 2>/dev/null | awk 'NR>3 && NF {printf "    %s\n", $0}' >&2
   else
-    log_warn "ufw is installed but INACTIVE. Run: ./install.sh --only ufw"
+    log_warn "ufw is installed but INACTIVE. Run: $INSTALL_SH --only ufw"
   fi
 fi
 
@@ -108,4 +108,8 @@ if [[ -f /var/run/reboot-required ]]; then
   log_warn "A reboot is required to finish applying updates:  sudo reboot"
 fi
 
+printf '\n' >&2
+log_ok "Installed at: $REPO_ROOT"
+log_info "Re-run any step from anywhere, e.g.:"
+log_info "  sudo $INSTALL_SH --only nginx"
 log_ok "Install complete. Log: $LOG_FILE"

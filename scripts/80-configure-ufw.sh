@@ -93,7 +93,7 @@ if [[ "$UFW_TAILSCALE_ONLY" == "1" ]]; then
   if (( ! tailscale_up )); then
     die "Refusing: Tailscale is not connected, so this would lock you out permanently.
     Bring the node up first ('sudo tailscale up'), then re-run:
-      ./install.sh --only ufw"
+      $INSTALL_SH --only ufw"
   fi
   log_ok "Tailscale is up ($tailscale_ip)"
 
@@ -180,5 +180,5 @@ done
 
 if [[ "$UFW_TAILSCALE_ONLY" != "1" ]]; then
   log_info "SSH is reachable publicly. To move it behind the VPN once Tailscale works:"
-  log_info "  UFW_TAILSCALE_ONLY=1 ./install.sh --only ufw"
+  log_info "  UFW_TAILSCALE_ONLY=1 $INSTALL_SH --only ufw"
 fi

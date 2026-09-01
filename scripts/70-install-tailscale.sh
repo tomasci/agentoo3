@@ -125,7 +125,7 @@ else
     log_warn "    sudo tailscale up --hostname $TAILSCALE_HOSTNAME --accept-dns=$TAILSCALE_ACCEPT_DNS"
     log_warn "Then open the printed URL to authorise the machine."
     log_warn "For unattended installs, create a reusable auth key and pass:"
-    log_warn "    TAILSCALE_AUTHKEY=tskey-auth-... ./install.sh --only tailscale"
+    log_warn "    TAILSCALE_AUTHKEY=tskey-auth-... $INSTALL_SH --only tailscale"
   fi
 fi
 

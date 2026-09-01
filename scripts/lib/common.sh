@@ -18,6 +18,9 @@ SCRIPTS_DIR="$REPO_ROOT/scripts"
 LOG_DIR="${LOG_DIR:-$REPO_ROOT/logs}"
 LOG_FILE="${LOG_FILE:-$LOG_DIR/install.log}"
 STATE_DIR="${STATE_DIR:-$REPO_ROOT/.state}"
+# Absolute, because the operator's shell is rarely inside the install directory
+# — bootstrap.sh clones to /opt/agentoo and they stay in their home dir.
+INSTALL_SH="${INSTALL_SH:-$REPO_ROOT/install.sh}"
 
 mkdir -p "$LOG_DIR" "$STATE_DIR" 2>/dev/null || true
 
