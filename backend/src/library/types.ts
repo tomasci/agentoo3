@@ -12,7 +12,8 @@ export type AgentRole = z.infer<typeof agentRoleSchema>
 // Mirrors the SDK's AgentDefinition where the names overlap, so frontmatter maps
 // straight onto it. `role` and `name` are ours.
 export const agentFrontmatterSchema = z.object({
-  name: z.string().min(1).optional(),
+  // Deliberately no `name`: the filename is the identity. A stray one in a
+  // hand-edited file is ignored rather than allowed to shadow it.
   role: agentRoleSchema.default('subagent'),
   description: z.string().min(1),
   tools: z.array(z.string()).optional(),

@@ -84,8 +84,10 @@ export function AgentEditorPage({ name }: { name?: string }) {
         { onSuccess: () => void navigate({ to: '/library' }), onError },
       )
     } else {
+      // A changed name is a rename: the file moves and every project's symlink
+      // is rebuilt to follow it.
       update.mutate(
-        { path: { name }, body },
+        { path: { name }, body: { ...body, ...(draft.name !== name ? { name: draft.name } : {}) } },
         { onSuccess: () => void navigate({ to: '/library' }), onError },
       )
     }
@@ -110,13 +112,12 @@ export function AgentEditorPage({ name }: { name?: string }) {
               id="agent-name"
               className={styles.input}
               value={draft.name}
-              // The name is the filename; renaming would mean moving the file
-              // and rewriting every project's symlink, so it is fixed once set.
-              disabled={!isNew}
               onChange={(e) => set('name', e.target.value)}
               placeholder="reviewer"
             />
-            {isNew && <span className={styles.hint}>{t('library.agent.nameHint')}</span>}
+            <span className={styles.hint}>
+              {isNew ? t('library.agent.nameHint') : t('library.agent.renameHint')}
+            </span>
           </div>
 
           <div className={styles.field}>

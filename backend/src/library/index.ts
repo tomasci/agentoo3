@@ -66,8 +66,11 @@ export async function listAgents(): Promise<LibraryAgent[]> {
       const fm = agentFrontmatterSchema.parse(data)
       agents.push({
         ...fm,
-        // Frontmatter `name` wins; otherwise the filename is the name.
-        name: fm.name ?? basename(entry.name, '.md'),
+        // The filename is the identity, always. It is what agentPath(), the
+        // per-project symlink and the plugin loader all key on, so letting a
+        // frontmatter `name` override it would let the two disagree — and then
+        // agentPath(reportedName) points at a file that is not there.
+        name: basename(entry.name, '.md'),
         prompt: content.trim(),
         path,
       })
@@ -95,12 +98,15 @@ export async function listSkills(): Promise<LibrarySkill[]> {
     if (!(await exists(skillFile))) continue
     try {
       const { data, content } = matter(await readFile(skillFile, 'utf8'))
+      // Same rule as agents: the directory name is the identity. SKILL.md also
+      // carries a `name` because Claude Code's skill format expects one, but it
+      // is written from the directory name, never read back as identity.
       const siblings = (await readdir(path, { withFileTypes: true }))
         .filter((f) => f.isFile() && f.name !== 'SKILL.md')
         .map((f) => f.name)
         .sort()
       skills.push({
-        name: typeof data.name === 'string' ? data.name : entry.name,
+        name: entry.name,
         description: typeof data.description === 'string' ? data.description : '',
         body: content.trim(),
         path,

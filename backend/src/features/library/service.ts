@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/db/client'
@@ -68,11 +68,13 @@ export async function createAgent(input: CreateAgentInput): Promise<AgentDto> {
 
 export async function updateAgent(name: string, input: UpdateAgentInput): Promise<AgentDto> {
   assertName(name)
-  const path = agentPath(name)
-  if (!(await exists(path))) throw notFound('Agent')
-  await writeFile(path, agentToMarkdown(input), 'utf8')
-  logger.info(`Updated agent ${name}`)
-  return getAgentOrThrow(name)
+  if (!(await exists(agentPath(name)))) throw notFound('Agent')
+
+  const finalName =
+    input.name && input.name !== name ? await renameItem('agent', name, input.name) : name
+  await writeFile(agentPath(finalName), agentToMarkdown(input), 'utf8')
+  logger.info(`Updated agent ${finalName}`)
+  return getAgentOrThrow(finalName)
 }
 
 export async function deleteAgent(name: string): Promise<void> {
@@ -116,11 +118,18 @@ export async function createSkill(input: CreateSkillInput): Promise<SkillDto> {
 
 export async function updateSkill(name: string, input: UpdateSkillInput): Promise<SkillDto> {
   assertName(name)
-  const file = join(skillDir(name), 'SKILL.md')
-  if (!(await exists(file))) throw notFound('Skill')
-  await writeFile(file, skillToMarkdown(name, input.description, input.body), 'utf8')
-  logger.info(`Updated skill ${name}`)
-  return getSkillOrThrow(name)
+  if (!(await exists(join(skillDir(name), 'SKILL.md')))) throw notFound('Skill')
+
+  const finalName =
+    input.name && input.name !== name ? await renameItem('skill', name, input.name) : name
+  await writeFile(
+    join(skillDir(finalName), 'SKILL.md'),
+    // The name lives in the frontmatter too for skills, so it has to follow.
+    skillToMarkdown(finalName, input.description, input.body),
+    'utf8',
+  )
+  logger.info(`Updated skill ${finalName}`)
+  return getSkillOrThrow(finalName)
 }
 
 export async function deleteSkill(name: string): Promise<void> {
@@ -233,6 +242,46 @@ export async function setProjectLibrary(
 
   logger.info(`Project ${project.slug} library updated`)
   return getProjectLibrary(projectId)
+}
+
+/**
+ * Rename a library item, moving the file and following it everywhere.
+ *
+ * The name is the filename, so a rename is a move — and every project using the
+ * item holds a symlink whose *target is the old absolute path* and whose own
+ * filename is the old name. Both have to be rebuilt, or the rename would leave
+ * a trail of dangling links and the SDK would report a plugin that half-loads.
+ */
+async function renameItem(kind: 'agent' | 'skill', from: string, to: string): Promise<string> {
+  assertName(to)
+
+  const fromPath = kind === 'agent' ? agentPath(from) : skillDir(from)
+  const toPath = kind === 'agent' ? agentPath(to) : skillDir(to)
+
+  const taken = kind === 'agent' ? await exists(toPath) : await exists(join(toPath, 'SKILL.md'))
+  if (taken) throw conflict(`A ${kind} named "${to}" already exists`)
+
+  await rename(fromPath, toPath)
+
+  // Re-point every project that used it, then rename the rows.
+  const users = await db
+    .select({ projectId: projectLibraryItems.projectId, slug: projects.slug })
+    .from(projectLibraryItems)
+    .innerJoin(projects, eq(projects.id, projectLibraryItems.projectId))
+    .where(and(eq(projectLibraryItems.kind, kind), eq(projectLibraryItems.name, from)))
+
+  for (const user of users) {
+    await unlinkItem(user.slug, kind, from)
+    await linkItem(user.slug, kind, to)
+  }
+
+  await db
+    .update(projectLibraryItems)
+    .set({ name: to })
+    .where(and(eq(projectLibraryItems.kind, kind), eq(projectLibraryItems.name, from)))
+
+  logger.info(`Renamed ${kind} ${from} -> ${to}, re-linked in ${users.length} project(s)`)
+  return to
 }
 
 /** Remove an item from every project that used it, symlinks included. */

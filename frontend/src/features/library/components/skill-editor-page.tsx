@@ -59,11 +59,12 @@ export function SkillEditorPage({ name }: { name?: string }) {
               id="skill-name"
               className={styles.input}
               value={draft.name}
-              disabled={!isNew}
               onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
               placeholder="testing"
             />
-            {isNew && <span className={styles.hint}>{t('library.skill.nameHint')}</span>}
+            <span className={styles.hint}>
+              {isNew ? t('library.skill.nameHint') : t('library.skill.renameHint')}
+            </span>
           </div>
         </div>
 

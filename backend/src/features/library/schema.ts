@@ -51,7 +51,12 @@ export const createAgentSchema = z.object({
 })
 export type CreateAgentInput = z.infer<typeof createAgentSchema>
 
-export const updateAgentSchema = z.object(agentBody)
+export const updateAgentSchema = z.object({
+  // Optional: present and different means rename. The file moves and every
+  // project's symlink is rebuilt to follow it.
+  name: z.string().min(1).max(64).optional(),
+  ...agentBody,
+})
 export type UpdateAgentInput = z.infer<typeof updateAgentSchema>
 
 export const skillSchema = z.object({
@@ -76,7 +81,10 @@ export const createSkillSchema = z.object({
 })
 export type CreateSkillInput = z.infer<typeof createSkillSchema>
 
-export const updateSkillSchema = z.object(skillBody)
+export const updateSkillSchema = z.object({
+  name: z.string().min(1).max(64).optional(),
+  ...skillBody,
+})
 export type UpdateSkillInput = z.infer<typeof updateSkillSchema>
 
 // --- per-project assignment ---------------------------------------------------

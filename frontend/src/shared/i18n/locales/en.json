@@ -11,7 +11,8 @@
     "cancel": "Cancel",
     "actions": "Actions",
     "working": "Working…",
-    "save": "Save"
+    "save": "Save",
+    "edit": "Edit"
   },
   "health": {
     "checking": "Checking backend…",
@@ -275,7 +276,8 @@
       "promptHint": "The agent's system prompt. A subagent starts with a fresh context and sees nothing of the parent conversation, so say what it needs to know here.",
       "promptHintOrchestrator": "The agent's system prompt. Anthropic's delegation guidance is appended automatically for orchestrators — you do not need to write it.",
       "deleteTitle": "Delete agent?",
-      "deleteConfirm": "Delete the agent \"{{name}}\"? It is also removed from every project using it."
+      "deleteConfirm": "Delete the agent \"{{name}}\"? It is also removed from every project using it.",
+      "renameHint": "Changing this renames the file and re-points every project using it."
     },
     "skill": {
       "name": "Name",
@@ -288,7 +290,8 @@
       "bundled": "Bundled beside SKILL.md:",
       "deleteTitle": "Delete skill?",
       "deleteConfirm": "Delete the skill \"{{name}}\"? It is also removed from every project using it.",
-      "deleteConfirmWithFiles": "Delete the skill \"{{name}}\"? The whole directory goes, including: {{files}}"
+      "deleteConfirmWithFiles": "Delete the skill \"{{name}}\"? The whole directory goes, including: {{files}}",
+      "renameHint": "Changing this renames the directory and re-points every project using it."
     },
     "assign": {
       "intro": "Pick the agents and skills this project should use. They are symlinked beside the repository, never into it, so your working tree stays clean.",
@@ -297,6 +300,13 @@
       "saved": "Saved",
       "failed": "Could not save the selection",
       "hint": "Changes apply to the next session; a running one keeps what it started with."
+    },
+    "actionsFor": "Actions for {{name}}",
+    "delete": {
+      "agentTitle": "Delete agent?",
+      "agentConfirm": "\"{{name}}\" will be deleted, and unlinked from {{count}} project(s) using it. This cannot be undone.",
+      "skillTitle": "Delete skill?",
+      "skillConfirm": "\"{{name}}\" and its {{files}} bundled file(s) will be deleted, and unlinked from {{count}} project(s) using it. This cannot be undone."
     }
   }
 }
