@@ -207,3 +207,8 @@ CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-}"                # native only, e.g
 # Checked before the keyring is installed.
 CLAUDE_CODE_GPG_FINGERPRINT="${CLAUDE_CODE_GPG_FINGERPRINT:-31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE}"
 CLAUDE_CODE_MIN_RAM_MB="${CLAUDE_CODE_MIN_RAM_MB:-4096}"
+# A native install lands in the user's home, which is not on the PATH of cron,
+# systemd, or a non-login shell. /usr/local/bin is on all of them, and linking
+# the launcher (rather than the versioned binary) survives auto-updates.
+CLAUDE_CODE_SYMLINK="${CLAUDE_CODE_SYMLINK:-1}"
+CLAUDE_CODE_SYMLINK_PATH="${CLAUDE_CODE_SYMLINK_PATH:-/usr/local/bin/claude}"

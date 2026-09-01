@@ -104,10 +104,6 @@ install_claude_native() {
   local rc=$?
   rm -f "$tmp"
 
-  if (( rc == 0 )); then
-    log_warn "Installed per-user at ${home}/.local/bin/claude — NOT system-wide."
-    log_warn "systemd units must set PATH or call the absolute path."
-  fi
   return $rc
 }
 
@@ -193,14 +189,42 @@ fi
 claude_bin="$(claude_path)" || die "claude not found after install (looked on PATH and in $app_home/.local/bin)."
 log_ok "claude $("$claude_bin" --version 2>/dev/null | head -1) at $claude_bin"
 
-# A per-user install is only useful if the things that call it can find it.
-if ! have claude; then
-  log_warn "$claude_bin is not on root's PATH. For '$APP_USER' it is picked up by"
-  log_warn "$app_home/.profile picks it up on login, but a systemd unit does not — set"
+# --- make it reachable --------------------------------------------------------
+# The native installer puts the launcher in the user's home. That is fine for an
+# interactive login shell, but cron, systemd and any non-login shell have their
+# own PATH and will not find it.
+if [[ "$CLAUDE_CODE_INSTALL_METHOD" == "native" && "$CLAUDE_CODE_SYMLINK" == "1" ]]; then
+  # Link the launcher, not the versioned binary: auto-updates replace what the
+  # launcher points to, so this link keeps working.
+  as_root ln -sfn "$claude_bin" "$CLAUDE_CODE_SYMLINK_PATH"
+  log_ok "Linked $CLAUDE_CODE_SYMLINK_PATH -> $claude_bin"
+  hash -r
+
+  home_mode="$(stat -c '%a' "$app_home" 2>/dev/null || true)"
+  case "$home_mode" in
+    700|750)
+      log_info "$app_home is mode $home_mode, so only $APP_USER and root can follow that link."
+      log_info "A service running as some other user would need its own install."
+      ;;
+  esac
+
+  # And for interactive shells, which read the profile rather than /usr/local/bin
+  # first — this is the line the Claude installer itself suggests.
+  rc_file="$app_home/.bashrc"
+  if [[ -f "$rc_file" ]] && ! grep -q '\.local/bin' "$rc_file" 2>/dev/null; then
+    # $HOME must stay literal — it is evaluated when the shell starts, not now.
+    # shellcheck disable=SC2016
+    printf '\n# Added by the %s installer — Claude Code installs here\nexport PATH="$HOME/.local/bin:$PATH"\n' \
+      "$APP_NAME" | as_user "$APP_USER" tee -a "$rc_file" >/dev/null
+    log_ok "Added ~/.local/bin to PATH in $rc_file"
+  fi
+fi
+
+if have claude; then
+  log_ok "'claude' resolves on PATH: $(command -v claude)"
+else
+  log_warn "'claude' is not on PATH — call it as $claude_bin, or in a systemd unit set"
   log_warn "    Environment=PATH=$app_home/.local/bin:/usr/local/bin:/usr/bin:/bin"
-  log_warn "in the unit, or call the absolute path. To put it on everyone's PATH:"
-  log_warn "    sudo ln -sfn $claude_bin /usr/local/bin/claude"
-  log_warn "(that symlink survives auto-updates, which replace the target, not the link)"
 fi
 
 report_auth

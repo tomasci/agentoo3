@@ -15,16 +15,41 @@ missing_count=0
 # "git version 2.53.0", and curl's single enormous line), so pull out the first
 # version-shaped token rather than trying to parse each one.
 short_version() {
-  "$1" --version 2>&1 | head -1 \
-    | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true
+  local bin="$1" flag out
+  # nginx has no --version (it wants -v), and prints to stderr. Try each until
+  # one yields something version-shaped.
+  for flag in --version -v -V; do
+    out="$("$bin" "$flag" 2>&1 | head -1 \
+           | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true)"
+    [[ -n "$out" ]] && { printf '%s' "$out"; return 0; }
+  done
+  return 0
+}
+
+# A per-user native install is not on root's PATH; look where it actually lives
+# before calling it missing.
+extra_locations() {
+  local bin="$1" home
+  home="$(getent passwd "$APP_USER" 2>/dev/null | cut -d: -f6 || true)"
+  [[ -n "$home" ]] && printf '%s\n' "$home/.local/bin/$bin"
+  printf '%s\n' "/usr/local/bin/$bin" "/root/.local/bin/$bin"
+}
+
+resolve_bin() {
+  local bin="$1" p
+  if have "$bin"; then command -v "$bin"; return 0; fi
+  while read -r p; do
+    [[ -n "$p" && -x "$p" ]] && { printf '%s' "$p"; return 0; }
+  done < <(extra_locations "$bin")
+  return 1
 }
 
 report() {
   local label="$1" bin="$2" ver
-  if have "$bin"; then
+  if bin="$(resolve_bin "$bin")"; then
     ver="$(short_version "$bin")"
     printf '  %s%-10s%s %-10s %s\n' \
-      "$C_GRN" "$label" "$C_RESET" "${ver:-?}" "$(command -v "$bin")" >&2
+      "$C_GRN" "$label" "$C_RESET" "${ver:-?}" "$bin" >&2
   else
     printf '  %s%-10s%s %s\n' "$C_RED" "$label" "$C_RESET" "missing" >&2
     missing_count=$(( missing_count + 1 ))

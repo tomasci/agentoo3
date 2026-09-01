@@ -125,12 +125,14 @@ alternative's tidiness.
 The native install is per-user (`~/.local/bin/claude`), so the step runs it as
 the deploy user rather than root — provisioning runs as root, and a root-owned
 install would sit in `/root` where the account running the app cannot see it.
-If a systemd unit needs it, either set `Environment=PATH=...` in the unit or
-symlink it once (the link survives auto-updates, which replace the target):
+Because a home directory is on nobody's PATH but its owner's login shell, the
+step also symlinks the launcher into `/usr/local/bin` — which *is* on systemd's
+default PATH — and adds `~/.local/bin` to the user's `.bashrc`. The link points
+at the launcher rather than the versioned binary, so auto-updates keep working.
+`CLAUDE_CODE_SYMLINK=0` disables it.
 
-```
-sudo ln -sfn /home/<user>/.local/bin/claude /usr/local/bin/claude
-```
+Note that installing as `root` puts the binary under `/root`, which is mode
+`0700` — reachable by root, but not by a service running as another user.
 
 ```
 CLAUDE_CODE_CHANNEL=latest ...        # every release, instead of ~1-week-old stable
@@ -262,8 +264,10 @@ tailnet, and the next run closes it.
 Before cutting a session that arrived over a public address, the step warns and
 asks. `--yes` accepts the disconnect; `UFW_TAILSCALE_ONLY=0` keeps SSH public.
 
-Rules are additive. Widening `UFW_PUBLIC_PORTS` later does not delete existing
-rules; inspect with `ufw status numbered` and `ufw delete <n>`.
+Changing `UFW_PUBLIC_PORTS` is reconciled, not just added to: a port dropped
+from the list is actually closed on the next run. Only rules the installer
+created (tagged with its own comment) are ever removed, so anything you added by
+hand with `ufw allow` survives untouched.
 
 ## Configuration
 

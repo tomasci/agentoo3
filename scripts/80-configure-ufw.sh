@@ -171,6 +171,33 @@ for spec in $UFW_APP_PORTS; do
   as_root ufw allow "$spec" comment "$APP_NAME app"
 done
 
+# Rules are additive, so narrowing UFW_PUBLIC_PORTS would otherwise leave the
+# old ones in place — emptying it has to actually close the ports. Only rules
+# carrying our own comment are considered, so anything added by hand survives.
+ufw_prune_managed() {
+  local wanted=" ${UFW_PUBLIC_PORTS} ${UFW_APP_PORTS} "
+  local -a doomed=()
+  local line num spec entry
+
+  while IFS= read -r line; do
+    [[ "$line" == *"# $APP_NAME public"* || "$line" == *"# $APP_NAME app"* ]] || continue
+    [[ "$line" =~ ^\[[[:space:]]*([0-9]+)\][[:space:]]+([^[:space:]]+) ]] || continue
+    num="${BASH_REMATCH[1]}"
+    spec="${BASH_REMATCH[2]}"
+    [[ "$wanted" == *" $spec "* ]] || doomed+=("$num:$spec")
+  done < <(${_SUDO[@]+"${_SUDO[@]}"} ufw status numbered 2>/dev/null || true)
+
+  (( ${#doomed[@]} )) || return 0
+
+  # Highest number first: deleting a rule renumbers every rule after it.
+  while IFS= read -r entry; do
+    num="${entry%%:*}"; spec="${entry#*:}"
+    log_info "Closing public $spec (no longer requested)"
+    as_root ufw --force delete "$num"
+  done < <(printf '%s\n' "${doomed[@]}" | sort -t: -k1,1nr)
+}
+ufw_prune_managed
+
 # Everything over the VPN. This is what makes the backend and frontend ports
 # reachable for administration without exposing them to the internet.
 if [[ "$UFW_ALLOW_TAILSCALE" == "1" ]]; then
