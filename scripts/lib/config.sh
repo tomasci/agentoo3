@@ -181,3 +181,17 @@ UFW_ALLOW_TAILSCALE="${UFW_ALLOW_TAILSCALE:-1}"  # allow all inbound on tailscal
 UFW_TAILSCALE_ONLY="${UFW_TAILSCALE_ONLY:-0}"
 UFW_LIMIT_SSH="${UFW_LIMIT_SSH:-1}"            # rate-limit SSH against brute force
 UFW_LOGGING="${UFW_LOGGING:-low}"
+
+# ------------------------------------------------------------ claude code ---
+
+# 'stable' trails 'latest' by about a week and skips releases with major
+# regressions — the right default for a server that is not babysat.
+CLAUDE_CODE_CHANNEL="${CLAUDE_CODE_CHANNEL:-stable}"          # stable | latest
+# apt: system-wide, signed, upgrades with the rest of the system.
+# native: per-user in ~/.local/bin, self-updating in the background.
+CLAUDE_CODE_INSTALL_METHOD="${CLAUDE_CODE_INSTALL_METHOD:-apt}"
+CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-}"                # native only, e.g. 2.1.89
+# Anthropic's release signing key, from https://code.claude.com/docs/en/setup.
+# Checked before the keyring is installed.
+CLAUDE_CODE_GPG_FINGERPRINT="${CLAUDE_CODE_GPG_FINGERPRINT:-31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE}"
+CLAUDE_CODE_MIN_RAM_MB="${CLAUDE_CODE_MIN_RAM_MB:-4096}"

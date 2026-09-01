@@ -31,6 +31,7 @@ STEPS=(
   "python:30-install-python.sh:Python 3 + venv + uv"
   "node:40-install-node.sh:Node.js LTS + npm"
   "bun:50-install-bun.sh:Bun (latest stable)"
+  "claude:55-install-claude-code.sh:Claude Code CLI"
   "postgres:60-install-postgres.sh:PostgreSQL + role/database (+ pgvector)"
   "redis:62-install-redis.sh:Redis, localhost-only, password-protected"
   "nginx:64-install-nginx.sh:nginx reverse proxy (+ optional TLS)"
@@ -70,6 +71,7 @@ ${C_BOLD}Environment overrides${C_RESET} (see scripts/lib/config.sh):
   NODE_MAJOR=22           Pin the Node major version
   BUN_VERSION=1.1.38      Pin Bun instead of tracking latest
   INSTALL_UV=0            Skip the uv install
+  CLAUDE_CODE_CHANNEL=latest  Track every Claude Code release
   TAILSCALE_AUTHKEY=...   Join the tailnet unattended
   NGINX_DOMAIN=x.com      server_name for the site
   NGINX_ENABLE_TLS=1      Issue a Let's Encrypt cert (needs DNS + NGINX_DOMAIN)

@@ -80,6 +80,7 @@ scripts/
   30-install-python.sh  python3 + venv + uv
   40-install-node.sh    Node.js LTS + npm
   50-install-bun.sh     Bun (latest stable)
+  55-install-claude-code.sh  Claude Code CLI (signed apt repo)
   60-install-postgres.sh  PostgreSQL + role + database + pgvector
   62-install-redis.sh   Redis, localhost-only, password-protected
   64-install-nginx.sh   nginx reverse proxy (+ optional Let's Encrypt)
@@ -114,6 +115,40 @@ From inside the install directory. After a bootstrap install, prefix with
 
 If a step fails the script stops, names the step, and prints the exact command
 to resume with. Full transcript in `logs/install.log`.
+
+## Claude Code
+
+Installed from Anthropic's **signed apt repository**, not the
+`curl https://claude.ai/install.sh | bash` native installer. On a server the
+apt package is system-wide, so a systemd unit can exec `claude`; the native
+installer is per-user and would strand the binary in `/root` when provisioning
+runs as root. The signing key fingerprint is verified against
+`31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE` before the repo is trusted — a
+truncated or wrong download is refused rather than silently becoming a package
+source.
+
+Trade-off: apt installs do not self-update the way native installs do. They
+upgrade with everything else, so `install.sh --only upgrade` keeps Claude Code
+current.
+
+```
+CLAUDE_CODE_CHANNEL=latest ...        # every release, instead of ~1-week-old stable
+CLAUDE_CODE_INSTALL_METHOD=native ... # per-user ~/.local/bin, self-updating
+CLAUDE_CODE_VERSION=2.1.89 ...        # pin (native method only)
+```
+
+**Authentication.** Claude Code needs a Pro, Max, Team, Enterprise, or Console
+account. Browser login is impractical on a headless box, so put a key in `.env`:
+
+```
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> /opt/agentoo/.env
+```
+
+Claude Code prompts once to approve the key instead of opening a browser.
+Interactive login over SSH also works — run `claude`. Diagnose with
+`claude doctor`.
+
+Claude Code asks for 4 GB RAM; the step warns below that but does not fail.
 
 ## What gets exposed
 

@@ -38,6 +38,7 @@ report uv       uv
 report node     node
 report npm      npm
 report bun      bun
+report claude   claude
 report git      git
 report curl     curl
 report wget     wget
