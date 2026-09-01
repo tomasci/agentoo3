@@ -47,6 +47,29 @@ export function checkComment(comment: string): { ok: boolean; reason?: string } 
   return { ok: true }
 }
 
+/**
+ * Host for a connectivity test.
+ *
+ * The value reaches ssh's argv, and ssh parses anything starting with `-` as an
+ * option — `-oProxyCommand=<cmd>` runs that command through a shell. A single
+ * option-shaped token cannot exploit this on its own, because ssh needs a
+ * destination as well and prints usage without one, but that is a property of
+ * the current argv layout rather than a guarantee. Validating here and passing
+ * `--` below means neither has to hold.
+ */
+export function checkHost(host: string): { ok: boolean; reason?: string } {
+  if (host.length === 0) return { ok: false, reason: 'Host is empty' }
+  if (host.length > 255) return { ok: false, reason: 'Host is too long' }
+  if (hasControlChars(host)) return { ok: false, reason: 'Host contains control characters' }
+  if (host.startsWith('-')) return { ok: false, reason: 'Host may not start with "-"' }
+  // Optional user@, then a hostname. No ports: `ssh -T` takes a port with -p,
+  // not host:port, so accepting one here would only mislead.
+  if (!/^([A-Za-z0-9._-]+@)?[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(host)) {
+    return { ok: false, reason: 'Host must look like github.com or git@github.com' }
+  }
+  return { ok: true }
+}
+
 export const privateKeyPath = (name: string) => join(SSH_KEYS_DIR, name)
 export const publicKeyPath = (name: string) => `${join(SSH_KEYS_DIR, name)}.pub`
 
@@ -174,8 +197,13 @@ export interface KeyTestResult {
  * the exit code says nothing useful — the greeting on stderr is the signal.
  */
 export async function testKey(keyPath: string, host: string): Promise<KeyTestResult> {
+  const check = checkHost(host)
+  if (!check.ok) return { ok: false, message: check.reason ?? 'Invalid host' }
+
   const target = host.includes('@') ? host : `git@${host}`
-  const result = await run(['ssh', '-T', ...sshOptionsFor(keyPath), target])
+  // `--` stops option parsing, so even a host that slipped past validation is
+  // read as a destination rather than a flag. Verified: OpenSSH honours it.
+  const result = await run(['ssh', '-T', ...sshOptionsFor(keyPath), '--', target])
   const output = `${result.stderr}\n${result.stdout}`.trim()
 
   if (/successfully authenticated|Welcome to GitLab|logged in as/i.test(output)) {

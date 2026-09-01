@@ -31,10 +31,15 @@ export const createSshKeySchema = z.object({
 export type CreateSshKeyInput = z.infer<typeof createSshKeySchema>
 
 export const testSshKeySchema = z.object({
+  // The value reaches ssh's argv, so it is shape-checked here as well as in the
+  // service — a 400 naming the rule beats an ssh usage dump.
   host: z
     .string()
     .min(1)
     .max(255)
+    .regex(/^([A-Za-z0-9._-]+@)?[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$/, {
+      message: 'Host must look like github.com or git@github.com',
+    })
     .default('github.com')
     .openapi({ description: 'Host to try, e.g. github.com or gitlab.com' }),
 })
