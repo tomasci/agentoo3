@@ -1,6 +1,8 @@
+import { useAtom } from 'jotai'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSshKeys } from '@/features/ssh-keys'
+import { routeAtom } from '@/shared/store/ui'
 import { Button } from '@/shared/ui'
 import {
   type Project,
@@ -20,6 +22,7 @@ export function ProjectCard({ project }: { project: Project }) {
   const update = useUpdateProject()
   const retry = useRetryProject()
   const { data: sshKeys } = useSshKeys()
+  const [, setRoute] = useAtom(routeAtom)
   const [keyId, setKeyId] = useState(project.sshKeyId ?? '')
   const [keyError, setKeyError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -87,6 +90,14 @@ export function ProjectCard({ project }: { project: Project }) {
         </div>
         <div className={styles.right}>
           <ProjectStatusBadge project={project} />
+          {/* Only a ready project has a checkout to run a session against. */}
+          <Button
+            type="button"
+            disabled={project.status !== 'ready'}
+            onClick={() => setRoute({ name: 'project', projectId: project.id })}
+          >
+            {t('projects.open')}
+          </Button>
           <Button type="button" onClick={onDelete} disabled={remove.isPending}>
             {t('common.delete')}
           </Button>

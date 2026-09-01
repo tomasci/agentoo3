@@ -138,6 +138,28 @@ judging the target, and refuses system roots (`/`, `/etc`, `/usr`, `/proc`, ...)
 let any page read this API's responses and drive its endpoints, since no
 credential gates them.
 
+## Sessions
+
+A session is a unit of work on a project, and each gets **its own git worktree
+on branch `agentoo/s-<id>`**. That is what lets two sessions run against the same
+project at once without fighting over the working tree.
+
+The worktree is attempted whenever the project is a git repository, *including*
+one with no commits: git 2.48+ infers `--orphan` there and produces a perfectly
+usable checkout, so refusing on an unborn HEAD would deny isolation to a new
+project for no reason. Older git does fail that case, which is why the result is
+checked rather than assumed. The fallback is to share the project checkout,
+reported as `isolated: false`, because it changes whether concurrent sessions are
+safe and should not be hidden.
+
+Deleting a session removes its worktree but **keeps the branch**: it holds
+whatever the session did, and deleting a session should not silently discard
+work.
+
+**Not yet implemented:** nothing runs in a session. The Agent SDK loop, message
+persistence and SSE streaming are the next piece; the schema and the endpoints
+that reserve a worktree are what exist today.
+
 ## SSH keys
 
 Generated as ed25519 **with no passphrase**, and there is no ssh-agent. Both are

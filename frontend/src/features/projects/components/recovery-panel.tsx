@@ -2,7 +2,7 @@ import { useAtom } from 'jotai'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSshKeys } from '@/features/ssh-keys'
-import { pageAtom } from '@/shared/store/ui'
+import { routeAtom } from '@/shared/store/ui'
 import { Button, CopyButton } from '@/shared/ui'
 import { type Project, useRetryProject, useUpdateProject } from '../hooks/use-projects'
 import { apiErrorMessage } from '../lib/api-error'
@@ -20,7 +20,7 @@ import styles from './recovery-panel.module.scss'
  */
 export function RecoveryPanel({ project }: { project: Project }) {
   const { t } = useTranslation()
-  const [, setPage] = useAtom(pageAtom)
+  const [, setRoute] = useAtom(routeAtom)
   const { data: sshKeys } = useSshKeys()
   const retry = useRetryProject()
   const update = useUpdateProject()
@@ -81,7 +81,7 @@ export function RecoveryPanel({ project }: { project: Project }) {
 
             {keys.length === 0 ? (
               <div className={styles.row}>
-                <Button type="button" onClick={() => setPage('ssh-keys')}>
+                <Button type="button" onClick={() => setRoute({ name: 'ssh-keys' })}>
                   {t('projects.recovery.goToKeys')}
                 </Button>
                 <span className={styles.explain}>{t('projects.recovery.noKeysYet')}</span>
@@ -105,7 +105,11 @@ export function RecoveryPanel({ project }: { project: Project }) {
                 <Button type="button" disabled={busy || !selectedKey} onClick={useKeyAndRetry}>
                   {busy ? t('projects.recovery.working') : t('projects.recovery.useKeyAndRetry')}
                 </Button>
-                <button type="button" className={styles.link} onClick={() => setPage('ssh-keys')}>
+                <button
+                  type="button"
+                  className={styles.link}
+                  onClick={() => setRoute({ name: 'ssh-keys' })}
+                >
                   {t('projects.recovery.manageKeys')}
                 </button>
               </div>

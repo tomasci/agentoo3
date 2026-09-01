@@ -3,16 +3,17 @@ import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HealthBadge } from '@/features/health'
 import { ProjectsPage } from '@/features/projects'
+import { ProjectPage } from '@/features/sessions'
 import { SshKeysPage } from '@/features/ssh-keys'
 import { SUPPORTED_LANGUAGES } from '@/shared/i18n'
-import { pageAtom, themeAtom } from '@/shared/store/ui'
+import { routeAtom, themeAtom } from '@/shared/store/ui'
 import { Button } from '@/shared/ui'
 import styles from './app.module.scss'
 
 export function App() {
   const { t, i18n } = useTranslation()
   const [theme, setTheme] = useAtom(themeAtom)
-  const [page, setPage] = useAtom(pageAtom)
+  const [route, setRoute] = useAtom(routeAtom)
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -49,22 +50,27 @@ export function App() {
         <button
           type="button"
           className={styles.navItem}
-          aria-current={page === 'projects' ? 'page' : undefined}
-          onClick={() => setPage('projects')}
+          // A project view is still "projects" as far as the tab is concerned.
+          aria-current={route.name !== 'ssh-keys' ? 'page' : undefined}
+          onClick={() => setRoute({ name: 'projects' })}
         >
           {t('nav.projects')}
         </button>
         <button
           type="button"
           className={styles.navItem}
-          aria-current={page === 'ssh-keys' ? 'page' : undefined}
-          onClick={() => setPage('ssh-keys')}
+          aria-current={route.name === 'ssh-keys' ? 'page' : undefined}
+          onClick={() => setRoute({ name: 'ssh-keys' })}
         >
           {t('nav.sshKeys')}
         </button>
       </nav>
 
-      <main>{page === 'projects' ? <ProjectsPage /> : <SshKeysPage />}</main>
+      <main>
+        {route.name === 'ssh-keys' && <SshKeysPage />}
+        {route.name === 'projects' && <ProjectsPage />}
+        {route.name === 'project' && <ProjectPage projectId={route.projectId} />}
+      </main>
     </div>
   )
 }

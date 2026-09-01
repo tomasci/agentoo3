@@ -93,7 +93,8 @@
     "keySaved": "Saved",
     "keyChangeFailed": "Could not change the key",
     "keyRetryHint": "Changing the key does not re-clone.",
-    "retry": "Retry setup"
+    "retry": "Retry setup",
+    "open": "Open"
   },
   "language": {
     "label": "Language"
@@ -133,6 +134,46 @@
       "copy": "Copy the public key and add it to your git host as a deploy key (GitHub: repo → Settings → Deploy keys).",
       "test": "Press Test to confirm the host accepts it.",
       "use": "Select the key when adding a project with an ssh remote."
+    }
+  },
+  "sessions": {
+    "heading": "Sessions",
+    "backToProjects": "All projects",
+    "empty": "No sessions yet. Create one above — it gets its own git worktree and branch, so it will not collide with anything else running on this project.",
+    "loadFailed": "Could not load sessions",
+    "createFailed": "Could not create the session",
+    "deleteFailed": "Could not delete the session",
+    "deleteConfirm": "Delete this session? Its worktree is removed, but the branch is kept so the work is not lost.",
+    "untitled": "Session {{id}}",
+    "isolated": "own worktree",
+    "shared": "shared checkout",
+    "notImplemented": "Sessions currently reserve a worktree and a branch. Running agents in them, and streaming their output here, is the next piece of work — nothing executes yet.",
+    "status": {
+      "idle": "Idle",
+      "queued": "Queued",
+      "running": "Running",
+      "interrupted": "Interrupted",
+      "completed": "Completed",
+      "failed": "Failed"
+    },
+    "meta": {
+      "workingDir": "Directory",
+      "branch": "Branch",
+      "orchestrator": "Orchestrator"
+    },
+    "form": {
+      "heading": "New session",
+      "title": "Title",
+      "titlePlaceholder": "Refactor the auth module",
+      "orchestrator": "Orchestrator",
+      "orchestratorNone": "None",
+      "orchestratorHint": "The agent that drives this session and delegates to subagents.",
+      "orchestratorEmpty": "No orchestrator agents in the library yet. Add one with role: orchestrator.",
+      "budget": "Spend cap (USD)",
+      "budgetHint": "Optional hard ceiling for the whole session, passed to the SDK. Subagent requests count towards it.",
+      "submit": "Create session",
+      "creating": "Creating…",
+      "notReady": "The project has to finish setup first."
     }
   }
 }

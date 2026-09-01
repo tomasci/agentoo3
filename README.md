@@ -135,6 +135,17 @@ Projects live one-per-directory under `PROJECTS_DIR`, each session on its own gi
 worktree and branch. Details and the private-repo recovery flow:
 `backend/README.md`.
 
+## Sessions
+
+Open a project to manage its sessions. Each session takes its own git worktree
+and branch, so two can run against one project without colliding — a project
+that is not a git repository falls back to a shared checkout, which the UI
+labels rather than hiding.
+
+**Nothing runs in a session yet.** Creating one reserves a worktree, a branch,
+an orchestrator and a spend cap. Driving the Agent SDK in it and streaming the
+output back is the next piece of work.
+
 ## SSH keys
 
 Generate ed25519 deploy keys for private repositories from the UI, copy the
