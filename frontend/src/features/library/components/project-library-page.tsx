@@ -121,7 +121,7 @@ export function ProjectLibraryPage({ projectId }: { projectId: string }) {
       )}
 
       {!empty && (
-        <div className={styles.row}>
+        <div className={styles.controls}>
           <Button type="button" disabled={!dirty || save.isPending} onClick={onSave}>
             {save.isPending ? t('common.working') : t('common.save')}
           </Button>

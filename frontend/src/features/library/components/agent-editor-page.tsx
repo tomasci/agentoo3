@@ -254,7 +254,7 @@ export function AgentEditorPage({ name }: { name?: string }) {
         </span>
       </section>
 
-      <div className={styles.row}>
+      <div className={styles.controls}>
         <Button
           type="button"
           disabled={busy || !draft.name || !draft.description || !draft.prompt}

@@ -1,6 +1,6 @@
 @use '@/styles/variables' as v;
 
-.page { display: grid; gap: v.$space-xl; max-width: 68rem; }
+.page { display: grid; gap: v.$space-xl; }
 
 .section { display: grid; gap: v.$space-md; }
 
@@ -136,7 +136,9 @@
 
 .hint { font-size: 0.75rem; color: var(--muted-fg); line-height: 1.55; }
 .error { color: var(--warn); font-size: 0.8125rem; }
-.row { display: flex; gap: v.$space-sm; align-items: center; flex-wrap: wrap; }
+// Named for what it is. It was `.row`, which collided with the table-row
+// class above and turned every <tr> into a flex container.
+.controls { display: flex; gap: v.$space-sm; align-items: center; flex-wrap: wrap; }
 .back { font-size: 0.8125rem; color: var(--accent); text-decoration: none; justify-self: start; }
 
 .files {
