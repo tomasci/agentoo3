@@ -1,11 +1,11 @@
 import { useAtom } from 'jotai'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { GreetingForm } from '@/features/greeting'
-import { StatusCard } from '@/features/status'
+import { HealthBadge } from '@/features/health'
+import { ProjectsPage } from '@/features/projects'
 import { SUPPORTED_LANGUAGES } from '@/shared/i18n'
 import { themeAtom } from '@/shared/store/ui'
-import { Button } from '@/shared/ui/button'
+import { Button } from '@/shared/ui'
 import styles from './app.module.scss'
 
 export function App() {
@@ -24,6 +24,7 @@ export function App() {
           <p className={styles.subtitle}>{t('app.subtitle')}</p>
         </div>
         <div className={styles.controls}>
+          <HealthBadge />
           <select
             className={styles.select}
             aria-label={t('language.label')}
@@ -42,9 +43,8 @@ export function App() {
         </div>
       </header>
 
-      <main className={styles.grid}>
-        <StatusCard />
-        <GreetingForm />
+      <main>
+        <ProjectsPage />
       </main>
     </div>
   )

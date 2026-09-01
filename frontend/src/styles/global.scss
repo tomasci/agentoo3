@@ -11,6 +11,7 @@
   --accent-fg: #ffffff;
   --ok: #1f9d55;
   --warn: #c2721a;
+  --danger: #c2410c;
 }
 
 :root[data-theme='dark'] {
@@ -24,6 +25,7 @@
   --accent-fg: #0f1013;
   --ok: #3fbf72;
   --warn: #e0a458;
+  --danger: #f0785a;
 }
 
 * { box-sizing: border-box; }

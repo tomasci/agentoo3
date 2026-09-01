@@ -1,0 +1,56 @@
+@use '@/styles/variables' as v;
+
+.panel {
+  margin-top: v.$space-md;
+  padding: v.$space-md;
+  border: 1px solid var(--warn);
+  border-radius: v.$radius-sm;
+  background: color-mix(in srgb, var(--warn) 8%, transparent);
+}
+
+.heading {
+  margin: 0 0 v.$space-sm;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.explain {
+  margin: 0 0 v.$space-sm;
+  font-size: 0.8125rem;
+  color: var(--muted-fg);
+  line-height: 1.55;
+}
+
+.error {
+  margin: 0 0 v.$space-sm;
+  padding: v.$space-sm;
+  border-radius: v.$radius-sm;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 8rem;
+  overflow-y: auto;
+}
+
+.commands {
+  margin: 0 0 v.$space-sm;
+  padding: v.$space-sm;
+  border-radius: v.$radius-sm;
+  background: #0b0c0f;
+  color: #e6e6ec;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  line-height: 1.7;
+  overflow-x: auto;
+
+  code { display: block; white-space: pre; }
+}
+
+.actions {
+  display: flex;
+  gap: v.$space-sm;
+  flex-wrap: wrap;
+}

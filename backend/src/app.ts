@@ -1,7 +1,8 @@
 import { OpenAPIHono } from '@hono/zod-openapi'
 import { cors } from 'hono/cors'
 import { logger as httpLogger } from 'hono/logger'
-import { env, hasClaudeCredential } from '@/env'
+import { env } from '@/env'
+import { healthRouter } from '@/features/health/routes'
 import { libraryRouter } from '@/features/library/routes'
 import { projectsRouter } from '@/features/projects/routes'
 import { AppError } from '@/lib/errors'
@@ -50,15 +51,7 @@ export function createApp() {
     )
   }
 
-  app.get('/api/health', (c) =>
-    c.json({
-      status: 'ok' as const,
-      version: process.env.npm_package_version ?? '0.1.0',
-      // The frontend shows this: agents cannot run without a credential.
-      claudeCredential: hasClaudeCredential,
-    }),
-  )
-
+  app.route('/api', healthRouter)
   app.route('/api', projectsRouter)
   app.route('/api', libraryRouter)
 

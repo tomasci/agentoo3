@@ -1,0 +1,46 @@
+@use '@/styles/variables' as v;
+
+.page {
+  display: grid;
+  gap: v.$space-lg;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: v.$space-md;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.count {
+  font-size: 0.8125rem;
+  color: var(--muted-fg);
+}
+
+.list {
+  display: grid;
+  gap: v.$space-md;
+}
+
+.empty {
+  padding: v.$space-xl v.$space-lg;
+  text-align: center;
+  color: var(--muted-fg);
+  border: 1px solid var(--border);
+  border-radius: v.$radius;
+  font-size: 0.9375rem;
+}
+
+.problem {
+  padding: v.$space-md;
+  border: 1px solid var(--warn);
+  border-radius: v.$radius-sm;
+  color: var(--warn);
+  font-size: 0.875rem;
+}

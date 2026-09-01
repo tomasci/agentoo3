@@ -7,8 +7,10 @@
     "jsx": "react-jsx",
 
     "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
+    // Unused-symbol detection is Biome's job, not tsc's: kubb's generated client
+    // emits unused type aliases, and tsc checks imported files whether or not
+    // they are in `include`, so these flags would fail the build on code we do
+    // not own. Biome can exclude the generated directory; tsc cannot.
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
 

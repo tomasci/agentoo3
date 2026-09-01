@@ -1,0 +1,729 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "agentoo",
+    "version": "0.1.0"
+  },
+  "components": {
+    "schemas": {},
+    "parameters": {}
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Liveness and credential status",
+        "responses": {
+          "200": {
+            "description": "Healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok"
+                      ]
+                    },
+                    "version": {
+                      "type": "string"
+                    },
+                    "claudeCredential": {
+                      "type": "boolean",
+                      "description": "False when neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN is set — the API runs but agents cannot"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "version",
+                    "claudeCredential"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "List all projects",
+        "responses": {
+          "200": {
+            "description": "Projects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "slug": {
+                        "type": "string"
+                      },
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "clone",
+                          "existing"
+                        ]
+                      },
+                      "remoteUrl": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "defaultBranch": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "pending",
+                          "cloning",
+                          "ready",
+                          "needs_manual",
+                          "failed"
+                        ]
+                      },
+                      "lastError": {
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "recoveryCommands": {
+                        "type": "array",
+                        "nullable": true,
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "createdAt": {
+                        "type": "string"
+                      },
+                      "updatedAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "slug",
+                      "source",
+                      "remoteUrl",
+                      "defaultBranch",
+                      "status",
+                      "lastError",
+                      "recoveryCommands",
+                      "path",
+                      "createdAt",
+                      "updatedAt"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Create a project from a git remote or an existing directory",
+        "description": "Returns immediately with status \"pending\"; cloning happens on a worker. Poll the project or watch for status \"needs_manual\", which carries the commands to run over SSH when a private repo needs authentication.",
+        "requestBody": {
+          "description": "Project to create",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  },
+                  "remoteUrl": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "existingPath": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "clone",
+                        "existing"
+                      ]
+                    },
+                    "remoteUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "defaultBranch": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "cloning",
+                        "ready",
+                        "needs_manual",
+                        "failed"
+                      ]
+                    },
+                    "lastError": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "recoveryCommands": {
+                      "type": "array",
+                      "nullable": true,
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "slug",
+                    "source",
+                    "remoteUrl",
+                    "defaultBranch",
+                    "status",
+                    "lastError",
+                    "recoveryCommands",
+                    "path",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "recoveryCommands": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}": {
+      "get": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Get one project",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "clone",
+                        "existing"
+                      ]
+                    },
+                    "remoteUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "defaultBranch": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "cloning",
+                        "ready",
+                        "needs_manual",
+                        "failed"
+                      ]
+                    },
+                    "lastError": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "recoveryCommands": {
+                      "type": "array",
+                      "nullable": true,
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "slug",
+                    "source",
+                    "remoteUrl",
+                    "defaultBranch",
+                    "status",
+                    "lastError",
+                    "recoveryCommands",
+                    "path",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "recoveryCommands": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Delete a project",
+        "description": "With removeFiles=true the project directory is deleted, but only for cloned projects — an adopted external directory is never touched.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "default": "false"
+            },
+            "required": false,
+            "name": "removeFiles",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "recoveryCommands": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}/retry": {
+      "post": {
+        "tags": [
+          "projects"
+        ],
+        "summary": "Re-run setup after resolving something manually",
+        "description": "Backs the \"check again, I did the manual steps\" button. Re-queues setup; if the repo is now present on disk it is adopted rather than re-cloned.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Setup re-queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "source": {
+                      "type": "string",
+                      "enum": [
+                        "clone",
+                        "existing"
+                      ]
+                    },
+                    "remoteUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "defaultBranch": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "cloning",
+                        "ready",
+                        "needs_manual",
+                        "failed"
+                      ]
+                    },
+                    "lastError": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "recoveryCommands": {
+                      "type": "array",
+                      "nullable": true,
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "slug",
+                    "source",
+                    "remoteUrl",
+                    "defaultBranch",
+                    "status",
+                    "lastError",
+                    "recoveryCommands",
+                    "path",
+                    "createdAt",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "recoveryCommands": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Setup already running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "recoveryCommands": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/library/agents": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "List global agents, marked as orchestrator or subagent",
+        "responses": {
+          "200": {
+            "description": "Agents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "role": {
+                        "type": "string",
+                        "enum": [
+                          "orchestrator",
+                          "subagent"
+                        ],
+                        "description": "orchestrator agents may drive a session and delegate; subagents are only reachable by delegation"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "model": {
+                        "type": "string"
+                      },
+                      "effort": {
+                        "type": "string"
+                      },
+                      "tools": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "promptLines": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "role",
+                      "description",
+                      "path",
+                      "promptLines"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/library/skills": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "summary": "List global skills",
+        "responses": {
+          "200": {
+            "description": "Skills",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "description",
+                      "path"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

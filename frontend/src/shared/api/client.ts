@@ -1,20 +1,21 @@
-import axios from 'axios'
-import { env } from '@/shared/config/env'
+import { client } from '@/shared/api/generated/.kubb/client'
 import { logger } from '@/shared/lib/logger'
 
-export const apiClient = axios.create({
-  baseURL: env.apiUrl,
-  timeout: 30_000,
-  headers: { 'Content-Type': 'application/json' },
-})
+// The generated operations already carry `/api/...` URLs, and nginx serves the
+// frontend and the API from one origin (the Vite dev server proxies /api), so
+// no baseURL is needed. VITE_API_URL is the escape hatch for pointing at an API
+// on another host.
+export function configureApiClient(): void {
+  const baseURL = import.meta.env.VITE_API_URL
+  if (baseURL) client.setConfig({ baseURL })
 
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    // Log once, centrally, then let the caller decide what to show.
-    if (axios.isAxiosError(error)) {
-      logger.warn(`${error.config?.method?.toUpperCase()} ${error.config?.url} -> ${error.message}`)
-    }
-    return Promise.reject(error)
-  },
-)
+  client.interceptors.error.use((error) => {
+    // Log once, centrally; components decide what to show.
+    const status = (error as { status?: number }).status
+    const message = error instanceof Error ? error.message : String(error)
+    logger.warn(`API error${status ? ` ${status}` : ''}: ${message}`)
+    return error
+  })
+}
+
+export { client }

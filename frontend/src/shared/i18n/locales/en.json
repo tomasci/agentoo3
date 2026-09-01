@@ -1,25 +1,70 @@
 {
   "app": {
     "title": "agentoo",
-    "subtitle": "Placeholder frontend. The stack is wired up; the app is not built yet."
+    "subtitle": "Run Claude agents against your projects."
   },
-  "status": {
-    "heading": "Backend status",
-    "loading": "Checking…",
-    "online": "Backend is reachable",
-    "offline": "Backend is not reachable yet",
-    "hint": "Expected until the backend is implemented — nginx has nothing to proxy to on /api/.",
-    "retry": "Check again"
+  "common": {
+    "loading": "Loading…",
+    "delete": "Delete",
+    "copy": "Copy",
+    "copied": "Copied",
+    "cancel": "Cancel"
   },
-  "greeting": {
-    "heading": "Say hello",
-    "nameLabel": "Your name",
-    "namePlaceholder": "Ada Lovelace",
-    "submit": "Greet",
-    "result": "Hello, {{name}}!",
-    "errors": {
-      "tooShort": "At least 2 characters",
-      "tooLong": "At most 40 characters"
+  "health": {
+    "checking": "Checking backend…",
+    "ok": "Backend ready",
+    "down": "Backend unreachable",
+    "noCredential": "No Claude credential"
+  },
+  "projects": {
+    "heading": "Projects",
+    "count": "{{count}} project",
+    "count_plural": "{{count}} projects",
+    "empty": "No projects yet. Add one above — clone a repository, or point at a folder that already exists on the server.",
+    "loadFailed": "Could not load projects",
+    "meta": {
+      "path": "Path",
+      "remote": "Remote",
+      "branch": "Branch"
+    },
+    "status": {
+      "pending": "Queued",
+      "cloning": "Cloning…",
+      "ready": "Ready",
+      "needs_manual": "Needs your input",
+      "failed": "Failed"
+    },
+    "form": {
+      "heading": "Add a project",
+      "sourceLabel": "Where the code comes from",
+      "sourceClone": "Clone a repository",
+      "sourceExisting": "Existing folder",
+      "name": "Name",
+      "namePlaceholder": "My app",
+      "remote": "Repository URL",
+      "remoteHint": "https://…, ssh://… or git@host:user/repo.git",
+      "path": "Absolute path on the server",
+      "pathHint": "May be empty, a git repo, or a git repo with a remote.",
+      "submit": "Add project",
+      "adding": "Adding…",
+      "failed": "Could not add the project",
+      "errors": {
+        "nameRequired": "Give the project a name",
+        "remoteRequired": "Enter a repository URL",
+        "pathRequired": "Enter a path",
+        "pathAbsolute": "Path must start with /"
+      }
+    },
+    "delete": {
+      "confirmClone": "Delete \"{{name}}\" and remove its files from the server?",
+      "confirmExisting": "Remove \"{{name}}\"? The folder itself is yours and will be left alone."
+    },
+    "recovery": {
+      "heading": "This repository needs authentication",
+      "explain": "The server never prompts for credentials, so a private repository cannot be cloned unattended. Run the commands below over SSH — git will ask you for the passphrase or token there — then press Check again.",
+      "copy": "Copy commands",
+      "checkAgain": "Check again, I did the manual steps",
+      "checking": "Checking…"
     }
   },
   "language": { "label": "Language" }

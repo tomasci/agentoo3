@@ -1,7 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Provider as JotaiProvider } from 'jotai'
 import type { ReactNode } from 'react'
+import { configureApiClient } from '@/shared/api/client'
 import '@/shared/i18n'
+
+configureApiClient()
 
 const queryClient = new QueryClient({
   defaultOptions: {

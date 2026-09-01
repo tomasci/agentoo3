@@ -1,0 +1,52 @@
+@use '@/styles/variables' as v;
+
+.card {
+  padding: v.$space-lg;
+  border: 1px solid var(--border);
+  border-radius: v.$radius;
+  background: var(--surface);
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: v.$space-md;
+}
+
+.name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  margin: v.$space-sm 0 0;
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.75rem;
+  color: var(--muted-fg);
+}
+
+.row {
+  display: flex;
+  gap: 0.4rem;
+
+  dt { flex: none; min-width: 4.5rem; }
+  dd { margin: 0; overflow-wrap: anywhere; font-family: ui-monospace, Menlo, monospace; }
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: v.$space-sm;
+  flex: none;
+}
+
+.error {
+  margin: v.$space-md 0 0;
+  font-size: 0.8125rem;
+  color: var(--warn);
+  overflow-wrap: anywhere;
+}

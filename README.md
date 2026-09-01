@@ -145,7 +145,14 @@ nginx proxies `/` to it, so a fresh install stops returning 502. `/api/` still
 502s until the backend exists — that is expected, and the placeholder UI says so
 rather than looking broken.
 
-Stack and layout: `frontend/README.md`.
+The projects page is live: add a project by cloning a repository or pointing at
+a folder already on the server, watch setup progress, and when a private repo
+needs authentication the UI shows the failure with the exact commands to run over
+SSH and a "check again, I did the manual steps" button.
+
+The API client is generated from the backend's OpenAPI document with kubb, and
+both the spec and the generated client are committed. Stack and layout:
+`frontend/README.md`.
 
 ## Claude Code
 
