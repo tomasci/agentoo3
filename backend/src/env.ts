@@ -23,6 +23,9 @@ const schema = z.object({
   // How many sessions may run at once. Each Claude Code instance wants ~4GB.
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(1),
 
+  // Where generated ssh keys live. Empty falls back to ~/.ssh/agentoo.
+  SSH_KEYS_DIR: z.string().default(''),
+
   // Comma-separated origin allowlist. Empty by default: nginx and the Vite dev
   // proxy both make the frontend same-origin, so nothing legitimate needs CORS.
   CORS_ORIGINS: z

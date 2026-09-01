@@ -1,5 +1,6 @@
 import { relations } from 'drizzle-orm'
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -37,6 +38,8 @@ export const projects = pgTable(
     source: projectSourceEnum('source').notNull(),
     // Null for 'existing' projects that have no remote configured.
     remoteUrl: text('remote_url'),
+    // Which key to authenticate the clone with. Null uses ssh's own defaults.
+    sshKeyId: uuid('ssh_key_id').references(() => sshKeys.id, { onDelete: 'set null' }),
     defaultBranch: text('default_branch'),
     status: projectStatusEnum('status').notNull().default('pending'),
     // Populated when status is 'needs_manual' or 'failed'.
@@ -47,6 +50,31 @@ export const projects = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('projects_slug_key').on(t.slug), index('projects_status_idx').on(t.status)],
+)
+
+// --- ssh keys -----------------------------------------------------------------
+
+// Only the public half is stored. The private key lives on disk at 0600 and its
+// path is recorded here, so a database dump never contains key material and the
+// API has nothing private to leak.
+export const sshKeys = pgTable(
+  'ssh_keys',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    comment: text('comment'),
+    publicKey: text('public_key').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    privateKeyPath: text('private_key_path').notNull(),
+    // Result of the last connectivity test, so the UI can say whether the key
+    // has actually been authorised on the host yet.
+    lastTestedAt: timestamp('last_tested_at', { withTimezone: true }),
+    lastTestHost: text('last_test_host'),
+    lastTestOk: boolean('last_test_ok'),
+    lastTestMessage: text('last_test_message'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('ssh_keys_name_key').on(t.name)],
 )
 
 // --- library assignments ------------------------------------------------------
@@ -145,9 +173,14 @@ export const messages = pgTable(
 
 // --- relations ----------------------------------------------------------------
 
-export const projectsRelations = relations(projects, ({ many }) => ({
+export const projectsRelations = relations(projects, ({ one, many }) => ({
   sessions: many(sessions),
   libraryItems: many(projectLibraryItems),
+  sshKey: one(sshKeys, { fields: [projects.sshKeyId], references: [sshKeys.id] }),
+}))
+
+export const sshKeysRelations = relations(sshKeys, ({ many }) => ({
+  projects: many(projects),
 }))
 
 export const projectLibraryItemsRelations = relations(projectLibraryItems, ({ one }) => ({

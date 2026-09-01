@@ -9,6 +9,8 @@ export const projectFormSchema = z
     source: z.enum(['clone', 'existing']),
     remoteUrl: z.string().trim().optional(),
     existingPath: z.string().trim().optional(),
+    // '' means "use ssh defaults"; the API wants the field absent, not empty.
+    sshKeyId: z.string().optional(),
   })
   .refine((v) => v.source !== 'clone' || Boolean(v.remoteUrl), {
     message: 'projects.form.errors.remoteRequired',

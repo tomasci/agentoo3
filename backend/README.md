@@ -124,6 +124,32 @@ judging the target, and refuses system roots (`/`, `/etc`, `/usr`, `/proc`, ...)
 let any page read this API's responses and drive its endpoints, since no
 credential gates them.
 
+## SSH keys
+
+Generated as ed25519 **with no passphrase**, and there is no ssh-agent. Both are
+deliberate:
+
+- A server clones unattended, so nobody is there to type a passphrase.
+- `eval "$(ssh-agent -s)"` exports variables into one shell. A long-running
+  systemd worker never sees them, and the agent dies on reboot. An agent's only
+  job is caching the passphrase of an encrypted key — which is exactly what we
+  do not have.
+
+Instead each clone points ssh at one specific key through `GIT_SSH_COMMAND`, so
+nothing global is mutated, `~/.ssh/config` is untouched, and a project's key is
+explicit. `IdentitiesOnly=yes` is set because otherwise ssh offers every default
+identity and a host with a low `MaxAuthTries` answers "Too many authentication
+failures".
+
+**The private key is unreachable through the API.** It lives at 0600 under
+`SSH_KEYS_DIR` (default `~/.ssh/agentoo`), only its path is in the database, and
+no response schema contains it. This service has no authentication, so the only
+safe design is for the secret to have no route out.
+
+`POST /ssh-keys/{id}/test` runs `ssh -T` against a host. GitHub and GitLab refuse
+a shell and **exit non-zero even on success**, so the exit code is useless — the
+greeting on stderr is what gets inspected.
+
 ## Commands
 
 ```

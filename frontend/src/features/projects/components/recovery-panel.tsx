@@ -1,4 +1,6 @@
+import { useAtom } from 'jotai'
 import { useTranslation } from 'react-i18next'
+import { pageAtom } from '@/shared/store/ui'
 import { Button, CopyButton } from '@/shared/ui'
 import { type Project, useRetryProject } from '../hooks/use-projects'
 import styles from './recovery-panel.module.scss'
@@ -14,6 +16,12 @@ import styles from './recovery-panel.module.scss'
 export function RecoveryPanel({ project }: { project: Project }) {
   const { t } = useTranslation()
   const retry = useRetryProject()
+  const [, setPage] = useAtom(pageAtom)
+
+  // An ssh remote with no key attached has a much better answer than "run these
+  // commands by hand": generate a deploy key and select it.
+  const isSshRemote = Boolean(project.remoteUrl && !project.remoteUrl.startsWith('http'))
+  const suggestKey = isSshRemote && !project.sshKeyId
 
   const commands = project.recoveryCommands ?? []
   const asText = commands.join('\n')
@@ -22,6 +30,15 @@ export function RecoveryPanel({ project }: { project: Project }) {
     <div className={styles.panel}>
       <h4 className={styles.heading}>{t('projects.recovery.heading')}</h4>
       <p className={styles.explain}>{t('projects.recovery.explain')}</p>
+
+      {suggestKey && (
+        <p className={styles.explain}>
+          {t('projects.recovery.suggestKey')}{' '}
+          <button type="button" className={styles.link} onClick={() => setPage('ssh-keys')}>
+            {t('projects.recovery.goToKeys')}
+          </button>
+        </p>
+      )}
 
       {project.lastError && <pre className={styles.error}>{project.lastError}</pre>}
 

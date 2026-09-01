@@ -3,6 +3,7 @@ import { Worker } from 'bullmq'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { projects } from '@/db/schema'
+import { keyPathFor } from '@/features/ssh-keys/service'
 import { checkAdoptPath } from '@/lib/adopt-path'
 import {
   currentBranch,
@@ -17,6 +18,7 @@ import {
 import { logger } from '@/lib/logger'
 import { assertInsideProjects, projectPlugin, projectRepo, projectRoot } from '@/lib/paths'
 import { checkRemoteUrl, safeCloneArgs } from '@/lib/remote-url'
+import { gitSshCommand } from '@/lib/ssh'
 import { type ProjectSetupJob, QUEUE_PROJECT_SETUP, redisConnection } from './index'
 
 async function fail(projectId: string, error: string, recovery?: string[]) {
@@ -106,11 +108,21 @@ export async function runProjectSetup(job: ProjectSetupJob): Promise<void> {
         logger.info(`${repo} already populated; adopting it`)
       } else {
         await ensureDir(repo)
-        const result = await git(safeCloneArgs(project.remoteUrl, repo))
+        // Clone with the project's key when it has one, so a private repo
+        // works without touching ~/.ssh/config or an agent.
+        const keyPath = await keyPathFor(project.sshKeyId)
+        const result = await git(
+          safeCloneArgs(project.remoteUrl, repo),
+          undefined,
+          keyPath ? { sshCommand: gitSshCommand(keyPath) } : {},
+        )
         if (!result.ok) {
           const recovery = looksLikeAuthFailure(result.stderr)
             ? recoveryCommandsFor(project.remoteUrl, repo)
             : undefined
+          if (recovery && !keyPath) {
+            logger.info(`${project.slug} has no ssh key; the UI will offer to add one`)
+          }
           await fail(project.id, result.stderr || 'git clone failed', recovery)
           logger.warn(`Clone failed for ${project.slug}: ${result.stderr}`)
           return

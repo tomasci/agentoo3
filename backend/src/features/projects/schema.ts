@@ -8,6 +8,7 @@ export const projectSchema = z.object({
   slug: z.string(),
   source: z.enum(['clone', 'existing']),
   remoteUrl: z.string().nullable(),
+  sshKeyId: z.string().uuid().nullable(),
   defaultBranch: z.string().nullable(),
   status: projectStatusSchema,
   lastError: z.string().nullable(),
@@ -24,6 +25,11 @@ export const createProjectSchema = z
     name: z.string().min(1).max(120),
     remoteUrl: z.string().min(1).optional(),
     existingPath: z.string().min(1).optional(),
+    sshKeyId: z
+      .string()
+      .uuid()
+      .optional()
+      .openapi({ description: 'Clone using this SSH key. Needed for a private repo over ssh.' }),
   })
   .refine((v) => Boolean(v.remoteUrl) !== Boolean(v.existingPath), {
     message: 'Provide exactly one of remoteUrl or existingPath',

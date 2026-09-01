@@ -3,6 +3,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
+import { useSshKeys } from '@/features/ssh-keys'
 import { Button } from '@/shared/ui'
 import { useCreateProject } from '../hooks/use-projects'
 import { apiErrorMessage } from '../lib/api-error'
@@ -12,6 +13,7 @@ import styles from './create-project-form.module.scss'
 export function CreateProjectForm() {
   const { t } = useTranslation()
   const create = useCreateProject()
+  const { data: sshKeys } = useSshKeys()
   const [serverError, setServerError] = useState<string | null>(null)
 
   const {
@@ -23,7 +25,7 @@ export function CreateProjectForm() {
     formState: { errors },
   } = useForm<ProjectFormValues>({
     resolver: zodResolver(projectFormSchema),
-    defaultValues: { name: '', source: 'clone', remoteUrl: '', existingPath: '' },
+    defaultValues: { name: '', source: 'clone', remoteUrl: '', existingPath: '', sshKeyId: '' },
   })
 
   const source = watch('source')
@@ -34,7 +36,12 @@ export function CreateProjectForm() {
       {
         body:
           values.source === 'clone'
-            ? { name: values.name, remoteUrl: values.remoteUrl }
+            ? {
+                name: values.name,
+                remoteUrl: values.remoteUrl,
+                // Empty string means "ssh defaults", not a key.
+                ...(values.sshKeyId ? { sshKeyId: values.sshKeyId } : {}),
+              }
             : { name: values.name, existingPath: values.existingPath },
       },
       {
@@ -83,22 +90,44 @@ export function CreateProjectForm() {
           )}
         </Field.Root>
 
-        {source === 'clone' ? (
-          <Field.Root invalid={Boolean(errors.remoteUrl)}>
-            <Field.Label className={styles.label}>{t('projects.form.remote')}</Field.Label>
-            <Field.Input
-              className={styles.input}
-              placeholder="https://github.com/user/repo.git"
-              {...register('remoteUrl')}
-            />
-            <span className={styles.hint}>{t('projects.form.remoteHint')}</span>
-            {errors.remoteUrl?.message && (
-              <Field.ErrorText className={styles.error}>
-                {t(errors.remoteUrl.message)}
-              </Field.ErrorText>
-            )}
-          </Field.Root>
-        ) : (
+        {source === 'clone' && (
+          <>
+            <Field.Root invalid={Boolean(errors.remoteUrl)}>
+              <Field.Label className={styles.label}>{t('projects.form.remote')}</Field.Label>
+              <Field.Input
+                className={styles.input}
+                placeholder="https://github.com/user/repo.git"
+                {...register('remoteUrl')}
+              />
+              <span className={styles.hint}>{t('projects.form.remoteHint')}</span>
+              {errors.remoteUrl?.message && (
+                <Field.ErrorText className={styles.error}>
+                  {t(errors.remoteUrl.message)}
+                </Field.ErrorText>
+              )}
+            </Field.Root>
+
+            <Field.Root>
+              <Field.Label className={styles.label}>{t('projects.form.sshKey')}</Field.Label>
+              <select className={styles.input} {...register('sshKeyId')}>
+                <option value="">{t('projects.form.sshKeyNone')}</option>
+                {(sshKeys ?? []).map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.name}
+                    {k.comment ? ` — ${k.comment}` : ''}
+                  </option>
+                ))}
+              </select>
+              <span className={styles.hint}>
+                {(sshKeys ?? []).length === 0
+                  ? t('projects.form.sshKeyEmptyHint')
+                  : t('projects.form.sshKeyHint')}
+              </span>
+            </Field.Root>
+          </>
+        )}
+
+        {source === 'existing' && (
           <Field.Root invalid={Boolean(errors.existingPath)}>
             <Field.Label className={styles.label}>{t('projects.form.path')}</Field.Label>
             <Field.Input

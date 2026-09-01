@@ -135,6 +135,14 @@ Projects live one-per-directory under `PROJECTS_DIR`, each session on its own gi
 worktree and branch. Details and the private-repo recovery flow:
 `backend/README.md`.
 
+## SSH keys
+
+Generate ed25519 deploy keys for private repositories from the UI, copy the
+public half, test it against the host, and select it when adding a project. Keys
+are passphraseless and there is no ssh-agent — `backend/README.md` explains why
+neither is an oversight. The private key never leaves the server: no API response
+contains it.
+
 ## Frontend
 
 Built and run as a service by step `frontend`: `bun install --frozen-lockfile`,

@@ -53,7 +53,11 @@
         "remoteRequired": "Enter a repository URL",
         "pathRequired": "Enter a path",
         "pathAbsolute": "Path must start with /"
-      }
+      },
+      "sshKey": "SSH key",
+      "sshKeyNone": "None — use ssh defaults",
+      "sshKeyHint": "Needed for a private repository over ssh. Only applies to git@… and ssh:// remotes.",
+      "sshKeyEmptyHint": "No keys yet. If this repository is private, generate one on the SSH keys page and add it to your git host as a deploy key first."
     },
     "delete": {
       "confirmClone": "Delete \"{{name}}\" and remove its files from the server?",
@@ -64,8 +68,49 @@
       "explain": "The server never prompts for credentials, so a private repository cannot be cloned unattended. Run the commands below over SSH — git will ask you for the passphrase or token there — then press Check again.",
       "copy": "Copy commands",
       "checkAgain": "Check again, I did the manual steps",
-      "checking": "Checking…"
+      "checking": "Checking…",
+      "suggestKey": "This is an ssh remote with no key attached. Generating a deploy key is usually easier than cloning by hand.",
+      "goToKeys": "Go to SSH keys"
     }
   },
-  "language": { "label": "Language" }
+  "language": {
+    "label": "Language"
+  },
+  "nav": {
+    "projects": "Projects",
+    "sshKeys": "SSH keys"
+  },
+  "sshKeys": {
+    "heading": "Your keys",
+    "intro": "Keys are generated as ed25519 with no passphrase, because the server clones unattended and nobody is there to type one. Only the public half is ever shown or returned by the API — the private key stays on disk, readable only by the service account.",
+    "empty": "No keys yet. Generate one above if you need to clone a private repository.",
+    "loadFailed": "Could not load keys",
+    "copyPublic": "Copy public key",
+    "host": "Host",
+    "test": "Test",
+    "testing": "Testing…",
+    "testFailed": "Test failed",
+    "deleteConfirm": "Delete the key \"{{name}}\"? Projects using it fall back to ssh defaults.",
+    "form": {
+      "heading": "Generate a key",
+      "name": "Name",
+      "nameHint": "Becomes the filename. Letters, digits, dot, dash and underscore.",
+      "comment": "Comment",
+      "commentHint": "Goes into the key as a label. An email is conventional.",
+      "submit": "Generate key",
+      "generating": "Generating…",
+      "failed": "Could not generate the key",
+      "errors": {
+        "nameRequired": "Give the key a name",
+        "nameTooLong": "Name is too long",
+        "nameChars": "Letters, digits, dot, dash and underscore only; must start with a letter or digit"
+      }
+    },
+    "steps": {
+      "generate": "Generate a key here.",
+      "copy": "Copy the public key and add it to your git host as a deploy key (GitHub: repo → Settings → Deploy keys).",
+      "test": "Press Test to confirm the host accepts it.",
+      "use": "Select the key when adding a project with an ssh remote."
+    }
+  }
 }

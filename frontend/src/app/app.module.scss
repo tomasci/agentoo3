@@ -46,3 +46,29 @@
   display: grid;
   gap: v.$space-lg;
 }
+
+.nav {
+  display: flex;
+  gap: 0.25rem;
+  margin-bottom: v.$space-lg;
+  border-bottom: 1px solid var(--border);
+}
+
+.navItem {
+  appearance: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted-fg);
+  font: inherit;
+  font-size: 0.9375rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+
+  &:hover { color: var(--fg); }
+
+  &[aria-current='page'] {
+    color: var(--fg);
+    border-bottom-color: var(--accent);
+  }
+}

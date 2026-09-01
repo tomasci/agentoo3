@@ -3,14 +3,16 @@ import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { HealthBadge } from '@/features/health'
 import { ProjectsPage } from '@/features/projects'
+import { SshKeysPage } from '@/features/ssh-keys'
 import { SUPPORTED_LANGUAGES } from '@/shared/i18n'
-import { themeAtom } from '@/shared/store/ui'
+import { pageAtom, themeAtom } from '@/shared/store/ui'
 import { Button } from '@/shared/ui'
 import styles from './app.module.scss'
 
 export function App() {
   const { t, i18n } = useTranslation()
   const [theme, setTheme] = useAtom(themeAtom)
+  const [page, setPage] = useAtom(pageAtom)
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -43,9 +45,26 @@ export function App() {
         </div>
       </header>
 
-      <main>
-        <ProjectsPage />
-      </main>
+      <nav className={styles.nav}>
+        <button
+          type="button"
+          className={styles.navItem}
+          aria-current={page === 'projects' ? 'page' : undefined}
+          onClick={() => setPage('projects')}
+        >
+          {t('nav.projects')}
+        </button>
+        <button
+          type="button"
+          className={styles.navItem}
+          aria-current={page === 'ssh-keys' ? 'page' : undefined}
+          onClick={() => setPage('ssh-keys')}
+        >
+          {t('nav.sshKeys')}
+        </button>
+      </nav>
+
+      <main>{page === 'projects' ? <ProjectsPage /> : <SshKeysPage />}</main>
     </div>
   )
 }

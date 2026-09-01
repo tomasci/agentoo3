@@ -17,7 +17,11 @@ export interface GitResult {
  * and BatchMode=yes turn every credential prompt into an immediate error, which
  * is what lets us hand the user recovery commands instead of hanging.
  */
-export async function git(args: string[], cwd?: string): Promise<GitResult> {
+export async function git(
+  args: string[],
+  cwd?: string,
+  options: { sshCommand?: string } = {},
+): Promise<GitResult> {
   const proc = Bun.spawn(['git', ...args], {
     cwd,
     env: {
@@ -25,7 +29,9 @@ export async function git(args: string[], cwd?: string): Promise<GitResult> {
       GIT_TERMINAL_PROMPT: '0',
       GIT_ASKPASS: '',
       SSH_ASKPASS: '',
-      GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new',
+      // A project with an ssh key clones with that one key and nothing else.
+      GIT_SSH_COMMAND:
+        options.sshCommand ?? 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new',
     },
     stdout: 'pipe',
     stderr: 'pipe',

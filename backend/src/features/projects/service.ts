@@ -19,6 +19,7 @@ export function toDto(row: ProjectRow): ProjectDto {
     slug: row.slug,
     source: row.source,
     remoteUrl: row.remoteUrl,
+    sshKeyId: row.sshKeyId,
     defaultBranch: row.defaultBranch,
     status: row.status,
     lastError: row.lastError,
@@ -81,6 +82,7 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectD
       slug,
       source: adoptPath ? 'existing' : 'clone',
       remoteUrl: input.remoteUrl ?? null,
+      sshKeyId: input.sshKeyId ?? null,
       status: 'pending',
     })
     .returning()
