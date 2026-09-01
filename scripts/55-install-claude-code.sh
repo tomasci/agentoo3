@@ -110,6 +110,44 @@ install_claude_native() {
   return $rc
 }
 
+# --- authentication -----------------------------------------------------------
+report_auth() {
+  local auth_var="" auth_where="" v
+  # Claude Code reads its credential from the environment, in this precedence
+  # order. .env is only a file: nothing sources it automatically, so a credential
+  # recorded there still has to be exported, or referenced by EnvironmentFile= in
+  # the systemd unit that runs the app.
+  for v in ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN; do
+    if [[ -n "${!v:-}" ]]; then
+      auth_var="$v"; auth_where="environment"; break
+    fi
+    if env_get "$ENV_FILE" "$v" >/dev/null 2>&1; then
+      auth_var="$v"; auth_where="$ENV_FILE"; break
+    fi
+  done
+
+  if [[ -n "$auth_var" ]]; then
+    log_ok "Credential found: $auth_var (from $auth_where)"
+    if [[ "$auth_where" != "environment" ]]; then
+      log_warn "$ENV_FILE is not loaded automatically. To use it in a shell:"
+      log_warn "    set -a; . $ENV_FILE; set +a"
+      log_warn "For a service, add to the unit:  EnvironmentFile=$ENV_FILE"
+    fi
+  else
+    log_warn "Claude Code is installed but has NO credential — it cannot make requests yet."
+    log_warn ""
+    log_warn "  Subscription (Pro/Max/Team/Enterprise) — one-year token."
+    log_warn "  'claude setup-token' needs a browser, so run it on your laptop:"
+    log_warn "      claude setup-token"
+    log_warn "  then here:"
+    log_warn "      echo 'CLAUDE_CODE_OAUTH_TOKEN=<paste>' | sudo tee -a $ENV_FILE >/dev/null"
+    log_warn ""
+    log_warn "  Or a Console API key (pay-as-you-go) from https://platform.claude.com:"
+    log_warn "      echo 'ANTHROPIC_API_KEY=sk-ant-...' | sudo tee -a $ENV_FILE >/dev/null"
+  fi
+
+}
+
 # --- already present? ---------------------------------------------------------
 if have claude; then
   log_ok "claude $(claude --version 2>/dev/null | head -1) already installed at $(command -v claude)"
@@ -120,6 +158,7 @@ fi
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
   log_info "[dry-run] would install claude-code via '$CLAUDE_CODE_INSTALL_METHOD' (${CLAUDE_CODE_CHANNEL} channel)"
+  report_auth
   exit 0
 fi
 
@@ -141,18 +180,7 @@ fi
 have claude || die "claude is not on PATH after install."
 log_ok "claude $(claude --version 2>/dev/null | head -1)"
 
-# --- authentication -----------------------------------------------------------
-# Claude Code needs a Pro/Max/Team/Enterprise/Console account, or an API key.
-# Browser login is impractical on a headless server, so an API key in .env is
-# the workable path. Never log the value itself.
-if [[ -n "${ANTHROPIC_API_KEY:-}" ]] || env_get "$ENV_FILE" ANTHROPIC_API_KEY >/dev/null 2>&1; then
-  log_ok "ANTHROPIC_API_KEY is set — Claude Code will prompt once to approve it."
-else
-  log_warn "No ANTHROPIC_API_KEY found. Claude Code is installed but not authenticated."
-  log_warn "On a headless server, set a key rather than using browser login:"
-  log_warn "    echo 'ANTHROPIC_API_KEY=sk-ant-...' >> $ENV_FILE"
-  log_warn "Interactive login also works over SSH: run 'claude' and follow the prompts."
-fi
+report_auth
 
 log_info "Diagnose the install any time with: claude doctor"
 log_ok "Claude Code ready"

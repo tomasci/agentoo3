@@ -66,6 +66,46 @@ Run as root, or as a user with `sudo` — it authenticates once up front rather
 than stalling halfway through an upgrade. It is **idempotent**: re-running skips
 whatever is already in place, and re-uses already-generated passwords.
 
+## Updating an existing install
+
+Re-running the bootstrap updates the clone and installs whatever is new — steps
+are idempotent, so anything already in place is skipped. Generated Postgres and
+Redis passwords are reused, not regenerated.
+
+Run just the step you added:
+
+```
+curl -fsSL https://raw.githubusercontent.com/tomasci/agentoo3/main/bootstrap.sh \
+  | sudo bash -s -- --only claude
+```
+
+Or the whole thing, which also re-runs the (slow) `full-upgrade`:
+
+```
+curl -fsSL https://raw.githubusercontent.com/tomasci/agentoo3/main/bootstrap.sh | sudo bash
+```
+
+From the server itself, without going through the bootstrap:
+
+```
+cd /opt/agentoo && sudo git pull && sudo ./install.sh --only claude
+```
+
+Two things to know before a **full** re-run:
+
+- **It re-runs the firewall step.** ufw rules are additive, and
+  `UFW_TAILSCALE_ONLY` is not remembered between runs. If you previously locked
+  SSH behind the VPN, a plain re-run **re-opens public SSH**. Carry the variable
+  through, or use `--skip ufw`:
+
+  ```
+  curl -fsSL .../bootstrap.sh | sudo UFW_TAILSCALE_ONLY=1 bash
+  ```
+
+- **Local edits under `/opt/agentoo` block the update.** The bootstrap uses a
+  fast-forward-only merge and refuses rather than clobbering your changes. Pass
+  `--force` to discard them. `.env` is gitignored, so credentials never conflict.
+
 ## Layout
 
 ```
@@ -137,16 +177,65 @@ CLAUDE_CODE_INSTALL_METHOD=native ... # per-user ~/.local/bin, self-updating
 CLAUDE_CODE_VERSION=2.1.89 ...        # pin (native method only)
 ```
 
-**Authentication.** Claude Code needs a Pro, Max, Team, Enterprise, or Console
-account. Browser login is impractical on a headless box, so put a key in `.env`:
+### Authenticating on a headless server
+
+Claude Code has no credential after install and cannot make requests until you
+give it one. Pick **one** of the two options below.
+
+**Option A — Claude subscription** (Pro, Max, Team, or Enterprise).
+`claude setup-token` mints a **one-year** OAuth token. It opens a browser, so
+run it on your laptop, not the server:
 
 ```
-echo 'ANTHROPIC_API_KEY=sk-ant-...' >> /opt/agentoo/.env
+claude setup-token
 ```
 
-Claude Code prompts once to approve the key instead of opening a browser.
-Interactive login over SSH also works — run `claude`. Diagnose with
-`claude doctor`.
+Copy the token it prints — it is not saved anywhere — then on the server:
+
+```
+echo 'CLAUDE_CODE_OAUTH_TOKEN=paste-token-here' | sudo tee -a /opt/agentoo/.env >/dev/null
+```
+
+This token can only make model requests: no Remote Control sessions and no
+claude.ai connectors. Locally configured MCP servers still work. It is also not
+read in [bare mode](https://code.claude.com/docs/en/headless) (`--bare`) — use
+an API key there.
+
+**Option B — Console API key** (pay-as-you-go API billing). Create one at
+[platform.claude.com](https://platform.claude.com), then:
+
+```
+echo 'ANTHROPIC_API_KEY=sk-ant-...' | sudo tee -a /opt/agentoo/.env >/dev/null
+```
+
+**Then load it.** `.env` is only a file — nothing sources it automatically. For
+an interactive shell:
+
+```
+set -a; . /opt/agentoo/.env; set +a
+claude --version && claude doctor
+```
+
+For the service that will run the app, point the unit at it instead of exporting
+anything:
+
+```
+EnvironmentFile=/opt/agentoo/.env
+```
+
+Confirm which credential is active at any time:
+
+```
+sudo /opt/agentoo/install.sh --only claude
+```
+
+It reports the variable it found and where it came from, without printing the
+value. If both are set, precedence is `ANTHROPIC_AUTH_TOKEN` >
+`ANTHROPIC_API_KEY` > `CLAUDE_CODE_OAUTH_TOKEN`.
+
+Interactive login over SSH also works — run `claude` and paste the code from
+your browser back into the terminal — but a token survives reboots and
+redeploys, so prefer it on a server.
 
 Claude Code asks for 4 GB RAM; the step warns below that but does not fail.
 
