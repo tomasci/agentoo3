@@ -27,27 +27,11 @@ export function RootLayout() {
           <p className={styles.tagline}>{t('app.subtitle')}</p>
         </Link>
 
-        <ProjectSwitcher />
-
-        {/* Project-scoped navigation, shown only when one is open. */}
-        {current && (
-          <nav className={styles.nav}>
-            <Link
-              to="/projects/$projectId"
-              params={{ projectId: current.id }}
-              className={styles.navItem}
-              activeProps={{ 'aria-current': 'page' }}
-            >
-              {t('nav.sessions')}
-            </Link>
-          </nav>
-        )}
-
         <div className={styles.sidebarSection}>
           <span className={styles.sectionLabel}>{t('nav.workspace')}</span>
           <nav className={styles.nav}>
             {/* exact:true, or this stays lit while inside a project and competes
-                with the Sessions link above it. */}
+                with the project's own links below. */}
             <Link
               to="/projects"
               className={styles.navItem}
@@ -65,6 +49,31 @@ export function RootLayout() {
             </Link>
           </nav>
         </div>
+
+        <ProjectSwitcher />
+
+        {/* Project-scoped navigation, shown only when one is open. */}
+        {current && (
+          <nav className={styles.nav}>
+            <Link
+              to="/projects/$projectId"
+              params={{ projectId: current.id }}
+              className={styles.navItem}
+              activeProps={{ 'aria-current': 'page' }}
+              activeOptions={{ exact: true }}
+            >
+              {t('nav.overview')}
+            </Link>
+            <Link
+              to="/projects/$projectId/sessions"
+              params={{ projectId: current.id }}
+              className={styles.navItem}
+              activeProps={{ 'aria-current': 'page' }}
+            >
+              {t('nav.sessions')}
+            </Link>
+          </nav>
+        )}
 
         {/* Preferences, not navigation, so they sit at the foot. */}
         <div className={styles.sidebarFoot}>

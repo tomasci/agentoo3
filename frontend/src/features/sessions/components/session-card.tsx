@@ -1,12 +1,14 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { Button } from '@/shared/ui'
+import { ActionsMenu, ConfirmDialog } from '@/shared/ui'
 import { type Session, useDeleteSession } from '../hooks/use-sessions'
 import styles from './sessions.module.scss'
 
 export function SessionCard({ session, projectId }: { session: Session; projectId: string }) {
   const { t } = useTranslation()
   const remove = useDeleteSession(projectId)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   return (
     <article className={styles.session}>
@@ -42,16 +44,17 @@ export function SessionCard({ session, projectId }: { session: Session; projectI
           <span className={`${styles.badge} ${session.isolated ? '' : styles.shared}`}>
             {session.isolated ? t('sessions.isolated') : t('sessions.shared')}
           </span>
-          <Button
-            type="button"
-            disabled={remove.isPending}
-            onClick={() => {
-              if (!window.confirm(t('sessions.deleteConfirm'))) return
-              remove.mutate({ path: { id: session.id } })
-            }}
-          >
-            {t('common.delete')}
-          </Button>
+          <ActionsMenu
+            label={t('sessions.actionsFor', { name: session.title ?? session.id.slice(0, 8) })}
+            actions={[
+              {
+                id: 'delete',
+                label: t('common.delete'),
+                destructive: true,
+                onSelect: () => setConfirmDelete(true),
+              },
+            ]}
+          />
         </div>
       </div>
 
@@ -59,6 +62,17 @@ export function SessionCard({ session, projectId }: { session: Session; projectI
         <p className={styles.error}>{apiErrorMessage(remove.error, t('sessions.deleteFailed'))}</p>
       )}
       {session.lastError && <p className={styles.error}>{session.lastError}</p>}
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={t('sessions.deleteTitle')}
+        description={t('sessions.deleteConfirm')}
+        busy={remove.isPending}
+        onConfirm={() =>
+          remove.mutate({ path: { id: session.id } }, { onSettled: () => setConfirmDelete(false) })
+        }
+      />
     </article>
   )
 }

@@ -1,8 +1,9 @@
 import { createRootRoute, createRoute, createRouter, Link, redirect } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { ProjectsPage } from '@/features/projects'
-import { ProjectPage } from '@/features/sessions'
 import { SshKeysPage } from '@/features/ssh-keys'
+import { ProjectLayout } from './project-layout'
+import { ProjectOverviewRoute, ProjectSessionsRoute } from './project-routes'
 import { RootLayout } from './root-layout'
 
 // Code-based routes rather than the file-based convention: file-based needs a
@@ -26,13 +27,24 @@ const projectsRoute = createRoute({
   component: ProjectsPage,
 })
 
+// A layout route, so /projects/$projectId/* shares the project lookup and the
+// current-project selection instead of repeating them per page.
 const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/projects/$projectId',
-  component: function ProjectRoute() {
-    const { projectId } = projectRoute.useParams()
-    return <ProjectPage projectId={projectId} />
-  },
+  component: ProjectLayout,
+})
+
+const projectOverviewRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/',
+  component: ProjectOverviewRoute,
+})
+
+const projectSessionsRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/sessions',
+  component: ProjectSessionsRoute,
 })
 
 const sshKeysRoute = createRoute({
@@ -41,7 +53,12 @@ const sshKeysRoute = createRoute({
   component: SshKeysPage,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, projectsRoute, projectRoute, sshKeysRoute])
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  projectsRoute,
+  projectRoute.addChildren([projectOverviewRoute, projectSessionsRoute]),
+  sshKeysRoute,
+])
 
 /** An unknown URL should say so, not render an empty layout. */
 function NotFound() {

@@ -80,6 +80,19 @@ the sidebar and status bar stay put **without `position: fixed`** — which avoi
 the overlap and scroll-locking bugs fixed positioning brings. Language and theme
 sit at the foot of the sidebar because they are preferences, not navigation.
 
+### Tables and dialogs
+
+The project list is a TanStack Table — **v8, not the v9 on `@latest`**. v9 is a
+feature-based rewrite whose typed setup wants `createTableHook` boilerplate and
+explicit feature declarations to get `getVisibleCells`; for a three-column list
+that is ceremony without payoff, and v8 is what every piece of documentation
+still describes. Revisit when v9 settles.
+
+Destructive actions use an Ark UI `alertdialog`, not `window.confirm`.
+`window.confirm` blocks the page, cannot format the name of the thing being
+deleted, is unstyleable, and — the part that matters — browsers let a user
+suppress it, which silently turns "are you sure" into "yes".
+
 ### The open project
 
 Opening a project selects it, and it stays selected as you move around — the way
@@ -112,7 +125,8 @@ TanStack Router, defined in code rather than by file convention
 |---|---|
 | `/` | redirects to `/projects` |
 | `/projects` | project list |
-| `/projects/$projectId` | one project and its sessions |
+| `/projects/$projectId` | project overview: details, SSH key, retry, delete |
+| `/projects/$projectId/sessions` | that project's sessions |
 | `/ssh-keys` | SSH keys |
 
 Code-based rather than file-based because file-based needs a Vite plugin and a

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { Button, CopyButton } from '@/shared/ui'
+import { Button, ConfirmDialog, CopyButton } from '@/shared/ui'
 import { type SshKey, useDeleteSshKey, useTestSshKey } from '../hooks/use-ssh-keys'
 import styles from './ssh-keys-page.module.scss'
 
@@ -9,6 +9,7 @@ export function SshKeyCard({ sshKey }: { sshKey: SshKey }) {
   const { t } = useTranslation()
   const [host, setHost] = useState('github.com')
   const [error, setError] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const test = useTestSshKey()
   const remove = useDeleteSshKey()
 
@@ -30,14 +31,7 @@ export function SshKeyCard({ sshKey }: { sshKey: SshKey }) {
           <p className={styles.fingerprint}>{sshKey.fingerprint}</p>
           {sshKey.comment && <p className={styles.fingerprint}>{sshKey.comment}</p>}
         </div>
-        <Button
-          type="button"
-          disabled={remove.isPending}
-          onClick={() => {
-            if (!window.confirm(t('sshKeys.deleteConfirm', { name: sshKey.name }))) return
-            remove.mutate({ path: { id: sshKey.id } })
-          }}
-        >
+        <Button type="button" disabled={remove.isPending} onClick={() => setConfirmDelete(true)}>
           {t('common.delete')}
         </Button>
       </div>
@@ -72,6 +66,17 @@ export function SshKeyCard({ sshKey }: { sshKey: SshKey }) {
         )}
         {error && <span className={styles.error}>{error}</span>}
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={t('sshKeys.deleteTitle')}
+        description={t('sshKeys.deleteConfirm', { name: sshKey.name })}
+        busy={remove.isPending}
+        onConfirm={() =>
+          remove.mutate({ path: { id: sshKey.id } }, { onSettled: () => setConfirmDelete(false) })
+        }
+      />
     </article>
   )
 }

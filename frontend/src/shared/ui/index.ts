@@ -1,2 +1,4 @@
+export { ActionsMenu, type MenuAction } from './actions-menu'
 export { Button } from './button'
+export { ConfirmDialog } from './confirm-dialog'
 export { CopyButton } from './copy-button'

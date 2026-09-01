@@ -8,7 +8,9 @@
     "delete": "Delete",
     "copy": "Copy",
     "copied": "Copied",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "actions": "Actions",
+    "working": "Working…"
   },
   "health": {
     "checking": "Checking backend…",
@@ -65,7 +67,8 @@
     },
     "delete": {
       "confirmClone": "Delete \"{{name}}\" and remove its files from the server?",
-      "confirmExisting": "Remove \"{{name}}\"? The folder in the sources directory is yours and will be left alone."
+      "confirmExisting": "Remove \"{{name}}\"? The folder in the sources directory is yours and will be left alone.",
+      "title": "Delete project?"
     },
     "recovery": {
       "heading": "Setup could not authenticate",
@@ -94,7 +97,28 @@
     "keyChangeFailed": "Could not change the key",
     "keyRetryHint": "Changing the key does not re-clone.",
     "retry": "Retry setup",
-    "open": "Open"
+    "open": "Open",
+    "notFound": "That project does not exist.",
+    "table": {
+      "name": "Name",
+      "status": "Status",
+      "path": "Path",
+      "actionsFor": "Actions for {{name}}"
+    },
+    "overview": {
+      "details": "Details",
+      "source": "Source",
+      "source_clone": "Cloned from a remote",
+      "source_existing": "Adopted folder",
+      "source_empty": "Created empty",
+      "authentication": "Authentication",
+      "setup": "Setup",
+      "retryHint": "Re-runs setup. An already-cloned repository is adopted rather than cloned again.",
+      "danger": "Danger zone",
+      "deleteProject": "Delete project",
+      "deleteCloneHint": "Deletes the project and removes its files from the server.",
+      "deleteExistingHint": "Removes the project. The folder in the sources directory is yours and is left alone."
+    }
   },
   "language": {
     "label": "Language"
@@ -106,7 +130,8 @@
     "workspace": "Workspace",
     "sessions": "Sessions",
     "noneOpen": "None open",
-    "noProjects": "No projects yet."
+    "noProjects": "No projects yet.",
+    "overview": "Overview"
   },
   "sshKeys": {
     "heading": "Your keys",
@@ -139,7 +164,8 @@
       "copy": "Copy the public key and add it to your git host as a deploy key (GitHub: repo → Settings → Deploy keys).",
       "test": "Press Test to confirm the host accepts it.",
       "use": "Select the key when adding a project with an ssh remote."
-    }
+    },
+    "deleteTitle": "Delete SSH key?"
   },
   "sessions": {
     "heading": "Sessions",
@@ -179,7 +205,9 @@
       "submit": "Create session",
       "creating": "Creating…",
       "notReady": "The project has to finish setup first."
-    }
+    },
+    "deleteTitle": "Delete session?",
+    "actionsFor": "Actions for {{name}}"
   },
   "notFound": {
     "message": "There is nothing at this address.",

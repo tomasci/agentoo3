@@ -2,8 +2,8 @@ import { useTranslation } from 'react-i18next'
 import { useProjects } from '../hooks/use-projects'
 import { apiErrorMessage } from '../lib/api-error'
 import { CreateProjectForm } from './create-project-form'
-import { ProjectCard } from './project-card'
 import styles from './projects-page.module.scss'
+import { ProjectsTable } from './projects-table'
 
 export function ProjectsPage() {
   const { t } = useTranslation()
@@ -34,13 +34,7 @@ export function ProjectsPage() {
           <p className={styles.empty}>{t('projects.empty')}</p>
         )}
 
-        {projects.length > 0 && (
-          <div className={styles.list}>
-            {projects.map((project) => (
-              <ProjectCard key={project.id} project={project} />
-            ))}
-          </div>
-        )}
+        {projects.length > 0 && <ProjectsTable projects={projects} />}
       </div>
     </div>
   )

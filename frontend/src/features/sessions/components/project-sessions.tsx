@@ -1,18 +1,16 @@
-import { Link } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLibraryAgents } from '@/features/library'
-import { useCurrentProject, useProjects } from '@/features/projects'
+import { useProjects } from '@/features/projects'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import { Button } from '@/shared/ui'
 import { useCreateSession, useSessions } from '../hooks/use-sessions'
 import { SessionCard } from './session-card'
 import styles from './sessions.module.scss'
 
-export function ProjectPage({ projectId }: { projectId: string }) {
+export function ProjectSessions({ projectId }: { projectId: string }) {
   const { t } = useTranslation()
   const { data: projects } = useProjects()
-  const { setCurrentProjectId } = useCurrentProject()
   const { data: sessions, isPending, isError, error } = useSessions(projectId)
   const { data: agents } = useLibraryAgents()
   const create = useCreateSession(projectId)
@@ -24,11 +22,6 @@ export function ProjectPage({ projectId }: { projectId: string }) {
 
   const project = (projects ?? []).find((p) => p.id === projectId)
 
-  // Opening a project is what selects it; it then stays selected as you move
-  // around, the way an IDE keeps a project open.
-  useEffect(() => {
-    setCurrentProjectId(projectId)
-  }, [projectId, setCurrentProjectId])
   const orchestrators = (agents ?? []).filter((a) => a.role === 'orchestrator')
 
   const onCreate = () => {
@@ -54,31 +47,6 @@ export function ProjectPage({ projectId }: { projectId: string }) {
 
   return (
     <div className={styles.page}>
-      <Link to="/projects" className={styles.back}>
-        ← {t('sessions.backToProjects')}
-      </Link>
-
-      {project && (
-        <div className={styles.projectHead}>
-          <div>
-            <h2 className={styles.projectName}>{project.name}</h2>
-            <dl className={styles.meta}>
-              <div className={styles.metaRow}>
-                <dt>{t('projects.meta.path')}</dt>
-                <dd>{project.path}</dd>
-              </div>
-              {project.remoteUrl && (
-                <div className={styles.metaRow}>
-                  <dt>{t('projects.meta.remote')}</dt>
-                  <dd>{project.remoteUrl}</dd>
-                </div>
-              )}
-            </dl>
-          </div>
-          <span className={styles.badge}>{t(`projects.status.${project.status}`)}</span>
-        </div>
-      )}
-
       <section className={styles.formCard}>
         <h3 className={styles.heading}>{t('sessions.form.heading')}</h3>
         <div className={styles.form}>

@@ -1,0 +1,46 @@
+@use '@/styles/variables' as v;
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgb(0 0 0 / 0.5);
+  backdrop-filter: blur(2px);
+  z-index: 40;
+}
+
+.positioner {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: v.$space-lg;
+  z-index: 41;
+}
+
+.content {
+  width: min(28rem, 100%);
+  padding: v.$space-lg;
+  border: 1px solid var(--border);
+  border-radius: v.$radius;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+}
+
+.title { margin: 0 0 v.$space-sm; font-size: 1rem; font-weight: 600; }
+
+.description {
+  margin: 0 0 v.$space-lg;
+  font-size: 0.875rem;
+  color: var(--muted-fg);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.actions { display: flex; gap: v.$space-sm; justify-content: flex-end; }
+
+.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}

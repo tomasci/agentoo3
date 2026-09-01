@@ -1,0 +1,45 @@
+@use '@/styles/variables' as v;
+
+.trigger {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-fg);
+  border-radius: v.$radius-sm;
+  padding: 0.15rem 0.4rem;
+  font-size: 1rem;
+  line-height: 1.2;
+  cursor: pointer;
+
+  &:hover { background: var(--bg); color: var(--fg); border-color: var(--border); }
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+}
+
+.positioner { z-index: 30; }
+
+.content {
+  min-width: 10rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: v.$radius-sm;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.24);
+
+  &:focus-visible { outline: none; }
+}
+
+.item {
+  display: block;
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  border-radius: calc(v.$radius-sm - 2px);
+  font-size: 0.8125rem;
+  color: var(--fg);
+  cursor: pointer;
+  user-select: none;
+
+  &[data-highlighted] { background: var(--bg); }
+  &[data-disabled] { opacity: 0.5; cursor: not-allowed; }
+}
+
+.destructive { color: var(--danger); }
