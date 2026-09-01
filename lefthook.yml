@@ -4,6 +4,10 @@
 pre-commit:
   parallel: true
   commands:
+    # Milliseconds, and it catches a class of failure that only shows up on a
+    # clean checkout: a source file the build imports but git ignores.
+    sources-tracked:
+      run: ./scripts/check-sources-tracked.sh
     frontend-check:
       root: "frontend/"
       glob: "frontend/**/*.{ts,tsx,js,jsx,json,jsonc}"
