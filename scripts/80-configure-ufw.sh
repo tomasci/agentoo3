@@ -24,6 +24,9 @@ require_root
 
 apt_install "${PKGS_FIREWALL[@]}"
 
+# A lockdown chosen on an earlier run must survive a later plain re-run.
+sticky_recall UFW_TAILSCALE_ONLY
+
 # ---------------------------------------------------------------- ssh port ---
 # `sshd -T` is authoritative because it expands Include'd files; fall back to
 # grepping the config, then to the default.
@@ -173,6 +176,9 @@ else
   as_root ufw --force enable       # --force: skip the interactive confirmation
 fi
 
+# Persist only what was actually applied, so a failed run remembers nothing.
+setting_remember UFW_TAILSCALE_ONLY "$UFW_TAILSCALE_ONLY"
+
 log_ok "Firewall active"
 as_root ufw status verbose 2>&1 | while IFS= read -r line; do
   printf '  %s\n' "$line" >&2
@@ -180,5 +186,6 @@ done
 
 if [[ "$UFW_TAILSCALE_ONLY" != "1" ]]; then
   log_info "SSH is reachable publicly. To move it behind the VPN once Tailscale works:"
-  log_info "  UFW_TAILSCALE_ONLY=1 $INSTALL_SH --only ufw"
+  log_info "  sudo UFW_TAILSCALE_ONLY=1 $INSTALL_SH --only ufw"
+  log_info "That choice is remembered; later runs keep it unless you pass UFW_TAILSCALE_ONLY=0."
 fi

@@ -91,6 +91,13 @@ if have tailscale; then
   fi
 fi
 
+if [[ -f "$SETTINGS_FILE" ]]; then
+  log_ok "Remembered installer settings ($SETTINGS_FILE):"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && printf '    %s\n' "$line" >&2
+  done <"$SETTINGS_FILE"
+fi
+
 if [[ -f "$ENV_FILE" ]]; then
   log_ok "Generated credentials are in $ENV_FILE (mode $(stat -c %a "$ENV_FILE" 2>/dev/null))"
 else

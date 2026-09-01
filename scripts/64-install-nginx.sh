@@ -15,6 +15,12 @@ require_root
 
 apt_install "${PKGS_NGINX[@]}"
 
+# Without this, a plain re-run would rewrite the site as a catch-all and drop
+# the TLS server block certbot added, silently taking the site back to HTTP.
+sticky_recall NGINX_DOMAIN
+sticky_recall NGINX_ENABLE_TLS
+sticky_recall NGINX_TLS_EMAIL
+
 SITE_AVAILABLE="/etc/nginx/sites-available/$NGINX_SITE_NAME"
 SITE_ENABLED="/etc/nginx/sites-enabled/$NGINX_SITE_NAME"
 
@@ -154,5 +160,9 @@ else
   log_info "No NGINX_DOMAIN set; serving on any hostname over plain HTTP."
   log_info "Set NGINX_DOMAIN and NGINX_ENABLE_TLS=1 once DNS points at this host."
 fi
+
+setting_remember NGINX_DOMAIN     "$NGINX_DOMAIN"
+setting_remember NGINX_ENABLE_TLS "$NGINX_ENABLE_TLS"
+setting_remember NGINX_TLS_EMAIL  "$NGINX_TLS_EMAIL"
 
 log_ok "nginx ready — / -> :$FRONTEND_PORT, /api/ -> :$BACKEND_PORT"

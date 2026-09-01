@@ -21,6 +21,8 @@ STATE_DIR="${STATE_DIR:-$REPO_ROOT/.state}"
 # Absolute, because the operator's shell is rarely inside the install directory
 # — bootstrap.sh clones to /opt/agentoo and they stay in their home dir.
 INSTALL_SH="${INSTALL_SH:-$REPO_ROOT/install.sh}"
+# Operator choices that must survive a later plain re-run.
+SETTINGS_FILE="${SETTINGS_FILE:-$STATE_DIR/settings.env}"
 
 mkdir -p "$LOG_DIR" "$STATE_DIR" 2>/dev/null || true
 
@@ -288,6 +290,38 @@ env_fix_owner() {
   local owner="${SUDO_USER:-}"
   [[ -n "$owner" ]] || return 0
   chown "$owner" "$file" 2>/dev/null || true
+}
+
+# ------------------------------------------------------ sticky settings -----
+#
+# Some choices must not evaporate between runs. Without this, a deliberate
+#   UFW_TAILSCALE_ONLY=1 ./install.sh --only ufw
+# would be undone by a later plain `bootstrap.sh | sudo bash`, silently
+# re-opening public SSH. Same for NGINX_DOMAIN: re-running without it would
+# rewrite the site as a catch-all and drop the TLS block certbot added.
+#
+# config.sh records "<NAME>_EXPLICIT" before applying its default, so we can
+# tell "the operator asked for this" apart from "this is just the default".
+
+setting_remember() {
+  local name="$1" value="$2"
+  env_set "$SETTINGS_FILE" "$name" "$value"
+  log_debug "remembered $name=$value in $SETTINGS_FILE"
+}
+
+setting_recall() { env_get "$SETTINGS_FILE" "$1"; }
+
+# If the operator did not set NAME this run, restore what an earlier run stored.
+sticky_recall() {
+  local name="$1" explicit="${1}_EXPLICIT" remembered
+  if [[ -n "${!explicit:-}" ]]; then
+    log_debug "$name set explicitly this run; not recalling"
+    return 0
+  fi
+  remembered="$(setting_recall "$name" || true)"
+  [[ -n "$remembered" ]] || return 0
+  printf -v "$name" '%s' "$remembered"
+  log_info "Using remembered $name=$remembered (set on an earlier run)"
 }
 
 # ------------------------------------------------------- managed blocks -----

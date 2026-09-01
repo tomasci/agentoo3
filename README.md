@@ -91,20 +91,46 @@ From the server itself, without going through the bootstrap:
 cd /opt/agentoo && sudo git pull && sudo ./install.sh --only claude
 ```
 
-Two things to know before a **full** re-run:
+One thing to know before a **full** re-run: local edits under `/opt/agentoo`
+block the update. The bootstrap uses a fast-forward-only merge and refuses
+rather than clobbering your changes — pass `--force` to discard them. `.env` is
+gitignored, so credentials never conflict.
 
-- **It re-runs the firewall step.** ufw rules are additive, and
-  `UFW_TAILSCALE_ONLY` is not remembered between runs. If you previously locked
-  SSH behind the VPN, a plain re-run **re-opens public SSH**. Carry the variable
-  through, or use `--skip ufw`:
+### Remembered settings
 
-  ```
-  curl -fsSL .../bootstrap.sh | sudo UFW_TAILSCALE_ONLY=1 bash
-  ```
+Choices that a plain re-run would otherwise silently undo are persisted to
+`.state/settings.env` and restored automatically:
 
-- **Local edits under `/opt/agentoo` block the update.** The bootstrap uses a
-  fast-forward-only merge and refuses rather than clobbering your changes. Pass
-  `--force` to discard them. `.env` is gitignored, so credentials never conflict.
+| Setting | Undoing it would... |
+|---|---|
+| `UFW_TAILSCALE_ONLY` | re-open public SSH after you moved it behind the VPN |
+| `NGINX_DOMAIN` | rewrite the site as a catch-all `server_name _` |
+| `NGINX_ENABLE_TLS`, `NGINX_TLS_EMAIL` | drop the TLS block certbot added, taking the site back to HTTP |
+
+So this, once:
+
+```
+sudo UFW_TAILSCALE_ONLY=1 /opt/agentoo/install.sh --only ufw
+```
+
+survives every later `bootstrap.sh | sudo bash`. The installer says so when it
+happens:
+
+```
+INFO  Using remembered UFW_TAILSCALE_ONLY=1 (set on an earlier run)
+```
+
+To change one, set it explicitly — an explicit value always wins and replaces
+what was stored:
+
+```
+sudo UFW_TAILSCALE_ONLY=0 /opt/agentoo/install.sh --only ufw
+```
+
+A value is stored only after the step it belongs to succeeds, so a failed run
+remembers nothing. `install.sh --only summary` prints the whole file. Deleting
+`.state/` forgets everything and returns to the defaults in
+`scripts/lib/config.sh`.
 
 ## Layout
 
@@ -131,7 +157,7 @@ backend/                Python service
 frontend/               web UI (Bun)
 config/  docs/
 logs/                   install.log (gitignored)
-.state/                 per-step completion markers (gitignored)
+.state/                 step markers + remembered settings (gitignored)
 .env                    generated credentials, mode 0600 (gitignored)
 ```
 

@@ -145,12 +145,15 @@ REDIS_MAXMEMORY_POLICY="${REDIS_MAXMEMORY_POLICY:-noeviction}"
 
 # ----------------------------------------------------------------- nginx ----
 
+NGINX_DOMAIN_EXPLICIT="${NGINX_DOMAIN+1}"   # set by the operator this run?
 NGINX_DOMAIN="${NGINX_DOMAIN:-}"               # empty -> catch-all server_name _
 NGINX_SITE_NAME="${NGINX_SITE_NAME:-$APP_NAME}"
 NGINX_CLIENT_MAX_BODY_SIZE="${NGINX_CLIENT_MAX_BODY_SIZE:-50m}"
 # Long timeouts: model responses routinely outlive nginx's 60s default.
 NGINX_PROXY_READ_TIMEOUT="${NGINX_PROXY_READ_TIMEOUT:-300s}"
+NGINX_ENABLE_TLS_EXPLICIT="${NGINX_ENABLE_TLS+1}"   # set by the operator this run?
 NGINX_ENABLE_TLS="${NGINX_ENABLE_TLS:-0}"      # needs NGINX_DOMAIN + DNS already pointed here
+NGINX_TLS_EMAIL_EXPLICIT="${NGINX_TLS_EMAIL+1}"   # set by the operator this run?
 NGINX_TLS_EMAIL="${NGINX_TLS_EMAIL:-}"
 
 # ------------------------------------------------------------- tailscale ----
@@ -178,6 +181,7 @@ UFW_APP_PORTS="${UFW_APP_PORTS:-}"             # extra public ports, e.g. "8080/
 UFW_ALLOW_TAILSCALE="${UFW_ALLOW_TAILSCALE:-1}"  # allow all inbound on tailscale0
 # Lockdown: SSH reachable only over the VPN. Refuses to apply unless Tailscale
 # is actually up, because getting this wrong ends the session permanently.
+UFW_TAILSCALE_ONLY_EXPLICIT="${UFW_TAILSCALE_ONLY+1}"   # set by the operator this run?
 UFW_TAILSCALE_ONLY="${UFW_TAILSCALE_ONLY:-0}"
 UFW_LIMIT_SSH="${UFW_LIMIT_SSH:-1}"            # rate-limit SSH against brute force
 UFW_LOGGING="${UFW_LOGGING:-low}"
