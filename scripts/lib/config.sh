@@ -30,6 +30,10 @@ FRONTEND_DIR="${FRONTEND_DIR:-$REPO_ROOT/frontend}"
 # Where cloned/adopted projects and the shared agent+skill library live.
 PROJECTS_DIR="${PROJECTS_DIR:-$REPO_ROOT/projects}"
 LIBRARY_DIR="${LIBRARY_DIR:-$REPO_ROOT/library}"
+# Drop a folder here to adopt it as a project. Separate from PROJECTS_DIR, which
+# holds managed project roots — listing our own scaffolding as adoptable would
+# be nonsense.
+SOURCES_DIR="${SOURCES_DIR:-$REPO_ROOT/sources}"
 # Each Claude Code instance wants ~4GB, so concurrency is deliberately low.
 WORKER_CONCURRENCY="${WORKER_CONCURRENCY:-1}"
 # Generated credentials and connection strings are written here.

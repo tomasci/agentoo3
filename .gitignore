@@ -4,6 +4,7 @@
 
 # runtime data: cloned projects, and the agent/skill library (its own git repo)
 /projects/
+/sources/
 /library/
 
 # generated secrets

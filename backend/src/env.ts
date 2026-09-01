@@ -14,6 +14,10 @@ const schema = z.object({
   // Where projects are cloned and where the shared agent/skill library lives.
   PROJECTS_DIR: z.string().default('/opt/agentoo/projects'),
   LIBRARY_DIR: z.string().default('/opt/agentoo/library'),
+  // Drop a folder here to adopt it as a project. Kept separate from
+  // PROJECTS_DIR, which holds our own managed project roots — mixing the two
+  // would mean listing our own scaffolding as adoptable.
+  SOURCES_DIR: z.string().default('/opt/agentoo/sources'),
 
   // One of these is needed to run agents. Neither is required to boot, so the
   // API still starts and can tell you what is missing.

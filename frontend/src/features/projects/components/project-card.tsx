@@ -2,7 +2,12 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSshKeys } from '@/features/ssh-keys'
 import { Button } from '@/shared/ui'
-import { type Project, useDeleteProject, useUpdateProject } from '../hooks/use-projects'
+import {
+  type Project,
+  useDeleteProject,
+  useRetryProject,
+  useUpdateProject,
+} from '../hooks/use-projects'
 import { apiErrorMessage } from '../lib/api-error'
 import { isSshRemote } from '../lib/remote-url'
 import styles from './project-card.module.scss'
@@ -13,6 +18,7 @@ export function ProjectCard({ project }: { project: Project }) {
   const { t } = useTranslation()
   const remove = useDeleteProject()
   const update = useUpdateProject()
+  const retry = useRetryProject()
   const { data: sshKeys } = useSshKeys()
   const [keyId, setKeyId] = useState(project.sshKeyId ?? '')
   const [keyError, setKeyError] = useState<string | null>(null)
@@ -111,7 +117,17 @@ export function ProjectCard({ project }: { project: Project }) {
           {update.isPending && <span>{t('projects.savingKey')}</span>}
           {saved && <span className={styles.saved}>{t('projects.keySaved')}</span>}
           {keyError && <span className={styles.error}>{keyError}</span>}
-          {project.status === 'ready' && <span>{t('projects.keyRetryHint')}</span>}
+
+          {/* The retry the hint refers to. It previously pointed at a button
+              that only existed on the failure panel. */}
+          <Button
+            type="button"
+            disabled={retry.isPending || update.isPending}
+            onClick={() => retry.mutate({ path: { id: project.id } })}
+          >
+            {retry.isPending ? t('projects.recovery.checking') : t('projects.retry')}
+          </Button>
+          <span>{t('projects.keyRetryHint')}</span>
         </div>
       )}
 

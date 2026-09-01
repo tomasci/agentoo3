@@ -37,31 +37,35 @@
     "form": {
       "heading": "Add a project",
       "sourceLabel": "Where the code comes from",
-      "sourceClone": "Clone a repository",
-      "sourceExisting": "Existing folder",
       "name": "Name",
       "namePlaceholder": "My app",
       "remote": "Repository URL",
       "remoteHint": "https://…, ssh://… or git@host:user/repo.git",
-      "path": "Absolute path on the server",
-      "pathHint": "May be empty, a git repo, or a git repo with a remote.",
       "submit": "Add project",
       "adding": "Adding…",
       "failed": "Could not add the project",
       "errors": {
         "nameRequired": "Give the project a name",
         "remoteRequired": "Enter a repository URL",
-        "pathRequired": "Enter a path",
-        "pathAbsolute": "Path must start with /"
+        "folderRequired": "Choose a folder"
       },
       "sshKey": "SSH key",
       "sshKeyNone": "None — use ssh defaults",
       "sshKeyHint": "Needed for a private repository over ssh. Only applies to git@… and ssh:// remotes.",
-      "sshKeyEmptyHint": "No keys yet. If this repository is private, generate one on the SSH keys page and add it to your git host as a deploy key first."
+      "sshKeyEmptyHint": "No keys yet. If this repository is private, generate one on the SSH keys page and add it to your git host as a deploy key first.",
+      "source_clone": "Clone a repository",
+      "source_existing": "Existing folder",
+      "source_empty": "New empty project",
+      "folder": "Folder",
+      "folderChoose": "Choose a folder…",
+      "folderNone": "No folders available",
+      "folderTaken": "used by {{name}}",
+      "folderTip": "Only folders in this directory can be added. To bring a project onto the server, copy it here — with scp or rsync, say — then reload this page.",
+      "emptyHint": "Creates an empty git repository in the projects directory. Useful for starting something new with an agent."
     },
     "delete": {
       "confirmClone": "Delete \"{{name}}\" and remove its files from the server?",
-      "confirmExisting": "Remove \"{{name}}\"? The folder itself is yours and will be left alone."
+      "confirmExisting": "Remove \"{{name}}\"? The folder in the sources directory is yours and will be left alone."
     },
     "recovery": {
       "heading": "Setup could not authenticate",
@@ -88,7 +92,8 @@
     "savingKey": "Saving…",
     "keySaved": "Saved",
     "keyChangeFailed": "Could not change the key",
-    "keyRetryHint": "Changing the key does not re-clone; use retry if you need to."
+    "keyRetryHint": "Changing the key does not re-clone.",
+    "retry": "Retry setup"
   },
   "language": {
     "label": "Language"

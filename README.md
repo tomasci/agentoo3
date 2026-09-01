@@ -161,10 +161,11 @@ nginx proxies `/` to it, so a fresh install stops returning 502. `/api/` still
 502s until the backend exists — that is expected, and the placeholder UI says so
 rather than looking broken.
 
-The projects page is live: add a project by cloning a repository or pointing at
-a folder already on the server, watch setup progress, and when a private repo
-needs authentication the UI shows the failure with the exact commands to run over
-SSH and a "check again, I did the manual steps" button.
+The projects page is live. A project starts by cloning a repository, adopting a
+folder from the sources directory, or as a new empty git repository. Folders are
+picked from a list rather than typed — adoption is restricted to `SOURCES_DIR`,
+and ones already in use are shown as taken — with the path to copy into shown
+alongside for anyone placing a project there by hand.
 
 The API client is generated from the backend's OpenAPI document with kubb during
 installation — neither the spec nor the generated client is committed, so the

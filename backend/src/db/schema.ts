@@ -14,9 +14,9 @@ import {
 
 // --- projects -----------------------------------------------------------------
 
-// A project is either cloned from a remote or adopted from a directory that
-// already exists on disk. Both end up as one directory under PROJECTS_DIR.
-export const projectSourceEnum = pgEnum('project_source', ['clone', 'existing'])
+// A project is cloned from a remote, adopted from a folder in SOURCES_DIR, or
+// created empty. All three end up as one directory under PROJECTS_DIR.
+export const projectSourceEnum = pgEnum('project_source', ['clone', 'existing', 'empty'])
 
 // 'needs_manual' is the interesting one: a private-repo clone failed, and the
 // user has to authenticate over SSH themselves before we can continue.
@@ -36,6 +36,9 @@ export const projects = pgTable(
     // Directory name under PROJECTS_DIR. Derived from the name, kept stable.
     slug: text('slug').notNull(),
     source: projectSourceEnum('source').notNull(),
+    // For 'existing': the folder name under SOURCES_DIR it was adopted from.
+    // Kept so the sources listing can mark it as taken.
+    sourceName: text('source_name'),
     // Null for 'existing' projects that have no remote configured.
     remoteUrl: text('remote_url'),
     // Which key to authenticate the clone with. Null uses ssh's own defaults.

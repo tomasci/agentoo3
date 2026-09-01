@@ -6,8 +6,6 @@ export const QUEUE_PROJECT_SETUP = 'project-setup'
 
 export interface ProjectSetupJob {
   projectId: string
-  /** Set when adopting a directory that already exists on disk. */
-  existingPath?: string
 }
 
 // BullMQ requires maxRetriesPerRequest: null on the connection it blocks on.

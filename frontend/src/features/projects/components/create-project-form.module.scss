@@ -96,3 +96,26 @@
   align-items: center;
   gap: v.$space-md;
 }
+
+.tip {
+  margin-top: v.$space-sm;
+  padding: v.$space-sm;
+  border: 1px solid var(--border);
+  border-radius: v.$radius-sm;
+  background: var(--surface);
+}
+
+.tipText {
+  margin: 0 0 0.4rem;
+  font-size: 0.75rem;
+  color: var(--muted-fg);
+  line-height: 1.55;
+}
+
+.tipRow { display: flex; align-items: center; gap: v.$space-sm; flex-wrap: wrap; }
+
+.tipPath {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}

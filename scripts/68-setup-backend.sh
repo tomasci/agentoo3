@@ -23,7 +23,7 @@ app_home="$(getent passwd "$APP_USER" 2>/dev/null | cut -d: -f6 || true)"
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
   log_info "[dry-run] would run 'bun install' and migrations in $BACKEND_DIR"
-  log_info "[dry-run] would create $PROJECTS_DIR and $LIBRARY_DIR"
+  log_info "[dry-run] would create $PROJECTS_DIR, $SOURCES_DIR and $LIBRARY_DIR"
   log_info "[dry-run] would install ${APP_NAME}-api and ${APP_NAME}-worker services"
   exit 0
 fi
@@ -53,7 +53,7 @@ run_as_app bash -c "cd '$BACKEND_DIR' && DATABASE_URL=unused REDIS_URL=unused bu
 log_ok "Wrote $BACKEND_DIR/openapi.json ($(jq -r '.paths | keys | length' "$BACKEND_DIR/openapi.json" 2>/dev/null || echo '?') paths)"
 
 # --- data directories ---------------------------------------------------------
-for dir in "$PROJECTS_DIR" "$LIBRARY_DIR/agents" "$LIBRARY_DIR/skills"; do
+for dir in "$PROJECTS_DIR" "$SOURCES_DIR" "$LIBRARY_DIR/agents" "$LIBRARY_DIR/skills"; do
   if [[ ! -d "$dir" ]]; then
     as_root install -d -o "$APP_USER" -g "$APP_USER" -m 0755 "$dir"
     log_ok "Created $dir"
@@ -85,6 +85,7 @@ env_set "$ENV_FILE" BACKEND_HOST "$BACKEND_HOST"
 env_set "$ENV_FILE" BACKEND_PORT "$BACKEND_PORT"
 env_set "$ENV_FILE" PROJECTS_DIR "$PROJECTS_DIR"
 env_set "$ENV_FILE" LIBRARY_DIR  "$LIBRARY_DIR"
+env_set "$ENV_FILE" SOURCES_DIR  "$SOURCES_DIR"
 env_set "$ENV_FILE" WORKER_CONCURRENCY "$WORKER_CONCURRENCY"
 env_fix_owner "$ENV_FILE"
 

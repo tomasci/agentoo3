@@ -4,16 +4,20 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { useSshKeys } from '@/features/ssh-keys'
-import { Button } from '@/shared/ui'
+import { Button, CopyButton } from '@/shared/ui'
 import { useCreateProject } from '../hooks/use-projects'
+import { useSources } from '../hooks/use-sources'
 import { apiErrorMessage } from '../lib/api-error'
 import { type ProjectFormValues, projectFormSchema } from '../model/project-form.schema'
 import styles from './create-project-form.module.scss'
+
+const SOURCES = ['clone', 'existing', 'empty'] as const
 
 export function CreateProjectForm() {
   const { t } = useTranslation()
   const create = useCreateProject()
   const { data: sshKeys } = useSshKeys()
+  const { data: sources, isPending: sourcesPending } = useSources()
   const [serverError, setServerError] = useState<string | null>(null)
 
   const {
@@ -25,25 +29,29 @@ export function CreateProjectForm() {
     formState: { errors },
   } = useForm<ProjectFormValues>({
     resolver: zodResolver(projectFormSchema),
-    defaultValues: { name: '', source: 'clone', remoteUrl: '', existingPath: '', sshKeyId: '' },
+    defaultValues: { name: '', source: 'clone', remoteUrl: '', sourceName: '', sshKeyId: '' },
   })
 
   const source = watch('source')
+  const entries = sources?.entries ?? []
+  const available = entries.filter((e) => !e.adopted)
 
   const onSubmit = (values: ProjectFormValues) => {
     setServerError(null)
+    const body =
+      values.source === 'clone'
+        ? {
+            name: values.name,
+            remoteUrl: values.remoteUrl,
+            // Empty string means "ssh defaults", not a key.
+            ...(values.sshKeyId ? { sshKeyId: values.sshKeyId } : {}),
+          }
+        : values.source === 'existing'
+          ? { name: values.name, sourceName: values.sourceName }
+          : { name: values.name, empty: true }
+
     create.mutate(
-      {
-        body:
-          values.source === 'clone'
-            ? {
-                name: values.name,
-                remoteUrl: values.remoteUrl,
-                // Empty string means "ssh defaults", not a key.
-                ...(values.sshKeyId ? { sshKeyId: values.sshKeyId } : {}),
-              }
-            : { name: values.name, existingPath: values.existingPath },
-      },
+      { body },
       {
         onSuccess: () => reset(),
         // The backend's message is the useful one — it names the exact rule the
@@ -60,22 +68,17 @@ export function CreateProjectForm() {
       <form className={styles.form} onSubmit={handleSubmit(onSubmit)} noValidate>
         <fieldset className={styles.tabs}>
           <legend className={styles.srOnly}>{t('projects.form.sourceLabel')}</legend>
-          <button
-            type="button"
-            className={styles.tab}
-            aria-pressed={source === 'clone'}
-            onClick={() => setValue('source', 'clone')}
-          >
-            {t('projects.form.sourceClone')}
-          </button>
-          <button
-            type="button"
-            className={styles.tab}
-            aria-pressed={source === 'existing'}
-            onClick={() => setValue('source', 'existing')}
-          >
-            {t('projects.form.sourceExisting')}
-          </button>
+          {SOURCES.map((option) => (
+            <button
+              key={option}
+              type="button"
+              className={styles.tab}
+              aria-pressed={source === option}
+              onClick={() => setValue('source', option)}
+            >
+              {t(`projects.form.source_${option}`)}
+            </button>
+          ))}
         </fieldset>
 
         <Field.Root invalid={Boolean(errors.name)}>
@@ -128,24 +131,53 @@ export function CreateProjectForm() {
         )}
 
         {source === 'existing' && (
-          <Field.Root invalid={Boolean(errors.existingPath)}>
-            <Field.Label className={styles.label}>{t('projects.form.path')}</Field.Label>
-            <Field.Input
-              className={styles.input}
-              placeholder="/srv/my-app"
-              {...register('existingPath')}
-            />
-            <span className={styles.hint}>{t('projects.form.pathHint')}</span>
-            {errors.existingPath?.message && (
+          <Field.Root invalid={Boolean(errors.sourceName)}>
+            <Field.Label className={styles.label}>{t('projects.form.folder')}</Field.Label>
+
+            {/* A list, not a path field: adoption is restricted to this one
+                directory, so there is nothing sensible to type. */}
+            <select className={styles.input} {...register('sourceName')}>
+              <option value="">
+                {sourcesPending
+                  ? t('common.loading')
+                  : available.length === 0
+                    ? t('projects.form.folderNone')
+                    : t('projects.form.folderChoose')}
+              </option>
+              {entries.map((entry) => (
+                <option key={entry.name} value={entry.name} disabled={entry.adopted}>
+                  {entry.name}
+                  {entry.isGitRepo ? ' · git' : ''}
+                  {entry.adopted
+                    ? ` — ${t('projects.form.folderTaken', { name: entry.adoptedBy })}`
+                    : ''}
+                </option>
+              ))}
+            </select>
+
+            {errors.sourceName?.message && (
               <Field.ErrorText className={styles.error}>
-                {t(errors.existingPath.message)}
+                {t(errors.sourceName.message)}
               </Field.ErrorText>
             )}
+
+            <div className={styles.tip}>
+              <p className={styles.tipText}>{t('projects.form.folderTip')}</p>
+              <div className={styles.tipRow}>
+                <code className={styles.tipPath}>{sources?.dir ?? '…'}</code>
+                {sources?.dir && <CopyButton value={sources.dir} />}
+              </div>
+            </div>
           </Field.Root>
         )}
 
+        {source === 'empty' && <p className={styles.hint}>{t('projects.form.emptyHint')}</p>}
+
         <div className={styles.submitRow}>
-          <Button type="submit" disabled={create.isPending}>
+          <Button
+            type="submit"
+            disabled={create.isPending || (source === 'existing' && available.length === 0)}
+          >
             {create.isPending ? t('projects.form.adding') : t('projects.form.submit')}
           </Button>
           {serverError && <span className={styles.error}>{serverError}</span>}

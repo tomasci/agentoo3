@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { projects } from '@/db/schema'
 import { keyPathFor } from '@/features/ssh-keys/service'
-import { checkAdoptPath } from '@/lib/adopt-path'
+import { resolveSource } from '@/lib/adopt-path'
 import {
   currentBranch,
   dirExists,
@@ -70,20 +70,32 @@ export async function runProjectSetup(job: ProjectSetupJob): Promise<void> {
     await ensureDir(`${projectPlugin(project.slug)}/agents`)
     await ensureDir(`${projectPlugin(project.slug)}/skills`)
 
-    if (project.source === 'existing') {
-      // Adopt a directory: symlink it into place rather than copying, so the
-      // user keeps working where they already were.
-      if (job.existingPath && !(await dirExists(repo))) {
-        // Re-validated on this side of the queue too: the job payload is data,
-        // and adopting a directory grants Claude full tool access to it.
-        const pathCheck = await checkAdoptPath(job.existingPath)
-        if (!pathCheck.ok || !pathCheck.resolved) {
-          await fail(project.id, `Refusing to adopt ${job.existingPath}: ${pathCheck.reason}`)
-          logger.warn(`Rejected adopt path for ${project.slug}: ${pathCheck.reason}`)
+    if (project.source === 'empty') {
+      // A fresh repository: worktrees need git, and an unborn HEAD is fine —
+      // addWorktree is guarded by hasCommits().
+      if (!(await dirExists(repo))) {
+        await ensureDir(repo)
+        const init = await git(['init', '-q', '-b', 'main', repo])
+        if (!init.ok) {
+          await fail(project.id, init.stderr || 'git init failed')
           return
         }
-        await symlink(pathCheck.resolved, repo, 'dir')
-        logger.info(`Linked ${repo} -> ${pathCheck.resolved}`)
+        logger.info(`Initialised an empty repository at ${repo}`)
+      }
+    } else if (project.source === 'existing') {
+      // Adopt a directory: symlink it into place rather than copying, so the
+      // user keeps working where they already were.
+      // Re-resolved on this side of the queue too: the job payload is data, and
+      // adopting a directory grants Claude full tool access to it.
+      if (project.sourceName && !(await dirExists(repo))) {
+        const check = await resolveSource(project.sourceName)
+        if (!check.ok || !check.resolved) {
+          await fail(project.id, `Refusing to adopt ${project.sourceName}: ${check.reason}`)
+          logger.warn(`Rejected source for ${project.slug}: ${check.reason}`)
+          return
+        }
+        await symlink(check.resolved, repo, 'dir')
+        logger.info(`Linked ${repo} -> ${check.resolved}`)
       }
     } else {
       if (!project.remoteUrl) {

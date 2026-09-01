@@ -5,6 +5,7 @@ import { env } from '@/env'
 import { healthRouter } from '@/features/health/routes'
 import { libraryRouter } from '@/features/library/routes'
 import { projectsRouter } from '@/features/projects/routes'
+import { sourcesRouter } from '@/features/sources/routes'
 import { sshKeysRouter } from '@/features/ssh-keys/routes'
 import { AppError } from '@/lib/errors'
 import { logger } from '@/lib/logger'
@@ -56,6 +57,7 @@ export function createApp() {
   app.route('/api', projectsRouter)
   app.route('/api', libraryRouter)
   app.route('/api', sshKeysRouter)
+  app.route('/api', sourcesRouter)
 
   app.doc('/api/openapi.json', {
     openapi: '3.1.0',

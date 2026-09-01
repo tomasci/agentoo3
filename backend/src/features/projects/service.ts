@@ -2,7 +2,7 @@ import { rm } from 'node:fs/promises'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { projects } from '@/db/schema'
-import { checkAdoptPath } from '@/lib/adopt-path'
+import { resolveSource } from '@/lib/adopt-path'
 import { badRequest, conflict, notFound } from '@/lib/errors'
 import { logger } from '@/lib/logger'
 import { assertInsideProjects, projectRepo, projectRoot, toSlug } from '@/lib/paths'
@@ -19,6 +19,7 @@ export function toDto(row: ProjectRow): ProjectDto {
     slug: row.slug,
     source: row.source,
     remoteUrl: row.remoteUrl,
+    sourceName: row.sourceName,
     sshKeyId: row.sshKeyId,
     defaultBranch: row.defaultBranch,
     status: row.status,
@@ -65,11 +66,22 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectD
   }
 
   let adoptPath: string | undefined
-  if (input.existingPath) {
+  if (input.sourceName) {
     // Must exist now, or the user gets a 'ready' project pointing at nothing.
-    const check = await checkAdoptPath(input.existingPath)
-    if (!check.ok) throw badRequest(check.reason ?? 'Invalid path')
-    // Hand the worker the resolved realpath, not the raw input.
+    const check = await resolveSource(input.sourceName)
+    if (!check.ok) throw badRequest(check.reason ?? 'Invalid folder')
+
+    // One project per folder: two projects sharing a directory would have their
+    // agents writing over each other.
+    const [taken] = await db
+      .select({ name: projects.name })
+      .from(projects)
+      .where(eq(projects.sourceName, input.sourceName))
+      .limit(1)
+    if (taken)
+      throw conflict(`"${input.sourceName}" is already used by the project "${taken.name}"`)
+
+    // The worker re-resolves from sourceName; this only proves it exists now.
     adoptPath = check.resolved
   }
 
@@ -80,8 +92,9 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectD
     .values({
       name: input.name,
       slug,
-      source: adoptPath ? 'existing' : 'clone',
+      source: input.empty ? 'empty' : adoptPath ? 'existing' : 'clone',
       remoteUrl: input.remoteUrl ?? null,
+      sourceName: input.sourceName ?? null,
       sshKeyId: input.sshKeyId ?? null,
       status: 'pending',
     })
@@ -90,7 +103,7 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectD
   if (!row) throw new Error('Insert returned no row')
 
   // The clone can fail on auth and take a while, so it never happens inline.
-  await enqueueProjectSetup({ projectId: row.id, existingPath: adoptPath })
+  await enqueueProjectSetup({ projectId: row.id })
   logger.info(`Project ${row.slug} created (${row.source}), setup queued`)
 
   return toDto(row)
@@ -158,7 +171,9 @@ export async function deleteProject(id: string, removeFiles: boolean): Promise<v
     // Only ever delete inside PROJECTS_DIR. An adopted directory the user
     // created elsewhere is theirs, and is never touched.
     if (row.source === 'existing') {
-      logger.warn(`Project ${row.slug} adopted an external directory; not deleting files`)
+      // The folder in SOURCES_DIR is the operator's; only our own scaffolding
+      // under PROJECTS_DIR is ours to remove.
+      logger.warn(`Project ${row.slug} adopted a source folder; leaving it in place`)
     } else {
       const target = assertInsideProjects(projectRoot(row.slug))
       await rm(target, { recursive: true, force: true })

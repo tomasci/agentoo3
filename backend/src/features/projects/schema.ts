@@ -6,8 +6,9 @@ export const projectSchema = z.object({
   id: z.string().uuid(),
   name: z.string(),
   slug: z.string(),
-  source: z.enum(['clone', 'existing']),
+  source: z.enum(['clone', 'existing', 'empty']),
   remoteUrl: z.string().nullable(),
+  sourceName: z.string().nullable(),
   sshKeyId: z.string().uuid().nullable(),
   defaultBranch: z.string().nullable(),
   status: projectStatusSchema,
@@ -19,20 +20,29 @@ export const projectSchema = z.object({
 })
 export type ProjectDto = z.infer<typeof projectSchema>
 
-// Either clone a remote or adopt a directory — never both, never neither.
+// Exactly one source. `sourceName` is a folder name inside SOURCES_DIR, never a
+// path — adoption is restricted to that directory by construction.
 export const createProjectSchema = z
   .object({
     name: z.string().min(1).max(120),
     remoteUrl: z.string().min(1).optional(),
-    existingPath: z.string().min(1).optional(),
+    sourceName: z
+      .string()
+      .min(1)
+      .optional()
+      .openapi({ description: 'Folder name inside SOURCES_DIR to adopt' }),
+    empty: z
+      .boolean()
+      .optional()
+      .openapi({ description: 'Create an empty git repository instead' }),
     sshKeyId: z
       .string()
       .uuid()
       .optional()
       .openapi({ description: 'Clone using this SSH key. Needed for a private repo over ssh.' }),
   })
-  .refine((v) => Boolean(v.remoteUrl) !== Boolean(v.existingPath), {
-    message: 'Provide exactly one of remoteUrl or existingPath',
+  .refine((v) => [v.remoteUrl, v.sourceName, v.empty].filter(Boolean).length === 1, {
+    message: 'Provide exactly one of remoteUrl, sourceName or empty',
   })
 export type CreateProjectInput = z.infer<typeof createProjectSchema>
 

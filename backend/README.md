@@ -78,7 +78,21 @@ deterministic caps (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`,
 
 ## Projects
 
-A project is one directory under `PROJECTS_DIR`, whether cloned or adopted:
+A project starts one of three ways: cloned from a remote, adopted from a folder
+in `SOURCES_DIR`, or created as an empty git repository.
+
+**Adoption is restricted to `SOURCES_DIR`, and takes a folder *name*, not a
+path.** That turns what was a denylist of dangerous roots into an allowlist:
+there is no list of system directories to keep current, and a project cannot be
+pointed at `/etc` by construction. Symlinks are resolved before the check, so a
+link inside that directory pointing out of it is refused. `SOURCES_DIR` is kept
+separate from `PROJECTS_DIR` because the latter holds our own managed project
+roots — listing those as adoptable would be nonsense.
+
+One project per folder: two projects sharing a directory would have their agents
+writing over each other, so an adopted folder is reported as taken.
+
+A project is one directory under `PROJECTS_DIR` however it started:
 
 ```
 projects/<slug>/
