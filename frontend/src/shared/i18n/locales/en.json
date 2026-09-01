@@ -179,5 +179,12 @@
   "notFound": {
     "message": "There is nothing at this address.",
     "back": "Back to projects"
+  },
+  "status": {
+    "keys": "{{count}} key",
+    "keys_plural": "{{count}} keys"
+  },
+  "theme": {
+    "toggle": "Toggle theme"
   }
 }

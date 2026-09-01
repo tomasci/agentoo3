@@ -2,13 +2,12 @@ import { Link, Outlet } from '@tanstack/react-router'
 import { useAtom } from 'jotai'
 import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { HealthBadge } from '@/features/health'
 import { SUPPORTED_LANGUAGES } from '@/shared/i18n'
 import { themeAtom } from '@/shared/store/ui'
 import { Button } from '@/shared/ui'
-import styles from './app.module.scss'
+import styles from './layout.module.scss'
+import { StatusBar } from './status-bar'
 
-/** Chrome shared by every page: header, nav, theme and language. */
 export function RootLayout() {
   const { t, i18n } = useTranslation()
   const [theme, setTheme] = useAtom(themeAtom)
@@ -18,16 +17,31 @@ export function RootLayout() {
   }, [theme])
 
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <div>
-          <Link to="/projects" className={styles.brand}>
-            <h1 className={styles.title}>{t('app.title')}</h1>
+    <div className={styles.shell}>
+      <aside className={styles.sidebar}>
+        <Link to="/projects" className={styles.brand}>
+          <h1 className={styles.logo}>{t('app.title')}</h1>
+          <p className={styles.tagline}>{t('app.subtitle')}</p>
+        </Link>
+
+        <nav className={styles.nav}>
+          {/* activeOptions exact:false keeps Projects lit while you are inside
+              a project, since /projects/$id sits under it. */}
+          <Link
+            to="/projects"
+            className={styles.navItem}
+            activeProps={{ 'aria-current': 'page' }}
+            activeOptions={{ exact: false }}
+          >
+            {t('nav.projects')}
           </Link>
-          <p className={styles.subtitle}>{t('app.subtitle')}</p>
-        </div>
-        <div className={styles.controls}>
-          <HealthBadge />
+          <Link to="/ssh-keys" className={styles.navItem} activeProps={{ 'aria-current': 'page' }}>
+            {t('nav.sshKeys')}
+          </Link>
+        </nav>
+
+        {/* Preferences, not navigation, so they sit at the foot. */}
+        <div className={styles.sidebarFoot}>
           <select
             className={styles.select}
             aria-label={t('language.label')}
@@ -40,31 +54,21 @@ export function RootLayout() {
               </option>
             ))}
           </select>
-          <Button type="button" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+          <Button
+            type="button"
+            aria-label={t('theme.toggle')}
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          >
             {theme === 'dark' ? '☀' : '☾'}
           </Button>
         </div>
-      </header>
+      </aside>
 
-      <nav className={styles.nav}>
-        {/* activeProps rather than manual comparison: a project page is under
-            /projects, so `fuzzy` keeps the tab lit while you are inside one. */}
-        <Link
-          to="/projects"
-          className={styles.navItem}
-          activeProps={{ 'aria-current': 'page' }}
-          activeOptions={{ exact: false }}
-        >
-          {t('nav.projects')}
-        </Link>
-        <Link to="/ssh-keys" className={styles.navItem} activeProps={{ 'aria-current': 'page' }}>
-          {t('nav.sshKeys')}
-        </Link>
-      </nav>
-
-      <main>
+      <main className={styles.body}>
         <Outlet />
       </main>
+
+      <StatusBar />
     </div>
   )
 }

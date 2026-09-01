@@ -180,5 +180,13 @@
   "notFound": {
     "message": "По этому адресу ничего нет.",
     "back": "К проектам"
+  },
+  "status": {
+    "keys": "{{count}} ключ",
+    "keys_few": "{{count}} ключа",
+    "keys_many": "{{count}} ключей"
+  },
+  "theme": {
+    "toggle": "Сменить тему"
   }
 }

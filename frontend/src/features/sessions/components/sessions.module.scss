@@ -68,7 +68,11 @@
 .error { color: var(--warn); font-size: 0.8125rem; }
 .row { display: flex; gap: v.$space-sm; align-items: center; flex-wrap: wrap; }
 
-.list { display: grid; gap: v.$space-md; }
+.list {
+  display: grid;
+  gap: v.$space-md;
+  grid-template-columns: repeat(auto-fill, minmax(26rem, 1fr));
+}
 
 .session {
   padding: v.$space-lg;

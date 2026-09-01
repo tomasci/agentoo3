@@ -92,7 +92,11 @@
   width: 10rem;
 }
 
-.list { display: grid; gap: v.$space-md; }
+.list {
+  display: grid;
+  gap: v.$space-md;
+  grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr));
+}
 
 .empty {
   padding: v.$space-xl v.$space-lg;

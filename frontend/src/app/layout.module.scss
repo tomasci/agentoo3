@@ -1,0 +1,175 @@
+@use '@/styles/variables' as v;
+
+// Three fixed regions and one scrolling one, the way an IDE is laid out:
+//
+//   ┌──────────┬───────────────────────┐
+//   │ sidebar  │ page body (scrolls)   │
+//   ├──────────┴───────────────────────┤
+//   │ status bar                       │
+//   └──────────────────────────────────┘
+//
+// The grid owns the viewport so only `.body` scrolls; the sidebar and status bar
+// stay put without `position: fixed` and the overlap bugs that brings.
+.shell {
+  display: grid;
+  grid-template-columns: v.$sidebar-width 1fr;
+  grid-template-rows: 1fr auto;
+  grid-template-areas:
+    'sidebar body'
+    'status  status';
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.sidebar {
+  grid-area: sidebar;
+  display: flex;
+  flex-direction: column;
+  gap: v.$space-lg;
+  padding: v.$space-lg v.$space-md;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  overflow-y: auto;
+}
+
+.brand {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  padding: 0 v.$space-sm;
+
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+}
+
+.logo {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.tagline {
+  margin: 0.15rem 0 0;
+  font-size: 0.75rem;
+  color: var(--muted-fg);
+  line-height: 1.4;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.navItem {
+  display: block;
+  padding: 0.45rem v.$space-sm;
+  border-radius: v.$radius-sm;
+  color: var(--muted-fg);
+  text-decoration: none;
+  font-size: 0.875rem;
+  border-left: 2px solid transparent;
+
+  &:hover { color: var(--fg); background: var(--bg); }
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  &[aria-current='page'] {
+    color: var(--fg);
+    background: var(--bg);
+    border-left-color: var(--accent);
+    font-weight: 500;
+  }
+}
+
+// Pushed to the bottom of the sidebar: preferences, not navigation.
+.sidebarFoot {
+  margin-top: auto;
+  display: flex;
+  gap: v.$space-sm;
+  align-items: center;
+  padding: 0 v.$space-sm;
+}
+
+.select {
+  flex: 1;
+  min-width: 0;
+  padding: 0.3rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: v.$radius-sm;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+.body {
+  grid-area: body;
+  overflow-y: auto;
+  padding: v.$space-xl v.$space-lg;
+}
+
+.status {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: v.$space-md;
+  padding: 0.3rem v.$space-md;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 0.75rem;
+  color: var(--muted-fg);
+  min-height: 1.75rem;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.statusItem { display: inline-flex; align-items: center; gap: 0.35rem; }
+.statusSpacer { margin-left: auto; }
+
+.dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  flex: none;
+
+  &.ok { background: var(--ok); }
+  &.warn { background: var(--warn); }
+  &.down { background: var(--muted); }
+}
+
+.statusLink {
+  color: var(--accent);
+  text-decoration: none;
+  &:hover { text-decoration: underline; }
+}
+
+// Narrow screens: the sidebar becomes a strip across the top rather than eating
+// half the width.
+@media (max-width: 40rem) {
+  .shell {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'sidebar'
+      'body'
+      'status';
+    grid-template-rows: auto 1fr auto;
+  }
+
+  .sidebar {
+    flex-direction: row;
+    align-items: center;
+    gap: v.$space-md;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    padding: v.$space-sm v.$space-md;
+    overflow-x: auto;
+  }
+
+  .tagline { display: none; }
+  .nav { flex-direction: row; }
+  .navItem { border-left: 0; border-bottom: 2px solid transparent; }
+  .navItem[aria-current='page'] { border-left: 0; border-bottom-color: var(--accent); }
+  .sidebarFoot { margin-top: 0; margin-left: auto; }
+  .select { flex: none; width: 4.5rem; }
+  .body { padding: v.$space-lg v.$space-md; }
+}

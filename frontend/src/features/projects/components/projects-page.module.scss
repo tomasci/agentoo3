@@ -26,6 +26,9 @@
 .list {
   display: grid;
   gap: v.$space-md;
+  // Full width, but cards stop growing at a comfortable measure rather than
+  // stretching a two-line card across an ultrawide monitor.
+  grid-template-columns: repeat(auto-fill, minmax(28rem, 1fr));
 }
 
 .empty {

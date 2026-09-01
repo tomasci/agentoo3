@@ -59,6 +59,37 @@ a single `index.ts`. Import across features through that barrel, never by
 reaching into another feature's internals. Anything genuinely shared moves to
 `shared/`.
 
+## Layout
+
+An IDE-style shell rather than a centred column:
+
+```
+┌──────────┬───────────────────────┐
+│ sidebar  │ page body (scrolls)   │
+│  logo    │                       │
+│  nav     │                       │
+│  lang/   │                       │
+│  theme   │                       │
+├──────────┴───────────────────────┤
+│ status bar                       │
+└──────────────────────────────────┘
+```
+
+One CSS grid owns the viewport (`height: 100dvh`), so only the body scrolls and
+the sidebar and status bar stay put **without `position: fixed`** — which avoids
+the overlap and scroll-locking bugs fixed positioning brings. Language and theme
+sit at the foot of the sidebar because they are preferences, not navigation.
+
+The status bar answers "is this working": backend reachable, whether a Claude
+credential is present, project and key counts, version. A reader should not have
+to open a page to discover the backend is down.
+
+Pages are full width. Card lists use `auto-fill` with a minimum track, so they
+fill a wide monitor in columns instead of stretching one card across it.
+
+Below 40rem the sidebar becomes a strip across the top rather than eating half
+the width.
+
 ## Routing
 
 TanStack Router, defined in code rather than by file convention
