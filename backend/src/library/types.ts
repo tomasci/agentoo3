@@ -36,6 +36,29 @@ export type LibraryAgent = z.infer<typeof libraryAgentSchema>
 export const librarySkillSchema = z.object({
   name: z.string().min(1),
   description: z.string(),
+  // The markdown body of SKILL.md, without the frontmatter.
+  body: z.string(),
   path: z.string(),
+  // Files bundled beside SKILL.md. Listed so a delete can say what goes with
+  // it; the UI never edits them.
+  extraFiles: z.array(z.string()),
 })
 export type LibrarySkill = z.infer<typeof librarySkillSchema>
+
+/**
+ * A name that becomes a filename or a directory name.
+ *
+ * Checked like a path because it is one: the same rule that keeps an ssh key
+ * name from escaping its directory applies here.
+ */
+export function checkLibraryName(name: string): { ok: boolean; reason?: string } {
+  if (name.length === 0) return { ok: false, reason: 'Name is empty' }
+  if (name.length > 64) return { ok: false, reason: 'Name is too long (max 64)' }
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+    return {
+      ok: false,
+      reason: 'Use lowercase letters, digits and dashes, starting with a letter or digit',
+    }
+  }
+  return { ok: true }
+}

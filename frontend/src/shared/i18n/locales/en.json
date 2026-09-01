@@ -10,7 +10,8 @@
     "copied": "Copied",
     "cancel": "Cancel",
     "actions": "Actions",
-    "working": "Working…"
+    "working": "Working…",
+    "save": "Save"
   },
   "health": {
     "checking": "Checking backend…",
@@ -131,7 +132,9 @@
     "sessions": "Sessions",
     "noneOpen": "None open",
     "noProjects": "No projects yet.",
-    "overview": "Overview"
+    "overview": "Overview",
+    "library": "Library",
+    "projectLibrary": "Agents & skills"
   },
   "sshKeys": {
     "heading": "Your keys",
@@ -220,5 +223,80 @@
   },
   "theme": {
     "toggle": "Toggle theme"
+  },
+  "library": {
+    "intro": "Agents and skills live here once and are used by any project you select them for. Editing one changes it everywhere it is used — that is the point of a shared library rather than per-project copies.",
+    "agents": "Agents",
+    "skills": "Skills",
+    "newAgent": "New agent",
+    "newSkill": "New skill",
+    "noAgents": "No agents yet. An agent is a role — an orchestrator that plans and delegates, or a specialist it delegates to.",
+    "noSkills": "No skills yet. A skill is knowledge an agent can pull in when it is relevant.",
+    "loadFailed": "Could not load the library",
+    "saveFailed": "Could not save",
+    "backToLibrary": "Library",
+    "usedByCount": "{{count}} project",
+    "usedByCount_plural": "{{count}} projects",
+    "bundledCount": "{{count}} file",
+    "bundledCount_plural": "{{count}} files",
+    "table": {
+      "name": "Name",
+      "role": "Role",
+      "description": "Description",
+      "model": "Model",
+      "usedBy": "Used by",
+      "files": "Bundled"
+    },
+    "role": {
+      "orchestrator": "orchestrator",
+      "subagent": "subagent"
+    },
+    "roleHint": {
+      "orchestrator": "Can drive a session and delegate to subagents. Gets a delegation instruction added automatically.",
+      "subagent": "Only reachable by delegation from an orchestrator; never drives a session itself."
+    },
+    "agent": {
+      "name": "Name",
+      "nameHint": "Becomes the filename. Lowercase letters, digits and dashes. Cannot be changed later.",
+      "role": "Role",
+      "model": "Model",
+      "inherit": "Inherit",
+      "default": "Default",
+      "effort": "Effort",
+      "maxTurns": "Max turns",
+      "unlimited": "unlimited",
+      "description": "Description",
+      "descriptionPlaceholder": "Reviews a change for correctness bugs. Read-only.",
+      "descriptionHint": "How Claude decides when to use this agent. Write it as a trigger, not a title.",
+      "restrictTools": "Restrict which tools this agent may use",
+      "toolsHint": "Leave off to inherit every tool available to subagents. A tool left out is not in the agent's session at all — it works without it rather than asking permission.",
+      "prompt": "Prompt",
+      "promptPlaceholder": "You review changes for defects that would actually bite…",
+      "promptHint": "The agent's system prompt. A subagent starts with a fresh context and sees nothing of the parent conversation, so say what it needs to know here.",
+      "promptHintOrchestrator": "The agent's system prompt. Anthropic's delegation guidance is appended automatically for orchestrators — you do not need to write it.",
+      "deleteTitle": "Delete agent?",
+      "deleteConfirm": "Delete the agent \"{{name}}\"? It is also removed from every project using it."
+    },
+    "skill": {
+      "name": "Name",
+      "nameHint": "Becomes the directory name. Lowercase letters, digits and dashes.",
+      "description": "Description",
+      "descriptionPlaceholder": "How this project runs and writes tests.",
+      "descriptionHint": "How Claude decides when this skill is relevant.",
+      "body": "SKILL.md",
+      "bodyHint": "The markdown body. Files bundled beside it are managed over SSH and are left untouched by this editor.",
+      "bundled": "Bundled beside SKILL.md:",
+      "deleteTitle": "Delete skill?",
+      "deleteConfirm": "Delete the skill \"{{name}}\"? It is also removed from every project using it.",
+      "deleteConfirmWithFiles": "Delete the skill \"{{name}}\"? The whole directory goes, including: {{files}}"
+    },
+    "assign": {
+      "intro": "Pick the agents and skills this project should use. They are symlinked beside the repository, never into it, so your working tree stays clean.",
+      "emptyLibrary": "The library is empty.",
+      "goToLibrary": "Add agents and skills",
+      "saved": "Saved",
+      "failed": "Could not save the selection",
+      "hint": "Changes apply to the next session; a running one keeps what it started with."
+    }
   }
 }

@@ -1,0 +1,168 @@
+@use '@/styles/variables' as v;
+
+.page { display: grid; gap: v.$space-xl; max-width: 68rem; }
+
+.section { display: grid; gap: v.$space-md; }
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: v.$space-md;
+}
+
+.title { margin: 0; font-size: 1.0625rem; font-weight: 600; }
+
+.intro {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted-fg);
+  line-height: 1.6;
+  max-width: 52rem;
+}
+
+.wrapper { border: 1px solid var(--border); border-radius: v.$radius; overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+
+.th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted-fg);
+  padding: 0.6rem v.$space-md;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  white-space: nowrap;
+}
+
+.td { padding: 0.65rem v.$space-md; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.row:last-child .td { border-bottom: 0; }
+.row:hover { background: var(--surface); }
+
+.nameLink {
+  color: var(--fg);
+  text-decoration: none;
+  font-weight: 500;
+  &:hover { text-decoration: underline; }
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+}
+
+.role {
+  font-size: 0.6875rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  white-space: nowrap;
+}
+.orchestrator { border-color: var(--accent); color: var(--accent); }
+
+.muted { color: var(--muted-fg); font-size: 0.8125rem; }
+.mono { font-family: ui-monospace, Menlo, monospace; font-size: 0.75rem; color: var(--muted-fg); }
+.actionsCell { width: 1%; text-align: right; white-space: nowrap; }
+
+.empty {
+  padding: v.$space-xl v.$space-lg;
+  text-align: center;
+  color: var(--muted-fg);
+  font-size: 0.9375rem;
+}
+
+// --- editor ---
+
+.editor { display: grid; gap: v.$space-lg; max-width: 60rem; }
+
+.card {
+  padding: v.$space-lg;
+  border: 1px solid var(--border);
+  border-radius: v.$radius;
+  background: var(--surface);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: v.$space-md;
+}
+
+.field { display: grid; gap: 0.35rem; }
+.label { font-size: 0.8125rem; color: var(--muted-fg); }
+
+.input,
+.select {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: v.$radius-sm;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  &:disabled { opacity: 0.6; }
+}
+
+.prompt {
+  width: 100%;
+  min-height: 26rem;
+  padding: v.$space-md;
+  border: 1px solid var(--border);
+  border-radius: v.$radius-sm;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.65;
+  resize: vertical;
+  tab-size: 2;
+
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+}
+
+.tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.35rem v.$space-md;
+}
+
+.tool {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.hint { font-size: 0.75rem; color: var(--muted-fg); line-height: 1.55; }
+.error { color: var(--warn); font-size: 0.8125rem; }
+.row { display: flex; gap: v.$space-sm; align-items: center; flex-wrap: wrap; }
+.back { font-size: 0.8125rem; color: var(--accent); text-decoration: none; justify-self: start; }
+
+.files {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.75rem;
+  color: var(--muted-fg);
+}
+
+// --- per-project assignment ---
+
+.assignList { display: grid; gap: 0.35rem; }
+
+.assignItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: v.$radius-sm;
+  cursor: pointer;
+
+  &:hover { background: var(--bg); }
+}
+
+.assignBody { display: grid; gap: 0.1rem; }
+.assignName { font-size: 0.875rem; font-weight: 500; }
+.assignDesc { font-size: 0.75rem; color: var(--muted-fg); line-height: 1.5; }

@@ -1,9 +1,10 @@
 import { createRootRoute, createRoute, createRouter, Link, redirect } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
+import { AgentEditorPage, LibraryPage, SkillEditorPage } from '@/features/library'
 import { ProjectsPage } from '@/features/projects'
 import { SshKeysPage } from '@/features/ssh-keys'
 import { ProjectLayout } from './project-layout'
-import { ProjectOverviewRoute, ProjectSessionsRoute } from './project-routes'
+import { ProjectLibraryRoute, ProjectOverviewRoute, ProjectSessionsRoute } from './project-routes'
 import { RootLayout } from './root-layout'
 
 // Code-based routes rather than the file-based convention: file-based needs a
@@ -47,6 +48,50 @@ const projectSessionsRoute = createRoute({
   component: ProjectSessionsRoute,
 })
 
+const projectLibraryRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/library',
+  component: ProjectLibraryRoute,
+})
+
+// The global library. Editors are their own pages rather than dialogs: a prompt
+// is the length of a document, and a document deserves an address.
+const libraryRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library',
+  component: LibraryPage,
+})
+
+const newAgentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/agents/new',
+  component: () => <AgentEditorPage />,
+})
+
+const agentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/agents/$name',
+  component: function AgentRoute() {
+    const { name } = agentRoute.useParams()
+    return <AgentEditorPage name={name} />
+  },
+})
+
+const newSkillRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/skills/new',
+  component: () => <SkillEditorPage />,
+})
+
+const skillRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/skills/$name',
+  component: function SkillRoute() {
+    const { name } = skillRoute.useParams()
+    return <SkillEditorPage name={name} />
+  },
+})
+
 const sshKeysRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/ssh-keys',
@@ -56,7 +101,13 @@ const sshKeysRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   indexRoute,
   projectsRoute,
-  projectRoute.addChildren([projectOverviewRoute, projectSessionsRoute]),
+  projectRoute.addChildren([projectOverviewRoute, projectSessionsRoute, projectLibraryRoute]),
+  // `new` before `$name`, or "new" would be read as a name.
+  newAgentRoute,
+  agentRoute,
+  newSkillRoute,
+  skillRoute,
+  libraryRoute,
   sshKeysRoute,
 ])
 

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useLibraryAgents } from '@/features/library'
+import { useAgents } from '@/features/library'
 import { useProjects } from '@/features/projects'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import { Button } from '@/shared/ui'
@@ -12,7 +12,7 @@ export function ProjectSessions({ projectId }: { projectId: string }) {
   const { t } = useTranslation()
   const { data: projects } = useProjects()
   const { data: sessions, isPending, isError, error } = useSessions(projectId)
-  const { data: agents } = useLibraryAgents()
+  const { data: agents } = useAgents()
   const create = useCreateSession(projectId)
 
   const [title, setTitle] = useState('')

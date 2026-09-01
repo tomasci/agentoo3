@@ -1,4 +1,5 @@
 import { useParams } from '@tanstack/react-router'
+import { ProjectLibraryPage } from '@/features/library'
 import { ProjectOverview, useProjects } from '@/features/projects'
 import { ProjectSessions } from '@/features/sessions'
 
@@ -13,4 +14,9 @@ export function ProjectOverviewRoute() {
 export function ProjectSessionsRoute() {
   const { projectId } = useParams({ from: '/projects/$projectId' })
   return <ProjectSessions projectId={projectId} />
+}
+
+export function ProjectLibraryRoute() {
+  const { projectId } = useParams({ from: '/projects/$projectId' })
+  return <ProjectLibraryPage projectId={projectId} />
 }

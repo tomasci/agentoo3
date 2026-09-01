@@ -41,6 +41,14 @@ export function RootLayout() {
               {t('nav.projects')}
             </Link>
             <Link
+              to="/library"
+              className={styles.navItem}
+              activeProps={{ 'aria-current': 'page' }}
+              activeOptions={{ exact: false }}
+            >
+              {t('nav.library')}
+            </Link>
+            <Link
               to="/ssh-keys"
               className={styles.navItem}
               activeProps={{ 'aria-current': 'page' }}
@@ -71,6 +79,14 @@ export function RootLayout() {
               activeProps={{ 'aria-current': 'page' }}
             >
               {t('nav.sessions')}
+            </Link>
+            <Link
+              to="/projects/$projectId/library"
+              params={{ projectId: current.id }}
+              className={styles.navItem}
+              activeProps={{ 'aria-current': 'page' }}
+            >
+              {t('nav.projectLibrary')}
             </Link>
           </nav>
         )}

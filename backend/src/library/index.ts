@@ -6,8 +6,10 @@ import { env } from '@/env'
 import { logger } from '@/lib/logger'
 import { agentFrontmatterSchema, type LibraryAgent, type LibrarySkill } from './types'
 
-const AGENTS_DIR = () => join(env.LIBRARY_DIR, 'agents')
-const SKILLS_DIR = () => join(env.LIBRARY_DIR, 'skills')
+export const AGENTS_DIR = () => join(env.LIBRARY_DIR, 'agents')
+export const SKILLS_DIR = () => join(env.LIBRARY_DIR, 'skills')
+export const agentPath = (name: string) => join(AGENTS_DIR(), `${name}.md`)
+export const skillDir = (name: string) => join(SKILLS_DIR(), name)
 
 /** A one-line reason, rather than a wall of Zod issue JSON in the log. */
 function describeError(error: unknown): string {
@@ -71,11 +73,17 @@ export async function listSkills(): Promise<LibrarySkill[]> {
     const skillFile = join(path, 'SKILL.md')
     if (!(await exists(skillFile))) continue
     try {
-      const { data } = matter(await readFile(skillFile, 'utf8'))
+      const { data, content } = matter(await readFile(skillFile, 'utf8'))
+      const siblings = (await readdir(path, { withFileTypes: true }))
+        .filter((f) => f.isFile() && f.name !== 'SKILL.md')
+        .map((f) => f.name)
+        .sort()
       skills.push({
         name: typeof data.name === 'string' ? data.name : entry.name,
         description: typeof data.description === 'string' ? data.description : '',
+        body: content.trim(),
         path,
+        extraFiles: siblings,
       })
     } catch (error) {
       logger.warn(
@@ -95,3 +103,27 @@ export async function getAgent(name: string): Promise<LibraryAgent | undefined> 
 export const orchestrators = (agents: LibraryAgent[]) =>
   agents.filter((a) => a.role === 'orchestrator')
 export const subagents = (agents: LibraryAgent[]) => agents.filter((a) => a.role === 'subagent')
+
+// --- writing ------------------------------------------------------------------
+
+/**
+ * Serialise an agent back to markdown.
+ *
+ * gray-matter's stringify is used rather than hand-rolled YAML so a description
+ * containing a colon, or a prompt containing `---`, cannot corrupt the file.
+ * `name` is deliberately not written: the filename is the name, and storing it
+ * twice invites the two to disagree.
+ */
+export function agentToMarkdown(agent: Omit<LibraryAgent, 'path' | 'name'>): string {
+  const { prompt, ...frontmatter } = agent
+  // Drop empty optionals so the file stays readable rather than accumulating
+  // `tools: null` noise.
+  const data = Object.fromEntries(
+    Object.entries(frontmatter).filter(([, v]) => v !== undefined && v !== null),
+  )
+  return matter.stringify(`\n${prompt.trim()}\n`, data)
+}
+
+export function skillToMarkdown(name: string, description: string, body: string): string {
+  return matter.stringify(`\n${body.trim()}\n`, { name, description })
+}
