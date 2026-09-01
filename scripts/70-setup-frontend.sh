@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Frontend: install dependencies, build, and run the built output as a service.
 #
+# The API client is generated here, not committed, so it always matches the
+# backend installed on this machine.
+#
 # Deliberately not `vite preview` — Vite says that is not a production server.
 # The build is served by a small Bun static server (frontend/server.ts) behind
 # nginx, which is what makes http://<tailnet-ip>/ stop returning 502.
@@ -22,7 +25,7 @@ app_home="$(getent passwd "$APP_USER" 2>/dev/null | cut -d: -f6 || true)"
 [[ -n "$app_home" ]] || die "No home directory for '$APP_USER'."
 
 if [[ "${DRY_RUN:-0}" == "1" ]]; then
-  log_info "[dry-run] would run 'bun install' and 'bun run build' in $FRONTEND_DIR"
+  log_info "[dry-run] would run 'bun install', 'bun run codegen' and 'bun run build' in $FRONTEND_DIR"
   log_info "[dry-run] would install and start the ${APP_NAME}-frontend service"
   exit 0
 fi
@@ -42,6 +45,23 @@ else
   run_as_app bash -c "cd '$FRONTEND_DIR' && bun install" || die "bun install failed."
 fi
 log_ok "Dependencies installed"
+
+# --- API client ---------------------------------------------------------------
+# kubb reads the spec the backend step rendered. Without it the build would fail
+# with a wall of "Cannot find module" errors, so say what is actually wrong.
+spec="$BACKEND_DIR/openapi.json"
+if [[ ! -f "$spec" ]]; then
+  die "No $spec — the backend step renders it.
+    Run:  $INSTALL_SH --only backend
+    then: $INSTALL_SH --only frontend"
+fi
+
+log_info "Generating the API client from $spec"
+run_as_app bash -c "cd '$FRONTEND_DIR' && KUBB_DISABLE_TELEMETRY=1 bun run codegen" \
+  || die "API client generation failed."
+generated="$FRONTEND_DIR/src/shared/api/generated"
+[[ -d "$generated" ]] || die "codegen reported success but $generated is missing."
+log_ok "Generated $(find "$generated" -name '*.ts' | wc -l) files into src/shared/api/generated"
 
 # --- build --------------------------------------------------------------------
 log_info "Building for production (bun run build)"

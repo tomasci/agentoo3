@@ -1,3 +1,7 @@
 node_modules/
 dist/
 *.tsbuildinfo
+
+# Rendered from the Hono app by `bun run openapi` during installation, so the
+# frontend's client always matches the backend actually running here.
+openapi.json

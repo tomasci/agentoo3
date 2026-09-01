@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Fail if any file under a source directory is git-ignored.
 #
-# This exists because `frontend/.gitignore` once carried
-# `src/shared/api/generated/`, left over from when that directory was scaffolded
-# empty. The generated API client was therefore never committed, every local
-# build passed because the files were present but untracked, and the server's
-# clean checkout failed with 21 "Cannot find module" errors.
+# This exists because a directory of hand-written source was once ignored by a
+# leftover .gitignore rule: every local build passed, because the files were
+# present but untracked, and the server's clean checkout failed with a wall of
+# "Cannot find module" errors.
 #
 # A build against a working tree cannot catch that. This can, in milliseconds.
+# Genuinely generated output is allowlisted below rather than tracked.
 
 set -Eeuo pipefail
 
@@ -15,9 +15,14 @@ cd -- "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
 SOURCE_DIRS=(frontend/src backend/src)
 
+# Output that is generated at install time and ignored on purpose. Anything else
+# under a source directory being ignored is the bug this script exists for.
+ALLOWED_IGNORED_RE='^frontend/src/shared/api/generated/'
+
 ignored="$(
   git ls-files --others --ignored --exclude-standard -- "${SOURCE_DIRS[@]}" 2>/dev/null \
-    | grep -v '/node_modules/' || true
+    | grep -v '/node_modules/' \
+    | grep -vE "$ALLOWED_IGNORED_RE" || true
 )"
 
 if [[ -n "$ignored" ]]; then
@@ -32,12 +37,10 @@ fi
 # does not untrack it and the scan goes quiet — so assert outright that the
 # generated artifacts a clean checkout needs are in the index.
 REQUIRED_TRACKED=(
-  frontend/src/shared/api/generated/.kubb/client.ts
-  frontend/src/shared/api/generated/hooks/useGetApiProjects.ts
-  frontend/src/shared/api/generated/types/GetApiProjects.ts
-  backend/openapi.json
   frontend/bun.lock
   backend/bun.lock
+  frontend/kubb.config.ts
+  backend/src/openapi.ts
 )
 
 missing=()

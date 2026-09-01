@@ -85,8 +85,8 @@ scripts/
   62-install-redis.sh   Redis, localhost-only, password-protected
   64-install-tailscale.sh Tailscale VPN
   66-install-nginx.sh   nginx on the tailnet (+ tailscale serve for HTTPS)
-  68-setup-frontend.sh  bun install, production build, systemd service
-  70-setup-backend.sh   bun install, migrations, API + worker services
+  68-setup-backend.sh   bun install, OpenAPI spec, migrations, API + worker
+  70-setup-frontend.sh  bun install, generate API client, build, service
   80-configure-ufw.sh   firewall — runs last, once all ports are known
   90-summary.sh         verify everything and report
 backend/                Hono API + worker driving the Claude Agent SDK
@@ -150,8 +150,9 @@ a folder already on the server, watch setup progress, and when a private repo
 needs authentication the UI shows the failure with the exact commands to run over
 SSH and a "check again, I did the manual steps" button.
 
-The API client is generated from the backend's OpenAPI document with kubb, and
-both the spec and the generated client are committed. Stack and layout:
+The API client is generated from the backend's OpenAPI document with kubb during
+installation — neither the spec nor the generated client is committed, so the
+client always matches the backend running on that machine. Stack and layout:
 `frontend/README.md`.
 
 ## Claude Code

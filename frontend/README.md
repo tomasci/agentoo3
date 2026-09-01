@@ -59,18 +59,24 @@ a single `index.ts`. Import across features through that barrel, never by
 reaching into another feature's internals. Anything genuinely shared moves to
 `shared/`.
 
-## The API client is generated
+## The API client is generated, not committed
 
-`src/shared/api/generated/` is kubb's output from `backend/openapi.json`, and
-both are committed — so a build never depends on codegen succeeding, and a fresh
-checkout typechecks without a running server.
+`src/shared/api/generated/` is kubb's output from `backend/openapi.json`.
+**Neither is committed.** Both are produced during installation, from the backend
+source on that machine, so the client always matches the backend actually
+running there — a snapshot taken on someone's laptop can silently disagree with
+what is deployed.
 
-After changing a backend route:
+That means a fresh checkout does not typecheck or build until you generate:
 
 ```
-cd ../backend && bun run openapi     # rewrite openapi.json from the Hono app
-cd ../frontend && bun run codegen    # regenerate types, schemas, hooks, clients
+cd backend  && bun run openapi     # render openapi.json from the Hono app
+cd frontend && bun run codegen     # types, zod schemas, query hooks, clients
+bun run build
 ```
+
+The installer does this for you: step `backend` renders the spec, step
+`frontend` generates against it. That is why `backend` runs first.
 
 Generated code is excluded from Biome, and `noUnusedLocals` is deliberately off
 in `tsconfig.json`: kubb emits unused type aliases, and tsc checks imported files

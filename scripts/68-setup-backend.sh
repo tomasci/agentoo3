@@ -43,6 +43,15 @@ else
 fi
 log_ok "Dependencies installed"
 
+# --- OpenAPI document ---------------------------------------------------------
+# Rendered from this machine's Hono app, so the frontend's generated client
+# matches the backend actually running here rather than a committed snapshot.
+log_info "Rendering the OpenAPI document"
+run_as_app bash -c "cd '$BACKEND_DIR' && DATABASE_URL=unused REDIS_URL=unused bun run openapi" \
+  || die "Could not render openapi.json. The frontend step needs it to generate its client."
+[[ -f "$BACKEND_DIR/openapi.json" ]] || die "openapi.json was not written."
+log_ok "Wrote $BACKEND_DIR/openapi.json ($(jq -r '.paths | keys | length' "$BACKEND_DIR/openapi.json" 2>/dev/null || echo '?') paths)"
+
 # --- data directories ---------------------------------------------------------
 for dir in "$PROJECTS_DIR" "$LIBRARY_DIR/agents" "$LIBRARY_DIR/skills"; do
   if [[ ! -d "$dir" ]]; then

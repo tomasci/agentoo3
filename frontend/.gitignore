@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# src/shared/api/generated is deliberately NOT ignored. It is kubb's output from
-# backend/openapi.json and it is committed on purpose, so a fresh checkout
-# typechecks and builds without running codegen or a backend.
+# Generated during installation by `bun run codegen`, from the openapi.json the
+# backend on that machine produces. Deliberately not committed: a snapshot taken
+# on a developer's checkout can silently disagree with the deployed backend.
+src/shared/api/generated/
