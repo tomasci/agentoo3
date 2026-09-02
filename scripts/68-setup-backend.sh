@@ -33,6 +33,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   log_info "[dry-run] would reassign $REPO_ROOT and the data directories to $APP_USER"
   log_info "[dry-run] would run 'bun install' and migrations in $BACKEND_DIR"
   log_info "[dry-run] would create $PROJECTS_DIR, $SOURCES_DIR and $LIBRARY_DIR"
+  log_info "[dry-run] would create $SSH_KEYS_DIR (0700) and adopt any keys from ~/.ssh/$APP_NAME"
   log_info "[dry-run] would install ${APP_NAME}-api and ${APP_NAME}-worker services"
   exit 0
 fi
@@ -43,7 +44,8 @@ run_as_app() { as_user "$APP_USER" env HOME="$app_home" PATH="/usr/local/bin:/us
 # Before anything runs as APP_USER. An install that previously ran as root left
 # a root-owned checkout and node_modules behind, and bun cannot relink into
 # those as another user.
-reconcile_ownership "$APP_USER" "$REPO_ROOT" "$PROJECTS_DIR" "$SOURCES_DIR" "$LIBRARY_DIR"
+reconcile_ownership "$APP_USER" "$REPO_ROOT" "$PROJECTS_DIR" "$SOURCES_DIR" "$LIBRARY_DIR" \
+  "$SSH_KEYS_DIR"
 
 # --- dependencies -------------------------------------------------------------
 log_info "Installing dependencies (bun install)"
@@ -75,6 +77,38 @@ for dir in "$PROJECTS_DIR" "$SOURCES_DIR" "$LIBRARY_DIR/agents" "$LIBRARY_DIR/sk
   fi
 done
 
+# 0700, unlike the others: it holds private keys, and ssh refuses to use a key
+# whose directory or file is group- or world-readable.
+if [[ ! -d "$SSH_KEYS_DIR" ]]; then
+  as_root install -d -o "$APP_USER" -g "$APP_USER" -m 0700 "$SSH_KEYS_DIR"
+  log_ok "Created $SSH_KEYS_DIR"
+else
+  as_root chmod 0700 "$SSH_KEYS_DIR"
+fi
+
+# Adopt keys written before SSH_KEYS_DIR was pinned. They went to the home
+# directory of whoever the services ran as — /root while that was root — where
+# the service account cannot read them, so every private-repo fetch fails.
+for legacy in "/root/.ssh/$APP_NAME" "/home/$APP_USER/.ssh/$APP_NAME"; do
+  [[ "$legacy" == "$SSH_KEYS_DIR" ]] && continue
+  as_root test -d "$legacy" || continue
+  moved=0
+  while IFS= read -r key; do
+    [[ -n "$key" ]] || continue
+    base="$(basename "$key")"
+    if as_root test -e "$SSH_KEYS_DIR/$base"; then continue; fi
+    as_root cp -p "$key" "$SSH_KEYS_DIR/$base"
+    moved=$(( moved + 1 ))
+  done < <(as_root find "$legacy" -maxdepth 1 -type f 2>/dev/null || true)
+  if (( moved > 0 )); then
+    log_ok "Adopted $moved key file(s) from $legacy"
+  fi
+done
+as_root chown -R "$APP_USER:$APP_USER" "$SSH_KEYS_DIR"
+# ssh rejects a private key that others can read.
+as_root find "$SSH_KEYS_DIR" -type f ! -name '*.pub' -exec chmod 0600 {} + 2>/dev/null || true
+as_root find "$SSH_KEYS_DIR" -type f -name '*.pub' -exec chmod 0644 {} + 2>/dev/null || true
+
 # Seed example agents and skills, but only into an empty library — never
 # overwrite prompts the operator has written.
 if [[ -d "$REPO_ROOT/library.example" ]] \
@@ -101,6 +135,7 @@ env_set "$ENV_FILE" BACKEND_PORT "$BACKEND_PORT"
 env_set "$ENV_FILE" PROJECTS_DIR "$PROJECTS_DIR"
 env_set "$ENV_FILE" LIBRARY_DIR  "$LIBRARY_DIR"
 env_set "$ENV_FILE" SOURCES_DIR  "$SOURCES_DIR"
+env_set "$ENV_FILE" SSH_KEYS_DIR "$SSH_KEYS_DIR"
 env_set "$ENV_FILE" WORKER_CONCURRENCY "$WORKER_CONCURRENCY"
 env_fix_owner "$ENV_FILE"
 

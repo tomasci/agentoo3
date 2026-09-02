@@ -12,14 +12,33 @@
 // Instead each clone points ssh at one specific key with GIT_SSH_COMMAND, so
 // nothing global is mutated and a project's key is explicit.
 
-import { chmod, mkdir, readFile, rm, stat } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { access, chmod, mkdir, readFile, rm, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { env } from '@/env'
 import { logger } from './logger'
 import { hasControlChars } from './text'
 
+/**
+ * Where generated keys live.
+ *
+ * The installer pins this in .env. The fallback exists for a local checkout run
+ * by hand, and is deliberately narrow: `homedir()` depends on *who* is running,
+ * so when the services ran as root the keys were written to /root/.ssh/agentoo
+ * and became unreadable the moment those services moved to a service account —
+ * reported by ssh as "Identity file not accessible: Permission denied" and then
+ * "Permission denied (publickey)", which reads like a rejected key rather than
+ * an unreadable one.
+ */
 export const SSH_KEYS_DIR = env.SSH_KEYS_DIR || join(homedir(), '.ssh', 'agentoo')
+
+if (!env.SSH_KEYS_DIR) {
+  logger.warn(
+    `SSH_KEYS_DIR is not set; falling back to ${SSH_KEYS_DIR}. That path follows $HOME, so keys ` +
+      'written here stop being readable if this process ever runs as a different user.',
+  )
+}
 
 /** Filesystem-safe key name. The name becomes a path, so it is checked like one. */
 export function checkKeyName(name: string): { ok: boolean; reason?: string } {
@@ -163,8 +182,15 @@ export function sshOptionsFor(keyPath: string): string[] {
   return [
     '-i',
     keyPath,
-    // Offer only this key: otherwise ssh walks every default identity and a host
-    // with a low MaxAuthTries answers "Too many authentication failures".
+    // Keeps ssh from offering every key an agent happens to hold, which a host
+    // with a low MaxAuthTries answers with "Too many authentication failures".
+    //
+    // Note it does *not* suppress ssh's built-in default identities
+    // (~/.ssh/id_*) — OpenSSH counts those as configured. On the service
+    // account there are none, so only the key named above is ever offered; on a
+    // developer's machine a default key can also be tried, which is why
+    // assertKeyUsable() below checks our own file rather than inferring from
+    // whether the connection succeeded.
     '-o',
     'IdentitiesOnly=yes',
     '-o',
@@ -185,6 +211,29 @@ export function gitSshCommand(keyPath: string): string {
     .join(' ')
 }
 
+/**
+ * Is this key actually usable by *this* process?
+ *
+ * Worth checking separately, because ssh's report of the two failures is
+ * indistinguishable from a rejected key. A key it cannot read is skipped in
+ * silence and the attempt ends as `Permission denied (publickey)` — verified
+ * against github.com with the key at mode 000, which produced that line and
+ * nothing else. Blaming the host for a local file permission sends you to
+ * GitHub's deploy-key settings to fix something that is not there.
+ */
+export async function keyProblem(keyPath: string): Promise<string | undefined> {
+  try {
+    await access(keyPath, constants.R_OK)
+  } catch (error) {
+    const code = (error as { code?: string }).code
+    if (code === 'ENOENT') {
+      return `The key file ${keyPath} is missing. Re-create the key, or point SSH_KEYS_DIR at where it lives.`
+    }
+    return `The key file ${keyPath} is not readable by this process (${code ?? 'unknown'}). Keys written while the services ran as a different user stay owned by that user; re-running the installer moves them.`
+  }
+  return undefined
+}
+
 export interface KeyTestResult {
   ok: boolean
   message: string
@@ -199,6 +248,12 @@ export interface KeyTestResult {
 export async function testKey(keyPath: string, host: string): Promise<KeyTestResult> {
   const check = checkHost(host)
   if (!check.ok) return { ok: false, message: check.reason ?? 'Invalid host' }
+
+  // Before the connection, not after: ssh silently skips a key it cannot read
+  // and the failure then looks like the host said no. It also stops a missing
+  // key from appearing to work because a default identity answered instead.
+  const problem = await keyProblem(keyPath)
+  if (problem) return { ok: false, message: problem }
 
   const target = host.includes('@') ? host : `git@${host}`
   // `--` stops option parsing, so even a host that slipped past validation is

@@ -5,7 +5,7 @@ import { keyPathFor } from '@/features/ssh-keys/service'
 import { configureRepoSsh, isGitRepo } from '@/lib/git'
 import { logger } from '@/lib/logger'
 import { projectPlugin, projectRepo } from '@/lib/paths'
-import { gitSshCommand } from '@/lib/ssh'
+import { gitSshCommand, keyProblem } from '@/lib/ssh'
 import { delegationEnv, withDelegationGuidance } from '@/library/delegation'
 import { getAgent } from '@/library/index'
 
@@ -40,6 +40,13 @@ export async function optionsFor(
   // "Host key verification failed".
   const repo = projectRepo(slug)
   const keyPath = await keyPathFor(sshKeyId)
+  if (keyPath) {
+    // Logged, not fatal: plenty of sessions never touch the remote, and
+    // refusing to start one because a fetch would fail is worse than letting it
+    // run. The warning is what makes the later failure legible.
+    const problem = await keyProblem(keyPath)
+    if (problem) logger.warn(`Session ${session.id} ssh key unusable — ${problem}`)
+  }
   if (await isGitRepo(repo)) {
     const configured = await configureRepoSsh(repo, keyPath ? gitSshCommand(keyPath) : undefined)
     if (!configured.ok) {

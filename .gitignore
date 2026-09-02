@@ -6,6 +6,8 @@
 /projects/
 /sources/
 /library/
+# generated ssh private keys — never
+/keys/
 
 # generated secrets
 config/*.local

@@ -47,6 +47,15 @@ LIBRARY_DIR="${LIBRARY_DIR:-$REPO_ROOT/library}"
 # holds managed project roots — listing our own scaffolding as adoptable would
 # be nonsense.
 SOURCES_DIR="${SOURCES_DIR:-$REPO_ROOT/sources}"
+
+# Generated ssh keys. Beside the other data directories rather than under a
+# home directory: the backend's fallback is ~/.ssh/agentoo, and ~ depends on who
+# is running — keys written while the services ran as root landed in
+# /root/.ssh/agentoo, which the service account cannot read. That surfaces as
+# "Identity file not accessible: Permission denied" followed by "Permission
+# denied (publickey)", which looks like a rejected key rather than an unreadable
+# one. Pinned here and written into .env so it never depends on $HOME again.
+SSH_KEYS_DIR="${SSH_KEYS_DIR:-$REPO_ROOT/keys}"
 # Each Claude Code instance wants ~4GB, so concurrency is deliberately low.
 WORKER_CONCURRENCY="${WORKER_CONCURRENCY:-1}"
 # Generated credentials and connection strings are written here.

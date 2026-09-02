@@ -221,6 +221,23 @@ a session's work onto main — verified, not assumed.
 
 ## SSH keys
 
+Stored in `SSH_KEYS_DIR`, which the installer pins in `.env`. The fallback is
+`~/.ssh/agentoo`, and `~` depends on *who is running* — keys written while the
+services ran as root landed in `/root/.ssh/agentoo` and stopped being readable
+the moment those services moved to the service account. ssh reports that as
+`Permission denied (publickey)`, indistinguishable from a key the host rejected,
+which sends you to GitHub's deploy-key settings to fix something local. The
+operational path is derived from `SSH_KEYS_DIR` and the key's name, not from the
+`private_key_path` column — that column records where a key was written, and is
+corrected when the two disagree.
+
+`keyProblem()` checks the file is readable *before* ssh runs, so a missing or
+unreadable key says so instead of arriving as a rejection. Note that
+`IdentitiesOnly=yes` does not suppress ssh's built-in default identities
+(`~/.ssh/id_*`) — OpenSSH counts those as configured — so on a developer machine
+a default key can also be offered. The service account has none, so there only
+the project's key is ever used.
+
 Generated as ed25519 **with no passphrase**, and there is no ssh-agent. Both are
 deliberate:
 

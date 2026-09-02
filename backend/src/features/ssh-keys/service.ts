@@ -3,7 +3,14 @@ import { db } from '@/db/client'
 import { sshKeys } from '@/db/schema'
 import { badRequest, conflict, notFound } from '@/lib/errors'
 import { logger } from '@/lib/logger'
-import { checkComment, checkKeyName, deleteKeyFiles, generateKey, testKey } from '@/lib/ssh'
+import {
+  checkComment,
+  checkKeyName,
+  deleteKeyFiles,
+  generateKey,
+  privateKeyPath,
+  testKey,
+} from '@/lib/ssh'
 import type { CreateSshKeyInput, SshKeyDto } from './schema'
 
 type SshKeyRow = typeof sshKeys.$inferSelect
@@ -62,6 +69,26 @@ export async function createSshKey(input: CreateSshKeyInput): Promise<SshKeyDto>
   return toDto(row)
 }
 
+/**
+ * Where a key lives *now*.
+ *
+ * Derived from SSH_KEYS_DIR and the key's name rather than read from
+ * `private_key_path`, which records where the file was written when it was
+ * created. Those two came apart the moment the services stopped running as
+ * root: the column still pointed into /root/.ssh, which the service account
+ * cannot read, and every fetch failed with "Permission denied (publickey)" as
+ * though the key had been rejected. Config decides the location; the column is
+ * a record of history, and is corrected below when it disagrees.
+ */
+async function resolveKeyPath(row: typeof sshKeys.$inferSelect): Promise<string> {
+  const actual = privateKeyPath(row.name)
+  if (row.privateKeyPath !== actual) {
+    logger.info(`Key ${row.name} moved: ${row.privateKeyPath} -> ${actual}`)
+    await db.update(sshKeys).set({ privateKeyPath: actual }).where(eq(sshKeys.id, row.id))
+  }
+  return actual
+}
+
 export async function testSshKey(
   id: string,
   host: string,
@@ -69,7 +96,7 @@ export async function testSshKey(
   const [row] = await db.select().from(sshKeys).where(eq(sshKeys.id, id)).limit(1)
   if (!row) throw notFound('SSH key')
 
-  const result = await testKey(row.privateKeyPath, host)
+  const result = await testKey(await resolveKeyPath(row), host)
 
   await db
     .update(sshKeys)
@@ -100,5 +127,5 @@ export async function deleteSshKey(id: string): Promise<void> {
 export async function keyPathFor(sshKeyId: string | null): Promise<string | undefined> {
   if (!sshKeyId) return undefined
   const [row] = await db.select().from(sshKeys).where(eq(sshKeys.id, sshKeyId)).limit(1)
-  return row?.privateKeyPath
+  return row ? resolveKeyPath(row) : undefined
 }

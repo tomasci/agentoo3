@@ -19,7 +19,7 @@ import {
 import { logger } from '@/lib/logger'
 import { assertInsideProjects, projectPlugin, projectRepo, projectRoot } from '@/lib/paths'
 import { checkRemoteUrl, safeCloneArgs } from '@/lib/remote-url'
-import { gitSshCommand } from '@/lib/ssh'
+import { gitSshCommand, keyProblem } from '@/lib/ssh'
 import { type ProjectSetupJob, QUEUE_PROJECT_SETUP, redisConnection } from './index'
 import { ensurePluginManifest } from './plugin-manifest'
 
@@ -129,6 +129,14 @@ export async function runProjectSetup(job: ProjectSetupJob): Promise<void> {
         // Clone with the project's key when it has one, so a private repo
         // works without touching ~/.ssh/config or an agent.
         const keyPath = await keyPathFor(project.sshKeyId)
+        // Say why before ssh turns it into "Permission denied (publickey)",
+        // which points at the host's deploy keys rather than at this box.
+        const problem = keyPath ? await keyProblem(keyPath) : undefined
+        if (problem) {
+          await fail(project.id, problem)
+          logger.warn(`Clone blocked for ${project.slug}: ${problem}`)
+          return
+        }
         const result = await git(
           safeCloneArgs(project.remoteUrl, repo),
           undefined,
