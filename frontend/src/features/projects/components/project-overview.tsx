@@ -1,4 +1,3 @@
-import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSshKeys } from '@/features/ssh-keys'
@@ -15,10 +14,21 @@ import styles from './project-overview.module.scss'
 import { ProjectStatusBadge } from './project-status'
 import { RecoveryPanel } from './recovery-panel'
 
-/** The project's own page: what it is, how it authenticates, and how to remove it. */
-export function ProjectOverview({ project }: { project: Project }) {
+/**
+ * The project's own page: what it is, how it authenticates, and how to remove it.
+ *
+ * Deleting is reported through `onDeleted` rather than acted on here: the
+ * project was opened in a tab, and it is the tab — not this page — that has to
+ * decide where the reader ends up once its subject is gone.
+ */
+export function ProjectOverview({
+  project,
+  onDeleted,
+}: {
+  project: Project
+  onDeleted?: () => void
+}) {
   const { t } = useTranslation()
-  const navigate = useNavigate()
   const { data: sshKeys } = useSshKeys()
   const update = useUpdateProject()
   const retry = useRetryProject()
@@ -159,7 +169,7 @@ export function ProjectOverview({ project }: { project: Project }) {
               path: { id: project.id },
               query: { removeFiles: project.source === 'clone' ? 'true' : 'false' },
             },
-            { onSuccess: () => void navigate({ to: '/projects' }) },
+            { onSuccess: () => onDeleted?.() },
           )
         }
       />

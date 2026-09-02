@@ -21,10 +21,6 @@
     "noCredential": "No Claude credential"
   },
   "projects": {
-    "heading": "Projects",
-    "count": "{{count}} project",
-    "count_plural": "{{count}} projects",
-    "empty": "No projects yet. Add one above — clone a repository, or point at a folder that already exists on the server.",
     "loadFailed": "Could not load projects",
     "meta": {
       "path": "Path",
@@ -122,20 +118,15 @@
       "deleteExistingHint": "Removes the project. The folder in the sources directory is yours and is left alone."
     }
   },
-  "language": {
-    "label": "Language"
-  },
   "nav": {
-    "projects": "Projects",
     "sshKeys": "SSH keys",
     "project": "Project",
-    "workspace": "Workspace",
     "sessions": "Sessions",
-    "noneOpen": "None open",
-    "noProjects": "No projects yet.",
     "overview": "Overview",
     "library": "Library",
-    "projectLibrary": "Agents & skills"
+    "projectLibrary": "Agents & skills",
+    "system": "System",
+    "configuration": "Configuration"
   },
   "sshKeys": {
     "heading": "Your keys",
@@ -234,21 +225,17 @@
   },
   "notFound": {
     "message": "There is nothing at this address.",
-    "back": "Back to projects"
+    "back": "Back to the library"
   },
   "status": {
     "keys": "{{count}} key",
     "keys_plural": "{{count}} keys",
-    "project": "{{name}}",
     "cpu": "CPU {{percent}}%",
     "cpuTitle": "{{cores}} cores, load {{load}}",
     "mem": "RAM {{used}} ({{percent}}%)",
     "memTitle": "{{used}} of {{total}} in use",
     "disk": "Disk {{percent}}%",
     "diskTitle": "{{free}} free on {{path}}"
-  },
-  "theme": {
-    "toggle": "Toggle theme"
   },
   "library": {
     "intro": "Agents and skills live here once and are used by any project you select them for. Editing one changes it everywhere it is used — that is the point of a shared library rather than per-project copies.",
@@ -338,5 +325,33 @@
       "skillTitle": "Delete skill?",
       "skillConfirm": "\"{{name}}\" and its {{files}} bundled file(s) will be deleted, and unlinked from {{count}} project(s) using it. This cannot be undone."
     }
+  },
+  "tabs": {
+    "label": "Workspace tabs",
+    "system": "System",
+    "newTab": "New tab",
+    "loading": "Loading…",
+    "close": "Close {{name}}",
+    "add": "New tab",
+    "unknown": "Unknown project"
+  },
+  "picker": {
+    "heading": "Choose a project for this tab",
+    "lead": "Open one of your projects here, or add a new one. This tab keeps whatever you choose.",
+    "existing": "Your projects",
+    "create": "Add a project",
+    "none": "No projects yet — add your first one below.",
+    "notReady": "This project is not ready to open yet.",
+    "openInTab": "Already open in another tab"
+  },
+  "settings": {
+    "heading": "Configuration",
+    "lead": "Preferences for this installation, stored in your browser.",
+    "language": "Language",
+    "languageHint": "The language of the interface.",
+    "theme": "Theme",
+    "themeHint": "Light or dark colours throughout the app.",
+    "themeDark": "Dark",
+    "themeLight": "Light"
   }
 }

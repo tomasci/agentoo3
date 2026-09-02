@@ -1,7 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useHealth } from '@/features/health'
-import { useCurrentProject, useProjects } from '@/features/projects'
 import { useSshKeys } from '@/features/ssh-keys'
 import { formatBytes, useSystem } from '@/features/system'
 import styles from './layout.module.scss'
@@ -16,8 +15,6 @@ import styles from './layout.module.scss'
 export function StatusBar() {
   const { t } = useTranslation()
   const { data: health, isPending, isError } = useHealth()
-  const { data: projects } = useProjects()
-  const { current } = useCurrentProject()
   const { data: keys } = useSshKeys()
   const { data: system } = useSystem()
 
@@ -45,22 +42,9 @@ export function StatusBar() {
         {label}
       </span>
 
-      {current ? (
-        <Link
-          to="/projects/$projectId"
-          params={{ projectId: current.id }}
-          className={`${styles.statusItem} ${styles.statusLink}`}
-        >
-          {t('status.project', { name: current.name })}
-        </Link>
-      ) : (
-        projects && (
-          <Link to="/projects" className={`${styles.statusItem} ${styles.statusLink}`}>
-            {t('projects.count', { count: projects.length })}
-          </Link>
-        )
-      )}
-
+      {/* Which project you are in is the tab bar's job now, so the status bar
+          says nothing about it: repeating it here would be a second, slower
+          answer to a question already answered above. */}
       {keys && (
         <Link to="/ssh-keys" className={`${styles.statusItem} ${styles.statusLink}`}>
           {t('status.keys', { count: keys.length })}

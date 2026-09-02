@@ -1,10 +1,12 @@
 import { createRootRoute, createRoute, createRouter, Link, redirect } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { AgentEditorPage, LibraryPage, SkillEditorPage } from '@/features/library'
-import { ProjectsPage } from '@/features/projects'
+import { SettingsPage } from '@/features/settings'
 import { SshKeysPage } from '@/features/ssh-keys'
+import { SYSTEM_HOME } from '@/shared/store/tabs'
 import { ProjectLayout } from './project-layout'
 import {
+  NewTabRoute,
   ProjectLibraryRoute,
   ProjectOverviewRoute,
   ProjectSessionsRoute,
@@ -17,20 +19,22 @@ import { RootLayout } from './root-layout'
 // API client at install time. One codegen step is enough.
 const rootRoute = createRootRoute({ component: RootLayout })
 
-// `/` is not a page of its own — projects is the home screen, and giving it a
-// real URL means it can be linked and bookmarked like everything else.
+// `/` is not a page of its own. Every page belongs to a tab, and the one tab
+// that is always open is the system tab, so that is where a bare visit lands.
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   beforeLoad: () => {
-    throw redirect({ to: '/projects' })
+    throw redirect({ to: SYSTEM_HOME })
   },
 })
 
-const projectsRoute = createRoute({
+// An empty tab, showing the picker. The tab id is in the URL so a reload — or a
+// second window — restores the same empty tab rather than inventing another.
+const newTabRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/projects',
-  component: ProjectsPage,
+  path: '/tab/$tabId',
+  component: NewTabRoute,
 })
 
 // A layout route, so /projects/$projectId/* shares the project lookup and the
@@ -111,9 +115,19 @@ const sshKeysRoute = createRoute({
   component: SshKeysPage,
 })
 
-const routeTree = rootRoute.addChildren([
+// Preferences for the whole installation, and so a system-tab page: a project
+// tab has no business changing the language of the app around it.
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings',
+  component: SettingsPage,
+})
+
+// Exported so a test can build its own router over the same tree, with a
+// history it controls, rather than the browser one this module's router uses.
+export const routeTree = rootRoute.addChildren([
   indexRoute,
-  projectsRoute,
+  newTabRoute,
   projectRoute.addChildren([
     projectOverviewRoute,
     projectSessionsRoute,
@@ -127,6 +141,7 @@ const routeTree = rootRoute.addChildren([
   skillRoute,
   libraryRoute,
   sshKeysRoute,
+  settingsRoute,
 ])
 
 /** An unknown URL should say so, not render an empty layout. */
@@ -135,7 +150,7 @@ function NotFound() {
   return (
     <div style={{ padding: '3rem 0', textAlign: 'center' }}>
       <p style={{ margin: '0 0 1rem', color: 'var(--muted-fg)' }}>{t('notFound.message')}</p>
-      <Link to="/projects">{t('notFound.back')}</Link>
+      <Link to={SYSTEM_HOME}>{t('notFound.back')}</Link>
     </div>
   )
 }

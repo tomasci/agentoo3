@@ -1,0 +1,104 @@
+@use '@/styles/variables' as v;
+
+// A strip of tabs above everything, the way a file manager or a browser stacks
+// them: the row scrolls sideways rather than shrinking tabs to illegibility, so
+// the twentieth project is still readable.
+.bar {
+  grid-area: tabs;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0.3rem v.$space-sm 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 14rem;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: v.$radius-sm v.$radius-sm 0 0;
+  color: var(--muted-fg);
+
+  &:hover { background: var(--bg); color: var(--fg); }
+}
+
+// The showing tab joins the body below it: same background, and the border line
+// it sits on is covered so the tab and its page read as one surface.
+.tabActive {
+  background: var(--bg);
+  color: var(--fg);
+  border-color: var(--border);
+  margin-bottom: -1px;
+  padding-bottom: 1px;
+}
+
+// The system tab is permanent, so it is narrow and holds no close button.
+.tabSystem { flex: none; }
+
+.tabButton {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.4rem v.$space-sm;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
+}
+
+.tabIcon { font-size: 0.875rem; line-height: 1; }
+
+.tabLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-right: 0.3rem;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted-fg);
+  font-size: 0.6875rem;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover { background: var(--surface); color: var(--fg); }
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+}
+
+.add {
+  flex: none;
+  align-self: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-left: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: v.$radius-sm;
+  background: var(--bg);
+  color: var(--muted-fg);
+  font-size: 0.9375rem;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover { color: var(--fg); border-color: var(--accent); }
+  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+}
