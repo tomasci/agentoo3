@@ -41,3 +41,5 @@ build/
 *.swp
 .idea/
 .vscode/
+
+# Commit-access smoke test — safe to delete.
