@@ -228,8 +228,8 @@
     "transcript": {
       "you": "You",
       "empty": "Nothing yet. Send a message to start the session.",
-      "noContent": "No content",
-      "delegatedPrompt": "Prompt given to {{agent}}"
+      "delegatedPrompt": "Prompt given to {{agent}}",
+      "thinking": "Thinking"
     }
   },
   "notFound": {

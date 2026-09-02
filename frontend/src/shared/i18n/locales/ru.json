@@ -230,8 +230,8 @@
     "transcript": {
       "you": "Вы",
       "empty": "Пока пусто. Отправьте сообщение, чтобы начать сессию.",
-      "noContent": "Нет содержимого",
-      "delegatedPrompt": "Промпт для {{agent}}"
+      "delegatedPrompt": "Промпт для {{agent}}",
+      "thinking": "Размышления"
     }
   },
   "notFound": {

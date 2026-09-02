@@ -1,7 +1,14 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { Markdown } from '@/shared/ui'
 import type { SessionMessage } from '../hooks/use-sessions'
-import { buildTranscript, type TranscriptNode, textOf, toolCallsOf } from '../lib/transcript'
+import {
+  buildTranscript,
+  type TranscriptNode,
+  textOf,
+  thinkingOf,
+  toolCallsOf,
+} from '../lib/transcript'
 import styles from './transcript.module.scss'
 
 /** A row that is a heading until you open it. */
@@ -46,25 +53,72 @@ function Collapsible({
 function MessageBody({ message }: { message: SessionMessage }) {
   const { t } = useTranslation()
   const text = textOf(message)
+  const thinking = thinkingOf(message)
   const tools = toolCallsOf(message)
+  const error =
+    message.type === 'error'
+      ? String((message.payload as { message?: unknown })?.message ?? '')
+      : ''
 
-  if (!text && tools.length === 0) {
-    // Nothing structured to show: the raw payload beats an empty box.
-    return <pre className={styles.raw}>{JSON.stringify(message.payload, null, 2)}</pre>
+  if (!text && !thinking && !error && tools.length === 0) {
+    // Nothing recognised. The payload is a last resort, not the normal case.
+    return <pre className={styles.code}>{JSON.stringify(message.payload, null, 2)}</pre>
   }
 
   return (
     <>
-      {text && <p className={styles.text}>{text}</p>}
+      {error && <p className={styles.errorText}>{error}</p>}
+      {/* Agent output is markdown, and reads as noise without it. */}
+      {text && <Markdown compact>{text}</Markdown>}
+      {thinking && (
+        <div className={styles.thinking}>
+          <span className={styles.thinkingLabel}>{t('sessions.transcript.thinking')}</span>
+          <Markdown compact>{thinking}</Markdown>
+        </div>
+      )}
       {tools.map((tool) => (
         <div key={tool.id} className={styles.tool}>
           <span className={styles.toolName}>{tool.name}</span>
-          <pre className={styles.toolInput}>{JSON.stringify(tool.input, null, 2)}</pre>
+          <ToolInput input={tool.input} />
         </div>
       ))}
-      {tools.length === 0 && !text && <span>{t('sessions.transcript.noContent')}</span>}
     </>
   )
+}
+
+/**
+ * A tool's arguments.
+ *
+ * Most are one or two short fields, and a JSON dump of `{"command": "..."}`
+ * hides the one line anybody wants behind punctuation and escaping. Long string
+ * values are shown as themselves; anything else falls back to formatted JSON.
+ */
+function ToolInput({ input }: { input: unknown }) {
+  if (input === null || input === undefined) return null
+
+  if (typeof input === 'object' && !Array.isArray(input)) {
+    const entries = Object.entries(input as Record<string, unknown>)
+    if (entries.length > 0) {
+      return (
+        <dl className={styles.args}>
+          {entries.map(([key, value]) => (
+            <div key={key} className={styles.arg}>
+              <dt className={styles.argKey}>{key}</dt>
+              <dd className={styles.argValue}>
+                {typeof value === 'string' ? (
+                  <pre className={styles.code}>{value}</pre>
+                ) : (
+                  <pre className={styles.code}>{JSON.stringify(value, null, 2)}</pre>
+                )}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )
+    }
+  }
+
+  return <pre className={styles.code}>{JSON.stringify(input, null, 2)}</pre>
 }
 
 function Node({ node }: { node: TranscriptNode }) {
@@ -75,6 +129,15 @@ function Node({ node }: { node: TranscriptNode }) {
       <div className={styles.prompt}>
         <span className={styles.promptLabel}>{t('sessions.transcript.you')}</span>
         {node.text}
+      </div>
+    )
+  }
+
+  // The turn's closing reply: open, full size, and the thing you came to read.
+  if (node.kind === 'answer') {
+    return (
+      <div className={styles.answer}>
+        <Markdown>{node.text}</Markdown>
       </div>
     )
   }
@@ -111,7 +174,7 @@ function Node({ node }: { node: TranscriptNode }) {
           <span className={styles.delegationLabel}>
             {t('sessions.transcript.delegatedPrompt', { agent: node.agent })}
           </span>
-          <p className={styles.delegationText}>{node.prompt}</p>
+          <Markdown compact>{node.prompt}</Markdown>
         </div>
       )}
       {node.children.length > 0 && (

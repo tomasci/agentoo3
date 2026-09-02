@@ -14,6 +14,8 @@ import type { SessionMessage } from '../hooks/use-sessions'
 export type TranscriptNode =
   | { kind: 'prompt'; id: string; seq: number; text: string }
   | { kind: 'event'; id: string; seq: number; message: SessionMessage }
+  /** The reply that closes a turn: shown open, at full size, as markdown. */
+  | { kind: 'answer'; id: string; seq: number; text: string }
   | {
       kind: 'task'
       id: string
@@ -125,7 +127,44 @@ export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
     listFor(parent).push({ kind: 'event', id: message.id, seq: message.seq, message })
   }
 
+  markAnswers(roots)
   return roots
+}
+
+/**
+ * Promote each turn's closing reply out of the collapsed rows.
+ *
+ * Everything above it is working — tool calls, delegations, thinking — and is
+ * worth collapsing. The last thing the orchestrator says before the turn ends is
+ * the part someone actually came to read, so it should not be behind a
+ * disclosure triangle in the same small type as a Bash invocation.
+ *
+ * Identified by position rather than content: the final top-level assistant
+ * message with text before a result. Nothing in the message marks it as the
+ * answer, and its shape is the same as any other reply.
+ */
+function markAnswers(roots: TranscriptNode[]): void {
+  let candidate = -1
+  for (let i = 0; i < roots.length; i++) {
+    const node = roots[i]
+    if (!node) continue
+
+    if (node.kind === 'event') {
+      if (node.message.type === 'result') {
+        const answer = candidate === -1 ? undefined : roots[candidate]
+        if (answer?.kind === 'event') {
+          const text = textOf(answer.message)
+          if (text) {
+            roots[candidate] = { kind: 'answer', id: answer.id, seq: answer.seq, text }
+          }
+        }
+        candidate = -1
+        continue
+      }
+      // Only the orchestrator's own replies; a subagent's are nested elsewhere.
+      if (node.message.type === 'assistant' && textOf(node.message)) candidate = i
+    }
+  }
 }
 
 /** Text blocks of an assistant/user message, joined. */
@@ -138,6 +177,19 @@ export function textOf(message: SessionMessage): string {
       (b): b is { type: string; text: string } => b?.type === 'text' && typeof b?.text === 'string',
     )
     .map((b) => b.text)
+    .join('\n\n')
+}
+
+/** Extended thinking, so a "thinking" row shows the reasoning, not a payload dump. */
+export function thinkingOf(message: SessionMessage): string {
+  const content = ((message.payload ?? {}) as { message?: { content?: unknown } }).message?.content
+  if (!Array.isArray(content)) return ''
+  return content
+    .filter(
+      (b): b is { type: string; thinking: string } =>
+        b?.type === 'thinking' && typeof b?.thinking === 'string',
+    )
+    .map((b) => b.thinking)
     .join('\n\n')
 }
 

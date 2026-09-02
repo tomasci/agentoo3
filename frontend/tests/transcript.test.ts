@@ -1,5 +1,11 @@
 import { expect, test } from 'bun:test'
-import { buildTranscript, displayAgent, textOf, toolCallsOf } from '../src/features/sessions/lib/transcript'
+import {
+  buildTranscript,
+  displayAgent,
+  textOf,
+  thinkingOf,
+  toolCallsOf,
+} from '../src/features/sessions/lib/transcript'
 
 type M = Parameters<typeof buildTranscript>[0][number]
 let n = 0
@@ -171,4 +177,66 @@ test('a task heading is the description alone, since the badge names the agent',
   if (task?.kind !== 'task') throw new Error('expected a task node')
   expect(task.agent).toBe('architect')
   expect(task.title).toBe('investigate project structure')
+})
+
+const say = (text: string, over: Record<string, unknown> = {}) =>
+  msg({ type: 'assistant', title: `orchestrator: ${text}`, payload: { message: { content: [{ type: 'text', text }] } }, ...over })
+
+test("a turn's closing reply is promoted out of the collapsed rows", () => {
+  n = 0
+  const nodes = buildTranscript([
+    msg({ type: 'prompt', payload: { text: 'what is this?' } }),
+    say('Let me look.'),
+    msg({ type: 'assistant', title: 'orchestrator: Read', payload: { message: { content: [{ type: 'tool_use', name: 'Read' }] } } }),
+    say('# agentoo\n\nA self-hosted platform.'),
+    msg({ type: 'result', title: 'Turn complete', payload: { subtype: 'success' } }),
+  ])
+
+  expect(nodes.map((x) => x.kind)).toEqual(['prompt', 'event', 'event', 'answer', 'event'])
+  const answer = nodes[3]
+  if (answer?.kind !== 'answer') throw new Error('expected an answer node')
+  expect(answer.text).toBe('# agentoo\n\nA self-hosted platform.')
+})
+
+test('only the last reply of each turn is the answer', () => {
+  n = 0
+  const nodes = buildTranscript([
+    msg({ type: 'prompt', payload: { text: 'one' } }),
+    say('first answer'),
+    msg({ type: 'result', title: 'Turn complete', payload: { subtype: 'success' } }),
+    msg({ type: 'prompt', payload: { text: 'two' } }),
+    say('working'),
+    say('second answer'),
+    msg({ type: 'result', title: 'Turn complete', payload: { subtype: 'success' } }),
+  ])
+  const answers = nodes.filter((x) => x.kind === 'answer')
+  expect(answers.length).toBe(2)
+  expect(answers.map((a) => (a.kind === 'answer' ? a.text : ''))).toEqual(['first answer', 'second answer'])
+})
+
+test("a subagent's reply is never promoted — it belongs to its group", () => {
+  n = 0
+  const nodes = buildTranscript([
+    msg({ type: 'system', title: 'scout: look', payload: {
+      subtype: 'task_started', task_id: 't1', tool_use_id: 'tu1', subagent_type: 'scout', description: 'look',
+    } }),
+    say('nested reply', { parentToolUseId: 'tu1' }),
+    msg({ type: 'result', title: 'Turn complete', payload: { subtype: 'success' } }),
+  ])
+  expect(nodes.some((x) => x.kind === 'answer')).toBe(false)
+})
+
+test('a turn still running has no answer yet', () => {
+  n = 0
+  const nodes = buildTranscript([msg({ type: 'prompt', payload: { text: 'go' } }), say('thinking about it')])
+  expect(nodes.some((x) => x.kind === 'answer')).toBe(false)
+})
+
+test('thinking is read out of the payload rather than dumped as JSON', () => {
+  const m = { payload: { message: { content: [
+    { type: 'thinking', thinking: 'Clean tree.' },
+    { type: 'text', text: 'visible' },
+  ] } } } as never
+  expect(thinkingOf(m)).toBe('Clean tree.')
+  expect(textOf(m)).toBe('visible')
 })
