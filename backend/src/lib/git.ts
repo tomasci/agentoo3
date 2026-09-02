@@ -92,8 +92,56 @@ export async function addWorktree(
   return git(['worktree', 'add', '-b', branch, worktreePath], repoPath)
 }
 
+/**
+ * Give a session branch an upstream, so `git pull` has somewhere to pull from.
+ *
+ * Without this the branch has no tracking ref and `git pull` stops with "no
+ * tracking information for the current branch" — which an agent asked to "pull
+ * and check again" cannot get past. The upstream is the branch the worktree was
+ * cut from, so pulling brings in what moved there.
+ *
+ * `git push` stays safe: push.default is `simple`, which refuses to push a
+ * branch whose upstream has a different name rather than quietly pushing a
+ * session's work onto main.
+ */
+export async function trackUpstream(
+  worktreePath: string,
+  remote: string,
+  branch: string,
+): Promise<GitResult> {
+  return git(['branch', `--set-upstream-to=${remote}/${branch}`], worktreePath)
+}
+
 export async function removeWorktree(repoPath: string, worktreePath: string): Promise<GitResult> {
   return git(['worktree', 'remove', '--force', worktreePath], repoPath)
+}
+
+/**
+ * Record the project's ssh key in the repository's own config.
+ *
+ * Injecting GIT_SSH_COMMAND per call (above) only covers git commands *we*
+ * spawn. A session's whole point is that an agent runs its own commands, and a
+ * bare `git fetch` in a worktree has no key handed to it — it fails with "Host
+ * key verification failed", which reads like a missing known_hosts entry rather
+ * than a missing credential. The service account deliberately has no ~/.ssh, so
+ * there is no ambient key to fall back on either.
+ *
+ * `core.sshCommand` lives in the repository config, which worktrees share, so
+ * every git invocation in the project picks it up: ours, the agent's, and a
+ * human's over SSH. Reconciled rather than written once, since a project's key
+ * can be changed or removed later.
+ */
+export async function configureRepoSsh(
+  repoPath: string,
+  sshCommand: string | undefined,
+): Promise<GitResult> {
+  if (!sshCommand) {
+    const result = await git(['config', '--local', '--unset-all', 'core.sshCommand'], repoPath)
+    // Exit 5 is "nothing to unset", which is the normal case for an https or
+    // adopted project and not a failure.
+    return result.exitCode === 5 ? { ...result, ok: true } : result
+  }
+  return git(['config', '--local', 'core.sshCommand', sshCommand], repoPath)
 }
 
 /** True when the repo has a commit. `git worktree add` fails on an unborn HEAD. */

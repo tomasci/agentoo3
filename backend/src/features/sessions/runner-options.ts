@@ -1,7 +1,11 @@
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
 import type { sessions } from '@/db/schema'
 import { syncProjectPlugin } from '@/features/library/service'
+import { keyPathFor } from '@/features/ssh-keys/service'
+import { configureRepoSsh, isGitRepo } from '@/lib/git'
+import { logger } from '@/lib/logger'
 import { projectPlugin, projectRepo } from '@/lib/paths'
+import { gitSshCommand } from '@/lib/ssh'
 import { delegationEnv, withDelegationGuidance } from '@/library/delegation'
 import { getAgent } from '@/library/index'
 
@@ -21,6 +25,7 @@ export async function optionsFor(
   session: typeof sessions.$inferSelect,
   slug: string,
   abortController: AbortController,
+  sshKeyId: string | null = null,
 ): Promise<Options> {
   const cwd = session.worktreePath ?? projectRepo(slug)
   // Rebuilt now rather than trusted: the plugin directory is a copy of the
@@ -28,6 +33,19 @@ export async function optionsFor(
   // project here. It also repairs anything that drifted.
   await syncProjectPlugin(slug, session.projectId)
   const pluginRoot = projectPlugin(slug)
+
+  // Also reconciled here, not only after a clone, so projects created before
+  // this existed pick it up on their next run rather than needing a repair
+  // step. Without it the agent's own `git fetch` has no key and fails with
+  // "Host key verification failed".
+  const repo = projectRepo(slug)
+  const keyPath = await keyPathFor(sshKeyId)
+  if (await isGitRepo(repo)) {
+    const configured = await configureRepoSsh(repo, keyPath ? gitSshCommand(keyPath) : undefined)
+    if (!configured.ok) {
+      logger.warn(`Could not set core.sshCommand for ${slug}: ${configured.stderr}`)
+    }
+  }
 
   const orchestrator = session.orchestrator ? await getAgent(session.orchestrator) : undefined
   if (session.orchestrator && !orchestrator) {
@@ -57,6 +75,9 @@ export async function optionsFor(
       ...process.env,
       ...delegationEnv(MAX_SPAWN_DEPTH, MAX_CONCURRENT_SUBAGENTS),
       CLAUDE_AGENT_SDK_CLIENT_APP: 'agentoo/1.0.0',
+      // Belt and braces alongside core.sshCommand: this also covers a remote
+      // added during the session, and any bare `ssh` the agent runs.
+      ...(keyPath ? { GIT_SSH_COMMAND: gitSshCommand(keyPath) } : {}),
     },
   }
 }

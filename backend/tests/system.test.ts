@@ -1,10 +1,9 @@
 import { expect, test } from 'bun:test'
 
-process.env.DATABASE_URL ??= 'postgres://u:p@127.0.0.1:5432/db'
-process.env.REDIS_URL ??= 'redis://127.0.0.1:6379'
-// Deliberately absent, to exercise the fallback: a fresh install has no
-// projects directory yet, and the status bar must still show a disk figure.
-process.env.PROJECTS_DIR = '/nonexistent-agentoo-projects-dir'
+// PROJECTS_DIR is set there to a path that does not exist, which is what the
+// fallback below relies on: a fresh install has no projects directory yet, and
+// the status bar must still show a disk figure.
+import './setup-env'
 
 const { systemStats } = await import('../src/features/system/service')
 

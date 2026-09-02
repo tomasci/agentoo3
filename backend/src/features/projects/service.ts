@@ -2,11 +2,14 @@ import { rm } from 'node:fs/promises'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { projects } from '@/db/schema'
+import { keyPathFor } from '@/features/ssh-keys/service'
 import { resolveSource } from '@/lib/adopt-path'
 import { badRequest, conflict, notFound } from '@/lib/errors'
+import { configureRepoSsh, isGitRepo } from '@/lib/git'
 import { logger } from '@/lib/logger'
 import { assertInsideProjects, projectRepo, projectRoot, toSlug } from '@/lib/paths'
 import { checkRemoteUrl } from '@/lib/remote-url'
+import { gitSshCommand } from '@/lib/ssh'
 import { enqueueProjectSetup } from '@/queue'
 import type { CreateProjectInput, ProjectDto, UpdateProjectInput } from './schema'
 
@@ -141,6 +144,20 @@ export async function updateProject(id: string, input: UpdateProjectInput): Prom
     .returning()
 
   if (!updated) throw new Error('Update returned no row')
+
+  // Changing the key has to reach the repository config, or the old key stays
+  // in effect for every git command run inside a session.
+  if (input.sshKeyId !== undefined) {
+    const repo = projectRepo(updated.slug)
+    if (await isGitRepo(repo)) {
+      const keyPath = await keyPathFor(updated.sshKeyId)
+      const configured = await configureRepoSsh(repo, keyPath ? gitSshCommand(keyPath) : undefined)
+      if (!configured.ok) {
+        logger.warn(`Could not update core.sshCommand for ${updated.slug}: ${configured.stderr}`)
+      }
+    }
+  }
+
   logger.info(`Project ${updated.slug} updated`)
   return toDto(updated)
 }

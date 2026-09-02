@@ -6,6 +6,7 @@ import { projects } from '@/db/schema'
 import { keyPathFor } from '@/features/ssh-keys/service'
 import { resolveSource } from '@/lib/adopt-path'
 import {
+  configureRepoSsh,
   currentBranch,
   dirExists,
   ensureDir,
@@ -155,6 +156,19 @@ export async function runProjectSetup(job: ProjectSetupJob): Promise<void> {
     // A project need not be a git repo at all — an empty adopted folder is
     // valid, it just cannot have per-session worktrees.
     const isRepo = await isGitRepo(repo)
+
+    // Persist the key into the repository config, so the git commands an agent
+    // runs inside a session worktree can reach the remote too — not only the
+    // ones this process spawns.
+    if (isRepo) {
+      const keyPath = await keyPathFor(project.sshKeyId)
+      const configured = await configureRepoSsh(repo, keyPath ? gitSshCommand(keyPath) : undefined)
+      if (!configured.ok) {
+        logger.warn(`Could not set core.sshCommand for ${project.slug}: ${configured.stderr}`)
+      } else if (keyPath) {
+        logger.info(`${project.slug} will use ${keyPath} for git over ssh`)
+      }
+    }
     const branch = isRepo ? await currentBranch(repo) : undefined
     const remote = isRepo ? await remoteUrl(repo) : undefined
 

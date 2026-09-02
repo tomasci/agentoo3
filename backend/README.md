@@ -198,6 +198,27 @@ pub/sub connections are **not** BullMQ's: BullMQ needs
 setting means a publish to a Redis that is down never rejects — it waits, inside
 the turn that called it. These use a bounded retry instead.
 
+### Git over ssh inside a session
+
+The app injects `GIT_SSH_COMMAND` into the git commands it spawns itself, which
+is enough to clone. It is not enough for a session: the whole point is that an
+agent runs its own commands, and a bare `git fetch` in a worktree has no key
+handed to it. It fails with **"Host key verification failed"**, which reads like
+a missing `known_hosts` entry rather than a missing credential — and the service
+account deliberately has no `~/.ssh`, so there is nothing to fall back on.
+
+So the project's key is also written into the repository's own config as
+`core.sshCommand`. Worktrees share that config, so every git invocation in the
+project picks it up: ours, the agent's, and a human's over SSH. It is reconciled
+after a clone, when the project's key changes, and again as a session starts —
+so projects created before this heal on their next run.
+
+Session branches also get an upstream, pointing at the branch the worktree was
+cut from. Without it `git pull` stops with "no tracking information for the
+current branch". `git push` stays safe: `push.default` is `simple`, which
+refuses a branch whose upstream is named differently rather than quietly pushing
+a session's work onto main — verified, not assumed.
+
 ## SSH keys
 
 Generated as ed25519 **with no passphrase**, and there is no ssh-agent. Both are

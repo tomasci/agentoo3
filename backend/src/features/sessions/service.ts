@@ -3,7 +3,15 @@ import { db } from '@/db/client'
 import { messages, projects, sessions } from '@/db/schema'
 import { badRequest, conflict, notFound } from '@/lib/errors'
 import { publishControl, publishSessionEvent } from '@/lib/events'
-import { addWorktree, dirExists, ensureDir, isGitRepo, removeWorktree } from '@/lib/git'
+import {
+  addWorktree,
+  currentBranch,
+  dirExists,
+  ensureDir,
+  isGitRepo,
+  removeWorktree,
+  trackUpstream,
+} from '@/lib/git'
 import { logger } from '@/lib/logger'
 import { projectRepo, projectRoot, projectWorktree } from '@/lib/paths'
 import { enqueueSessionRun } from '@/queue'
@@ -160,6 +168,18 @@ export async function createSession(
     if (result.ok) {
       worktreePath = path
       branch = name
+
+      // Point the new branch at whatever it was cut from, so `git pull` inside
+      // the session has a tracking ref instead of stopping with "no tracking
+      // information for the current branch".
+      const base = await currentBranch(repo)
+      if (base) {
+        const tracked = await trackUpstream(path, 'origin', base)
+        if (!tracked.ok) {
+          // Normal for a project with no remote, or before the first fetch.
+          logger.debug(`No upstream for ${name}: ${tracked.stderr}`)
+        }
+      }
       await db
         .update(sessions)
         .set({ worktreePath, branch, updatedAt: new Date() })

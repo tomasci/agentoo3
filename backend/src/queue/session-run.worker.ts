@@ -157,7 +157,7 @@ async function runTurn(job: SessionRunJob): Promise<void> {
   const orchestratorName = claimed.orchestrator ?? 'orchestrator'
 
   try {
-    const options = await optionsFor(claimed, project.slug, abortController)
+    const options = await optionsFor(claimed, project.slug, abortController, project.sshKeyId)
     logger.info(`Session ${sessionId} running in ${options.cwd}`)
 
     for await (const message of query({ prompt, options })) {

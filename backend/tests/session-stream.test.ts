@@ -1,9 +1,8 @@
 import { afterAll, expect, mock, test } from 'bun:test'
+import { FAKE_REDIS_PORT } from './setup-env'
 import { startFakeRedis } from './fake-redis'
 
-const PORT = 6399
-process.env.REDIS_URL = `redis://127.0.0.1:${PORT}`
-process.env.DATABASE_URL = 'postgres://u:p@127.0.0.1:5432/db'
+const PORT = FAKE_REDIS_PORT
 
 // Started before the import below: the events module pulls in the BullMQ
 // queues, which connect to Redis the moment they are constructed.
