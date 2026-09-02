@@ -1,9 +1,19 @@
 # Git hooks live at the repository root, so this config does too; each command
 # declares the directory it actually runs in.
 
+# Sequential, unlike pre-push: the bump and biome's stage_fixed both run
+# `git add`, and concurrent ones contend for .git/index.lock. The whole group
+# takes well under a second, so there is nothing to win by racing them.
 pre-commit:
-  parallel: true
+  parallel: false
   commands:
+    # Every commit gets its own version, so the number in the status bar moves.
+    # The script stages what it changed, so those files land in this commit.
+    # Skip a bump with SKIP=bump-build — worth doing on `--amend`, which re-runs
+    # pre-commit and would otherwise bump a second time for one commit.
+    bump-build:
+      priority: 1
+      run: bun scripts/bump-build.ts
     # Milliseconds, and it catches a class of failure that only shows up on a
     # clean checkout: a source file the build imports but git ignores.
     sources-tracked:

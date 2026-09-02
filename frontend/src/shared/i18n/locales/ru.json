@@ -242,7 +242,13 @@
     "keys": "{{count}} ключ",
     "keys_few": "{{count}} ключа",
     "keys_many": "{{count}} ключей",
-    "project": "{{name}}"
+    "project": "{{name}}",
+    "cpu": "CPU {{percent}}%",
+    "cpuTitle": "Ядер: {{cores}}, load {{load}}",
+    "mem": "RAM {{used}} ({{percent}}%)",
+    "memTitle": "Занято {{used}} из {{total}}",
+    "disk": "Диск {{percent}}%",
+    "diskTitle": "Свободно {{free}} на {{path}}"
   },
   "theme": {
     "toggle": "Сменить тему"

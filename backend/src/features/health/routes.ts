@@ -1,5 +1,6 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import { hasClaudeCredential } from '@/env'
+import { VERSION } from '@/lib/version'
 
 const healthSchema = z.object({
   status: z.literal('ok'),
@@ -26,7 +27,7 @@ healthRouter.openapi(
     c.json(
       {
         status: 'ok' as const,
-        version: process.env.npm_package_version ?? '0.1.0',
+        version: VERSION,
         claudeCredential: hasClaudeCredential,
       },
       200,

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useHealth } from '@/features/health'
 import { useCurrentProject, useProjects } from '@/features/projects'
 import { useSshKeys } from '@/features/ssh-keys'
+import { formatBytes, useSystem } from '@/features/system'
 import styles from './layout.module.scss'
 
 /**
@@ -18,6 +19,7 @@ export function StatusBar() {
   const { data: projects } = useProjects()
   const { current } = useCurrentProject()
   const { data: keys } = useSshKeys()
+  const { data: system } = useSystem()
 
   // Three states, because "backend down" and "backend up but agents cannot run"
   // call for different actions.
@@ -65,7 +67,41 @@ export function StatusBar() {
         </Link>
       )}
 
-      <span className={`${styles.statusItem} ${styles.statusSpacer}`}>
+      {/* Host load. Three figures, pushed to the right with the version: enough
+          to notice the box filling up or pinned, without becoming a dashboard. */}
+      {system && (
+        <>
+          <span
+            className={`${styles.statusItem} ${styles.statusSpacer} ${styles.metric}`}
+            title={t('status.cpuTitle', { cores: system.cpu.cores, load: system.cpu.load1 })}
+          >
+            {t('status.cpu', { percent: Math.round(system.cpu.usagePercent) })}
+          </span>
+          <span
+            className={`${styles.statusItem} ${styles.metric} ${system.memory.usedPercent >= 90 ? styles.metricHigh : ''}`}
+            title={t('status.memTitle', {
+              used: formatBytes(system.memory.usedBytes),
+              total: formatBytes(system.memory.totalBytes),
+            })}
+          >
+            {t('status.mem', {
+              used: formatBytes(system.memory.usedBytes),
+              percent: Math.round(system.memory.usedPercent),
+            })}
+          </span>
+          <span
+            className={`${styles.statusItem} ${styles.metric} ${system.disk.usedPercent >= 90 ? styles.metricHigh : ''}`}
+            title={t('status.diskTitle', {
+              path: system.disk.path,
+              free: formatBytes(system.disk.totalBytes - system.disk.usedBytes),
+            })}
+          >
+            {t('status.disk', { percent: Math.round(system.disk.usedPercent) })}
+          </span>
+        </>
+      )}
+
+      <span className={`${styles.statusItem} ${!system ? styles.statusSpacer : ''}`}>
         {health?.version ? `v${health.version}` : ''}
       </span>
     </footer>

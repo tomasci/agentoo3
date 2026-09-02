@@ -212,3 +212,13 @@
   .select { flex: none; width: 4.5rem; }
   .body { padding: v.$space-lg v.$space-md; }
 }
+
+// Host load in the status bar. Tabular figures so a changing percentage does
+// not make the row jitter as digits change width.
+.metric {
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-fg);
+  white-space: nowrap;
+}
+
+.metricHigh { color: var(--danger, #c0392b); }

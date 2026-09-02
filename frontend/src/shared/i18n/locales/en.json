@@ -239,7 +239,13 @@
   "status": {
     "keys": "{{count}} key",
     "keys_plural": "{{count}} keys",
-    "project": "{{name}}"
+    "project": "{{name}}",
+    "cpu": "CPU {{percent}}%",
+    "cpuTitle": "{{cores}} cores, load {{load}}",
+    "mem": "RAM {{used}} ({{percent}}%)",
+    "memTitle": "{{used}} of {{total}} in use",
+    "disk": "Disk {{percent}}%",
+    "diskTitle": "{{free}} free on {{path}}"
   },
   "theme": {
     "toggle": "Toggle theme"

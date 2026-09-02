@@ -8,6 +8,7 @@ import { projectsRouter } from '@/features/projects/routes'
 import { sessionsRouter } from '@/features/sessions/routes'
 import { sourcesRouter } from '@/features/sources/routes'
 import { sshKeysRouter } from '@/features/ssh-keys/routes'
+import { systemRouter } from '@/features/system/routes'
 import { AppError } from '@/lib/errors'
 import { logger } from '@/lib/logger'
 
@@ -60,6 +61,7 @@ export function createApp() {
   app.route('/api', sshKeysRouter)
   app.route('/api', sourcesRouter)
   app.route('/api', sessionsRouter)
+  app.route('/api', systemRouter)
 
   app.doc('/api/openapi.json', {
     openapi: '3.1.0',
