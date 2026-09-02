@@ -10,6 +10,7 @@ import styles from './library.module.scss'
 interface Draft {
   name: string
   role: 'orchestrator' | 'subagent'
+  team: boolean
   description: string
   model: string
   effort: string
@@ -22,6 +23,7 @@ interface Draft {
 const EMPTY: Draft = {
   name: '',
   role: 'subagent',
+  team: true,
   description: '',
   model: '',
   effort: '',
@@ -50,6 +52,7 @@ export function AgentEditorPage({ name }: { name?: string }) {
     setDraft({
       name: agent.name,
       role: agent.role,
+      team: agent.team,
       description: agent.description,
       model: agent.model ?? '',
       effort: agent.effort ?? '',
@@ -67,6 +70,9 @@ export function AgentEditorPage({ name }: { name?: string }) {
 
   const body = {
     role: draft.role,
+    // Only an orchestrator leads a team. Sending the flag for a subagent would
+    // write a field into its file that means nothing there.
+    ...(draft.role === 'orchestrator' ? { team: draft.team } : {}),
     description: draft.description,
     prompt: draft.prompt,
     ...(draft.restrictTools ? { tools: draft.tools } : {}),
@@ -135,6 +141,22 @@ export function AgentEditorPage({ name }: { name?: string }) {
             </select>
             <span className={styles.hint}>{t(`library.roleHint.${draft.role}`)}</span>
           </div>
+
+          {draft.role === 'orchestrator' && (
+            <div className={styles.field}>
+              <label className={styles.tool}>
+                <input
+                  type="checkbox"
+                  checked={draft.team}
+                  onChange={(e) => set('team', e.target.checked)}
+                />
+                {t('library.agent.team')}
+              </label>
+              <span className={styles.hint}>
+                {t(`library.agent.teamHint.${draft.team ? 'on' : 'off'}`)}
+              </span>
+            </div>
+          )}
 
           <div className={styles.field}>
             <label className={styles.label} htmlFor="agent-model">
