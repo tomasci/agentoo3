@@ -62,19 +62,61 @@ which are only reachable by delegation:
 Postgres stores which agents and skills a project uses, plus per-project
 overrides — never the prompt body.
 
-### Delegation guidance is injected automatically
+### Orchestrator guidance is composed automatically
 
-Every `role: orchestrator` prompt gets Anthropic's documented delegation
-instruction appended (`src/library/delegation.ts`), idempotently.
+An orchestrator's markdown body *is* a custom system prompt, so none of Claude
+Code's built-in scaffolding applies to it — whatever it says is the entire
+prompt. Asking every operator to rewrite the craft of running a team of agents
+from scratch just produces the same doctrine badly, several times over. So it is
+written once and every `role: orchestrator` prompt is composed from three parts,
+idempotently:
 
-This is not optional polish. Claude Opus 5 delegates far more readily than
-earlier models, and Claude Code adds a delegation instruction of its own **only**
-when you use its `claude_code` system-prompt preset. An orchestrator's markdown
-*is* a custom system prompt, so that safeguard never applies here — without the
-injection, Opus 5's eagerness runs unchecked and small tasks get fanned out to
-subagents at multiplied cost. Prompting only steers, so pair it with the
-deterministic caps (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`,
-`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`, `maxBudgetUsd`).
+| part | home | position |
+|---|---|---|
+| the orchestration method | `LIBRARY_DIR/prompts/orchestration-method.md` | before |
+| the agent's own markdown | `LIBRARY_DIR/agents/<name>.md` | middle |
+| delegation + autonomy | `src/library/orchestrator-prompt.ts` | after |
+
+**The method is a file, not a constant.** It is a prompt, and prompts belong in
+the library where a commit changes them — hardcoding it would mean a deploy to
+adjust how briefs get written. It is read per composition, so an edit lands on
+the next session rather than the next restart, and it sits *before* the agent's
+own markdown so anything that agent says can refine or overrule it. Delete it and
+orchestrators simply lose the method; they still get the two guarantees.
+
+The method covers grounding a plan in the code, splitting by context rather than
+by task list, briefing a subagent that starts blank, verifying instead of
+believing a report, and owning the integration. An agent file is then free to say
+only what is true of its project — the seeded
+`library.example/agents/orchestrator.md` is written that way on purpose.
+
+The remaining two are hardcoded because they are not craft anyone is meant to
+tune. They are what the platform guarantees about a headless session, so they go
+last and get the final word.
+
+**Delegation.** Claude Code adds a delegation instruction of its own **only** when
+you use its `claude_code` system-prompt preset. Anthropic's documented text for
+this slot pushes the model *away* from delegating; we invert it deliberately.
+That text is written for an agent doing the work itself, where a subagent is pure
+overhead — an orchestrator's whole job is routing work to specialists, and a
+reluctant orchestrator is just a slow single agent.
+
+Cost is held by the lever that does not argue with the role: prompting only
+steers, so fan-out is bounded by the deterministic caps
+(`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`, `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`,
+`maxBudgetUsd`), not by talking the orchestrator out of its job.
+
+**Autonomy.** A session runs headless on a server and often with nobody watching,
+so a question is not a pause — it is a hang that burns the session. The
+orchestrator never asks for permission, confirmation or a credential it was not
+given.
+
+The subtler failure it guards against is an agent treating a missing secret as
+permission to stop. Credentials constrain what can be *run*, almost never what
+can be *built*: the feature gets implemented in full against the documented
+interface and delivered finished, and only what genuinely cannot be exercised
+without that access becomes a note in the report — what is unverified, and what
+it would take to verify.
 
 ## Projects
 

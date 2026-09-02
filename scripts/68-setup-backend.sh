@@ -70,7 +70,7 @@ run_as_app bash -c "cd '$BACKEND_DIR' && DATABASE_URL=unused REDIS_URL=unused bu
 log_ok "Wrote $BACKEND_DIR/openapi.json ($(jq -r '.paths | keys | length' "$BACKEND_DIR/openapi.json" 2>/dev/null || echo '?') paths)"
 
 # --- data directories ---------------------------------------------------------
-for dir in "$PROJECTS_DIR" "$SOURCES_DIR" "$LIBRARY_DIR/agents" "$LIBRARY_DIR/skills"; do
+for dir in "$PROJECTS_DIR" "$SOURCES_DIR" "$LIBRARY_DIR/agents" "$LIBRARY_DIR/skills" "$LIBRARY_DIR/prompts"; do
   if [[ ! -d "$dir" ]]; then
     as_root install -d -o "$APP_USER" -g "$APP_USER" -m 0755 "$dir"
     log_ok "Created $dir"
@@ -113,9 +113,11 @@ as_root find "$SSH_KEYS_DIR" -type f -name '*.pub' -exec chmod 0644 {} + 2>/dev/
 # overwrite prompts the operator has written.
 if [[ -d "$REPO_ROOT/library.example" ]] \
    && [[ -z "$(ls -A "$LIBRARY_DIR/agents" 2>/dev/null)" ]] \
-   && [[ -z "$(ls -A "$LIBRARY_DIR/skills" 2>/dev/null)" ]]; then
+   && [[ -z "$(ls -A "$LIBRARY_DIR/skills" 2>/dev/null)" ]] \
+   && [[ -z "$(ls -A "$LIBRARY_DIR/prompts" 2>/dev/null)" ]]; then
   as_root cp -r "$REPO_ROOT/library.example/agents/." "$LIBRARY_DIR/agents/"
   as_root cp -r "$REPO_ROOT/library.example/skills/." "$LIBRARY_DIR/skills/"
+  as_root cp -r "$REPO_ROOT/library.example/prompts/." "$LIBRARY_DIR/prompts/"
   as_root chown -R "$APP_USER:$APP_USER" "$LIBRARY_DIR"
   log_ok "Seeded $LIBRARY_DIR with example agents and skills"
 fi
