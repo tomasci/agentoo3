@@ -2,12 +2,25 @@
 
 // The transcript scrolls; the header and composer stay put. Without this the
 // composer walks off the bottom of a long session.
+//
+// Flex rather than grid rows on purpose. The error banner between the header and
+// the transcript is conditional, and with fixed row tracks the children simply
+// auto-place into the first N of them — so with no banner the `1fr` landed on
+// the composer, which then inflated to fill whatever the transcript did not use.
+// Here the element that flexes says so itself, whatever else is present.
 .page {
-  display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  display: flex;
+  flex-direction: column;
   gap: v.$space-md;
   height: 100%;
   min-height: 0;
+}
+
+// Header, banner and composer keep their natural height.
+.head,
+.failure,
+.composer {
+  flex: none;
 }
 
 .head {
@@ -47,7 +60,14 @@
 .dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--muted-fg); }
 .dotLive { background: var(--accent); }
 
-.scroll { overflow-y: auto; min-height: 0; padding-right: v.$space-sm; }
+.scroll {
+  flex: 1 1 auto;
+  // Without this a flex item refuses to shrink below its content, and the
+  // scrollbar never appears.
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: v.$space-sm;
+}
 
 .composer {
   display: grid;
