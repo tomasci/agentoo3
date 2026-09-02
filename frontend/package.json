@@ -2,7 +2,7 @@
   "name": "agentoo-frontend",
   "private": true,
   "type": "module",
-  "version": "0.1.41",
+  "version": "0.1.42",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -37,6 +37,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.11",
+    "@happy-dom/global-registrator": "^20.13.2",
     "@kubb/adapter-oas": "5.0.5",
     "@kubb/cli": "5.0.5",
     "@kubb/plugin-axios": "5.1.1",
@@ -48,6 +49,7 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
     "@vitejs/plugin-react": "6.1.1",
+    "happy-dom": "^20.13.2",
     "kubb": "5.0.5",
     "lefthook": "2.1.12",
     "sass": "1.103.1",

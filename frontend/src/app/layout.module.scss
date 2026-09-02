@@ -1,24 +1,37 @@
 @use '@/styles/variables' as v;
 
-// Three fixed regions and one scrolling one, the way an IDE is laid out:
+// Four fixed regions and one scrolling one, the way an IDE is laid out:
 //
-//   ┌──────────┬───────────────────────┐
+//   ┌──────────────────────────────────┐
+//   │ tab bar                          │
+//   ├──────────┬───────────────────────┤
 //   │ sidebar  │ page body (scrolls)   │
 //   ├──────────┴───────────────────────┤
 //   │ status bar                       │
 //   └──────────────────────────────────┘
 //
-// The grid owns the viewport so only `.body` scrolls; the sidebar and status bar
-// stay put without `position: fixed` and the overlap bugs that brings.
+// The grid owns the viewport so only `.body` scrolls; the tab bar, sidebar and
+// status bar stay put without `position: fixed` and the overlap bugs that brings.
 .shell {
   display: grid;
   grid-template-columns: v.$sidebar-width 1fr;
-  grid-template-rows: 1fr auto;
+  grid-template-rows: auto 1fr auto;
   grid-template-areas:
+    'tabs    tabs'
     'sidebar body'
     'status  status';
   height: 100dvh;
   overflow: hidden;
+}
+
+// An empty tab has no sidebar to show, so the picker takes the full width
+// instead of leaving a column of nothing beside it.
+.shellBare {
+  grid-template-columns: 1fr;
+  grid-template-areas:
+    'tabs'
+    'body'
+    'status';
 }
 
 .sidebar {
@@ -46,6 +59,7 @@
   font-size: 1.125rem;
   font-weight: 600;
   letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
 }
 
 .tagline {
@@ -53,6 +67,7 @@
   font-size: 0.75rem;
   color: var(--muted-fg);
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .nav {
@@ -76,25 +91,7 @@
   color: var(--muted-fg);
 }
 
-.sectionEmpty {
-  margin: 0;
-  padding: 0 v.$space-sm;
-  font-size: 0.75rem;
-  color: var(--muted-fg);
-  line-height: 1.5;
-}
 
-.projectSelect {
-  margin: 0 v.$space-sm;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  font-size: 0.8125rem;
-  max-width: calc(100% - #{v.$space-sm} * 2);
-}
 
 .navItem {
   display: block;
@@ -116,26 +113,7 @@
   }
 }
 
-// Pushed to the bottom of the sidebar: preferences, not navigation.
-.sidebarFoot {
-  margin-top: auto;
-  display: flex;
-  gap: v.$space-sm;
-  align-items: center;
-  padding: 0 v.$space-sm;
-}
 
-.select {
-  flex: 1;
-  min-width: 0;
-  padding: 0.3rem 0.4rem;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  font-size: 0.8125rem;
-}
 
 .body {
   grid-area: body;
@@ -184,7 +162,16 @@
   .shell {
     grid-template-columns: 1fr;
     grid-template-areas:
+      'tabs'
       'sidebar'
+      'body'
+      'status';
+    grid-template-rows: auto auto 1fr auto;
+  }
+
+  .shellBare {
+    grid-template-areas:
+      'tabs'
       'body'
       'status';
     grid-template-rows: auto 1fr auto;
@@ -204,12 +191,8 @@
   .nav { flex-direction: row; }
   .sidebarSection { flex-direction: row; align-items: center; gap: v.$space-sm; }
   .sectionLabel { display: none; }
-  .sectionEmpty { display: none; }
-  .projectSelect { margin: 0; max-width: 9rem; }
   .navItem { border-left: 0; border-bottom: 2px solid transparent; }
   .navItem[aria-current='page'] { border-left: 0; border-bottom-color: var(--accent); }
-  .sidebarFoot { margin-top: 0; margin-left: auto; }
-  .select { flex: none; width: 4.5rem; }
   .body { padding: v.$space-lg v.$space-md; }
 }
 

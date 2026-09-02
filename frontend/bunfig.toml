@@ -1,0 +1,4 @@
+# `bun test` loads this first: it installs a DOM and the React test globals
+# before any test file imports React or the router.
+[test]
+preload = ["./tests/setup.ts"]

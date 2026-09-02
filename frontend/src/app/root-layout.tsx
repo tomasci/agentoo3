@@ -1,119 +1,39 @@
-import { Link, Outlet } from '@tanstack/react-router'
-import { useAtom } from 'jotai'
+import { Outlet, useLocation } from '@tanstack/react-router'
+import { useAtomValue } from 'jotai'
 import { useEffect } from 'react'
-import { useTranslation } from 'react-i18next'
-import { useCurrentProject } from '@/features/projects'
-import { SUPPORTED_LANGUAGES } from '@/shared/i18n'
+import { projectIdForPath, shellModeForPath } from '@/shared/store/tabs'
 import { themeAtom } from '@/shared/store/ui'
-import { Button } from '@/shared/ui'
 import styles from './layout.module.scss'
-import { ProjectSwitcher } from './project-switcher'
+import { ProjectSidebar, SystemSidebar } from './sidebar'
 import { StatusBar } from './status-bar'
+import { TabBar } from './tab-bar'
+import { useWorkspaceSync } from './use-tabs'
 
 export function RootLayout() {
-  const { t, i18n } = useTranslation()
-  const [theme, setTheme] = useAtom(themeAtom)
-  const { current } = useCurrentProject()
+  const theme = useAtomValue(themeAtom)
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
 
+  // Mounted here, once: the workspace is kept in step with the URL on every
+  // page, not only while the tab bar happens to be looking.
+  useWorkspaceSync()
+
+  const { pathname } = useLocation()
+  const mode = shellModeForPath(pathname)
+  const projectId = projectIdForPath(pathname)
+
+  // An empty tab has nothing to navigate yet: until it is pointed at a project,
+  // the picker gets the whole width rather than a sidebar of dead links.
+  const withoutSidebar = mode === 'new'
+
   return (
-    <div className={styles.shell}>
-      <aside className={styles.sidebar}>
-        <Link to="/projects" className={styles.brand}>
-          <h1 className={styles.logo}>{t('app.title')}</h1>
-          <p className={styles.tagline}>{t('app.subtitle')}</p>
-        </Link>
+    <div className={`${styles.shell} ${withoutSidebar ? styles.shellBare : ''}`}>
+      <TabBar />
 
-        <div className={styles.sidebarSection}>
-          <span className={styles.sectionLabel}>{t('nav.workspace')}</span>
-          <nav className={styles.nav}>
-            {/* exact:true, or this stays lit while inside a project and competes
-                with the project's own links below. */}
-            <Link
-              to="/projects"
-              className={styles.navItem}
-              activeProps={{ 'aria-current': 'page' }}
-              activeOptions={{ exact: true }}
-            >
-              {t('nav.projects')}
-            </Link>
-            <Link
-              to="/library"
-              className={styles.navItem}
-              activeProps={{ 'aria-current': 'page' }}
-              activeOptions={{ exact: false }}
-            >
-              {t('nav.library')}
-            </Link>
-            <Link
-              to="/ssh-keys"
-              className={styles.navItem}
-              activeProps={{ 'aria-current': 'page' }}
-            >
-              {t('nav.sshKeys')}
-            </Link>
-          </nav>
-        </div>
-
-        <ProjectSwitcher />
-
-        {/* Project-scoped navigation, shown only when one is open. */}
-        {current && (
-          <nav className={styles.nav}>
-            <Link
-              to="/projects/$projectId"
-              params={{ projectId: current.id }}
-              className={styles.navItem}
-              activeProps={{ 'aria-current': 'page' }}
-              activeOptions={{ exact: true }}
-            >
-              {t('nav.overview')}
-            </Link>
-            <Link
-              to="/projects/$projectId/sessions"
-              params={{ projectId: current.id }}
-              className={styles.navItem}
-              activeProps={{ 'aria-current': 'page' }}
-            >
-              {t('nav.sessions')}
-            </Link>
-            <Link
-              to="/projects/$projectId/library"
-              params={{ projectId: current.id }}
-              className={styles.navItem}
-              activeProps={{ 'aria-current': 'page' }}
-            >
-              {t('nav.projectLibrary')}
-            </Link>
-          </nav>
-        )}
-
-        {/* Preferences, not navigation, so they sit at the foot. */}
-        <div className={styles.sidebarFoot}>
-          <select
-            className={styles.select}
-            aria-label={t('language.label')}
-            value={i18n.resolvedLanguage}
-            onChange={(event) => void i18n.changeLanguage(event.target.value)}
-          >
-            {SUPPORTED_LANGUAGES.map((lng) => (
-              <option key={lng} value={lng}>
-                {lng.toUpperCase()}
-              </option>
-            ))}
-          </select>
-          <Button
-            type="button"
-            aria-label={t('theme.toggle')}
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          >
-            {theme === 'dark' ? '☀' : '☾'}
-          </Button>
-        </div>
-      </aside>
+      {mode === 'project' && projectId && <ProjectSidebar projectId={projectId} />}
+      {mode === 'system' && <SystemSidebar />}
 
       <main className={styles.body}>
         <Outlet />

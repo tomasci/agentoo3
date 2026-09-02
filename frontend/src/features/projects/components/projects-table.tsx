@@ -1,4 +1,3 @@
-import { Link, useNavigate } from '@tanstack/react-router'
 import {
   createColumnHelper,
   flexRender,
@@ -14,9 +13,21 @@ import styles from './projects-table.module.scss'
 
 const columnHelper = createColumnHelper<Project>()
 
-export function ProjectsTable({ projects }: { projects: Project[] }) {
+/**
+ * The projects, with what state each is in and a way to open or remove it.
+ *
+ * Opening is handed out through `onOpen` rather than linked: a project opens
+ * *into a tab*, and which tab that is — the empty one that asked, or the one it
+ * is already open in — is the workspace's decision, not a table's.
+ */
+export function ProjectsTable({
+  projects,
+  onOpen,
+}: {
+  projects: Project[]
+  onOpen: (projectId: string) => void
+}) {
   const { t } = useTranslation()
-  const navigate = useNavigate()
   const remove = useDeleteProject()
   const [pendingDelete, setPendingDelete] = useState<Project | null>(null)
 
@@ -28,13 +39,9 @@ export function ProjectsTable({ projects }: { projects: Project[] }) {
           const project = info.row.original
           // Only a ready project has a checkout to open.
           return project.status === 'ready' ? (
-            <Link
-              to="/projects/$projectId"
-              params={{ projectId: project.id }}
-              className={styles.nameLink}
-            >
+            <button type="button" className={styles.nameLink} onClick={() => onOpen(project.id)}>
               {project.name}
-            </Link>
+            </button>
           ) : (
             <span className={`${styles.nameLink} ${styles.namePlain}`}>{project.name}</span>
           )
@@ -58,11 +65,7 @@ export function ProjectsTable({ projects }: { projects: Project[] }) {
               id: 'open',
               label: t('projects.open'),
               disabled: project.status !== 'ready',
-              onSelect: () =>
-                void navigate({
-                  to: '/projects/$projectId',
-                  params: { projectId: project.id },
-                }),
+              onSelect: () => onOpen(project.id),
             },
             {
               id: 'delete',
@@ -80,7 +83,7 @@ export function ProjectsTable({ projects }: { projects: Project[] }) {
         },
       }),
     ],
-    [t, navigate],
+    [t, onOpen],
   )
 
   const table = useReactTable({ data: projects, columns, getCoreRowModel: getCoreRowModel() })

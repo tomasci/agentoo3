@@ -3,14 +3,13 @@
 .page {
   display: grid;
   gap: v.$space-lg;
+  // The picker owns the whole width of an empty tab, so it centres on a
+  // readable measure rather than stretching across an ultrawide monitor.
+  max-width: 52rem;
+  margin: 0 auto;
 }
 
-.header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: v.$space-md;
-}
+.intro { display: grid; gap: 0.25rem; }
 
 .title {
   margin: 0;
@@ -18,17 +17,19 @@
   font-weight: 600;
 }
 
-.count {
-  font-size: 0.8125rem;
+.lead {
+  margin: 0;
   color: var(--muted-fg);
+  font-size: 0.875rem;
 }
 
-.list {
-  display: grid;
-  gap: v.$space-md;
-  // Full width, but cards stop growing at a comfortable measure rather than
-  // stretching a two-line card across an ultrawide monitor.
-  grid-template-columns: repeat(auto-fill, minmax(28rem, 1fr));
+.sectionTitle {
+  margin: 0 0 v.$space-md;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-fg);
 }
 
 .empty {
@@ -46,4 +47,8 @@
   border-radius: v.$radius-sm;
   color: var(--warn);
   font-size: 0.875rem;
+}
+
+@media (max-width: 40rem) {
+  .page { max-width: none; }
 }

@@ -13,7 +13,12 @@ import styles from './create-project-form.module.scss'
 
 const SOURCES = ['clone', 'existing', 'empty'] as const
 
-export function CreateProjectForm() {
+/**
+ * `onCreated` lets the caller take the new project somewhere — the picker in an
+ * empty tab settles that project into the tab instead of leaving the reader on
+ * a form they have already finished with.
+ */
+export function CreateProjectForm({ onCreated }: { onCreated?: (projectId: string) => void }) {
   const { t } = useTranslation()
   const create = useCreateProject()
   const { data: sshKeys } = useSshKeys()
@@ -53,7 +58,10 @@ export function CreateProjectForm() {
     create.mutate(
       { body },
       {
-        onSuccess: () => reset(),
+        onSuccess: (project) => {
+          reset()
+          onCreated?.(project.id)
+        },
         // The backend's message is the useful one — it names the exact rule the
         // input broke rather than just the status code.
         onError: (error) => setServerError(apiErrorMessage(error, t('projects.form.failed'))),

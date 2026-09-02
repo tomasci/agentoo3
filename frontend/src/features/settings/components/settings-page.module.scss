@@ -1,0 +1,67 @@
+@use '@/styles/variables' as v;
+
+.page {
+  display: grid;
+  gap: v.$space-lg;
+  max-width: v.$content-width;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.lead {
+  margin: 0.25rem 0 0;
+  color: var(--muted-fg);
+  font-size: 0.875rem;
+}
+
+.card {
+  display: grid;
+  border: 1px solid var(--border);
+  border-radius: v.$radius;
+  background: var(--surface);
+}
+
+// A row per setting: label and explanation on the left, control on the right,
+// with the divider only between rows so the card keeps a clean edge.
+.setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: v.$space-lg;
+  padding: v.$space-md v.$space-lg;
+
+  & + & { border-top: 1px solid var(--border); }
+}
+
+.label {
+  display: grid;
+  gap: 0.15rem;
+  font-size: 0.9375rem;
+}
+
+.hint {
+  color: var(--muted-fg);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.control {
+  flex: none;
+  min-width: 9rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: v.$radius-sm;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 40rem) {
+  .setting { flex-direction: column; align-items: stretch; gap: v.$space-sm; }
+  .control { width: 100%; }
+}

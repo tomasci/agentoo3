@@ -1,23 +1,19 @@
 import { Outlet, useParams } from '@tanstack/react-router'
-import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useCurrentProject, useProjects } from '@/features/projects'
+import { useProjects } from '@/features/projects'
 
 /**
  * Wraps every page under /projects/$projectId.
  *
- * Selecting the project lives here rather than in each page, so the selection
- * cannot fall out of step with the URL depending on which sub-page you landed on.
+ * The lookup lives here rather than in each page, so a project that has been
+ * deleted or was never there says so once, instead of each sub-page finding out
+ * on its own. Which project is *open* is no longer a question this layout
+ * answers — the tab in the URL is the answer.
  */
 export function ProjectLayout() {
   const { t } = useTranslation()
   const { projectId } = useParams({ from: '/projects/$projectId' })
-  const { setCurrentProjectId } = useCurrentProject()
   const { data: projects, isPending } = useProjects()
-
-  useEffect(() => {
-    setCurrentProjectId(projectId)
-  }, [projectId, setCurrentProjectId])
 
   const project = projects?.find((p) => p.id === projectId)
 
