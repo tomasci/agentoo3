@@ -70,7 +70,9 @@ export async function optionsFor(
     // 'project' is what loads the repo's own CLAUDE.md, which is usually the
     // most useful context a project has.
     settingSources: ['project'],
-    ...(orchestrator && { systemPrompt: await composeOrchestratorPrompt(orchestrator.prompt) }),
+    ...(orchestrator && {
+      systemPrompt: await composeOrchestratorPrompt(orchestrator.prompt, orchestrator.team),
+    }),
     ...(orchestrator?.model && { model: orchestrator.model }),
     // Full tool access, deliberately: this runs on a single-user box behind a
     // tailnet, and prompting for permission has nobody to ask.

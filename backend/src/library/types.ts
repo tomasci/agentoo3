@@ -15,6 +15,11 @@ export const agentFrontmatterSchema = z.object({
   // Deliberately no `name`: the filename is the identity. A stray one in a
   // hand-edited file is ignored rather than allowed to shadow it.
   role: agentRoleSchema.default('subagent'),
+  // Whether this orchestrator leads a team. True gets the shared orchestration
+  // method and the delegation instruction; false marks a solo agent that does
+  // the work itself, for which both would be actively wrong. Ignored for
+  // subagents, which are never composed. Autonomy applies either way.
+  team: z.boolean().default(true),
   description: z.string().min(1),
   tools: z.array(z.string()).optional(),
   disallowedTools: z.array(z.string()).optional(),
