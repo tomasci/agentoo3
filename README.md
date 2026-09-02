@@ -91,7 +91,7 @@ scripts/
   90-summary.sh         verify everything and report
 backend/                Hono API + worker driving the Claude Agent SDK
 frontend/               React + Vite SPA, served by Bun — see frontend/README.md
-library.example/        seed agents/skills, copied to LIBRARY_DIR on first install
+library.example/        seed agents/skills/prompts, copied to LIBRARY_DIR on first install
 config/  docs/
 logs/                   install.log (gitignored)
 .state/                 step markers + remembered settings (gitignored)
@@ -127,9 +127,12 @@ Restarting the API never kills a running agent.
 
 Agents and skills are markdown in `LIBRARY_DIR`, marked `role: orchestrator` or
 `role: subagent` so you can see which drive a session and which are only reached
-by delegation. Orchestrators get Anthropic's documented delegation instruction
-injected automatically — Opus 5 over-delegates otherwise, and Claude Code's own
-safeguard does not apply to custom system prompts.
+by delegation. Every orchestrator is composed against the shared method in
+`prompts/orchestration-method.md` — how to plan, split, brief and verify — so an
+agent file only has to say what is true of its project. Two guarantees get the
+last word: delegate the work rather than do it, and run to completion without
+stopping to ask. Claude Code's own delegation safeguard never applies to a
+custom system prompt, so without this an orchestrator has no policy at all.
 
 Projects live one-per-directory under `PROJECTS_DIR`, each session on its own git
 worktree and branch. Details and the private-repo recovery flow:

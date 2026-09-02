@@ -6,8 +6,8 @@ import { configureRepoSsh, isGitRepo } from '@/lib/git'
 import { logger } from '@/lib/logger'
 import { projectPlugin, projectRepo } from '@/lib/paths'
 import { gitSshCommand, keyProblem } from '@/lib/ssh'
-import { delegationEnv, withDelegationGuidance } from '@/library/delegation'
 import { getAgent } from '@/library/index'
+import { composeOrchestratorPrompt, delegationEnv } from '@/library/orchestrator-prompt'
 
 /** Deterministic ceiling on delegation, paired with the prompt-level guidance. */
 const MAX_SPAWN_DEPTH = 2
@@ -16,8 +16,9 @@ const MAX_CONCURRENT_SUBAGENTS = 3
 /**
  * Build the SDK options for this session.
  *
- * The orchestrator's markdown body becomes the system prompt, with the
- * delegation guidance appended. Its subagents are not listed here: they reach
+ * The orchestrator's markdown body becomes the system prompt, composed between
+ * the library's shared orchestration method and the delegation and autonomy
+ * guarantees. Its subagents are not listed here: they reach
  * the session through the project's plugin directory, which is the same set the
  * library page assigns, so what runs matches what the UI shows.
  */
@@ -69,7 +70,7 @@ export async function optionsFor(
     // 'project' is what loads the repo's own CLAUDE.md, which is usually the
     // most useful context a project has.
     settingSources: ['project'],
-    ...(orchestrator && { systemPrompt: withDelegationGuidance(orchestrator.prompt) }),
+    ...(orchestrator && { systemPrompt: await composeOrchestratorPrompt(orchestrator.prompt) }),
     ...(orchestrator?.model && { model: orchestrator.model }),
     // Full tool access, deliberately: this runs on a single-user box behind a
     // tailnet, and prompting for permission has nobody to ask.

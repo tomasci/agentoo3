@@ -1,0 +1,109 @@
+import { readFile, stat } from 'node:fs/promises'
+import { join } from 'node:path'
+import matter from 'gray-matter'
+import { env } from '@/env'
+import { logger } from '@/lib/logger'
+
+// Composition for `role: orchestrator` prompts. Three parts, two homes.
+//
+// The METHOD — how to run a team of agents — is a prompt, and prompts live in
+// the library as markdown so they can be tuned with a commit instead of a
+// deploy. It is not hardcoded here on purpose.
+//
+// The two INSTRUCTIONS below are hardcoded, because they are not craft the
+// operator is meant to tune. They are the guarantees the platform makes about
+// how a headless session behaves, and they are two paragraphs, not a doctrine.
+
+/** Where the editable method lives, relative to `LIBRARY_DIR`. */
+export const METHOD_PATH = join('prompts', 'orchestration-method.md')
+
+// Claude Code adds a delegation instruction of its own ONLY under its
+// `claude_code` system-prompt preset, so a custom prompt gets no policy at all.
+//
+// Anthropic documents a general-purpose instruction for this slot that pushes the
+// model AWAY from delegating (see the Opus 5 prompting guide). We invert it on
+// purpose: that text is written for an agent doing the work itself, where a
+// subagent is overhead. An orchestrator's whole job is routing work to
+// specialists, and a reluctant orchestrator is just a slow single agent. Cost is
+// held by the caps below instead — the lever that does not argue with the role.
+export const DELEGATION_INSTRUCTION = `You are an orchestrator: delegating is your job, not a fallback. Route the execution of the work — investigation, implementation, testing, documentation — to the specialists available to you, and send independent pieces in a single turn so they run in parallel. Spend your own tool calls on reading enough to plan and on verifying what comes back, not on doing a specialist's work for them. A subagent starts with a fresh context and sees nothing of this conversation, so each brief must be self-contained: the goal, the paths, the decisions already made, what "done" means in checkable terms, and what belongs to another agent.`
+
+// A session here runs headless on a server, frequently with no human watching,
+// so a question is not a pause — it is a hang that burns the session.
+//
+// The failure this guards against is not asking, though; it is an agent treating
+// a missing secret as permission to stop. A credential it was not given blocks
+// running and verifying the work, almost never building it, and those are very
+// different outcomes to hand back.
+export const AUTONOMY_INSTRUCTION = `Work autonomously and deliver the task finished. Never ask for permission, confirmation, or clarification: resolve ambiguity by investigating the project and deciding, then record the assumption. Missing credentials and unreachable services are a constraint on what you can run, not on what you can build — implement the work in full against the documented interface, keep secrets out of the code, and finish it. Where something genuinely cannot be exercised without access you do not have, say in the final report what is unverified and what it would take to verify. "I could not run it" is a caveat on a completed task, never a reason to hand back less of one.`
+
+const METHOD_MARKER = '<!-- agentoo:orchestrator:method -->'
+const RULES_MARKER = '<!-- agentoo:orchestrator:rules -->'
+
+/**
+ * The shared orchestration method, as the operator currently has it.
+ *
+ * Absent or unreadable is not fatal: an operator who deletes the file has opted
+ * out of the method, and their orchestrators still get the guarantees below.
+ * Read per composition rather than cached, so editing the file takes effect on
+ * the next session instead of the next restart.
+ */
+export async function loadOrchestratorMethod(): Promise<string> {
+  const path = join(env.LIBRARY_DIR, METHOD_PATH)
+  try {
+    await stat(path)
+  } catch {
+    logger.warn(`No orchestration method at ${path} — orchestrators run without it`)
+    return ''
+  }
+  try {
+    // Tolerate frontmatter so the file can carry metadata later without the
+    // whole block leaking into the prompt.
+    return matter(await readFile(path, 'utf8')).content.trim()
+  } catch (error) {
+    logger.warn(`Could not read ${path}: ${error instanceof Error ? error.message : String(error)}`)
+    return ''
+  }
+}
+
+/**
+ * Compose a complete orchestrator system prompt: the method, the agent's own
+ * markdown, then the two non-negotiables.
+ *
+ * The order is the point. The method goes first as a default the agent's own
+ * words can refine or contradict. Delegation and autonomy go last, because they
+ * are guarantees rather than advice — an orchestrator that quietly stops to ask
+ * a question nobody is there to answer is a hung session, not a style choice.
+ *
+ * Pure, so the composition is testable without a library on disk. Idempotent:
+ * re-composing an already-composed prompt returns it unchanged.
+ */
+export function withOrchestratorGuidance(prompt: string, method: string): string {
+  if (prompt.includes(METHOD_MARKER) || prompt.includes(RULES_MARKER)) return prompt
+  const own = prompt.trim()
+  const base = method.trim()
+  return [
+    ...(base ? [METHOD_MARKER, base, ''] : []),
+    ...(own ? ['# This project', '', own, ''] : []),
+    RULES_MARKER,
+    `<delegation>\n${DELEGATION_INSTRUCTION}\n</delegation>`,
+    `<autonomy>\n${AUTONOMY_INSTRUCTION}\n</autonomy>`,
+    '',
+  ].join('\n')
+}
+
+/** Convenience for the common path: load the method, compose against it. */
+export async function composeOrchestratorPrompt(prompt: string): Promise<string> {
+  return withOrchestratorGuidance(prompt, await loadOrchestratorMethod())
+}
+
+// Prompting only steers, so the ceiling on fan-out is enforced, not asked for.
+// This is what makes an always-delegate orchestrator affordable. Passed through
+// the SDK's `env` option. Defaults are 3 and 20 respectively, which is far more
+// concurrency than a single-box deployment wants.
+export function delegationEnv(maxDepth: number, maxConcurrent: number): Record<string, string> {
+  return {
+    CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH: String(maxDepth),
+    CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS: String(maxConcurrent),
+  }
+}
