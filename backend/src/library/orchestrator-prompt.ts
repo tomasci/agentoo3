@@ -75,26 +75,40 @@ export async function loadOrchestratorMethod(): Promise<string> {
  * are guarantees rather than advice — an orchestrator that quietly stops to ask
  * a question nobody is there to answer is a hung session, not a style choice.
  *
+ * `leadsTeam: false` drops the method and the delegation instruction, which for
+ * a solo agent are not merely unnecessary but wrong: they tell it to hand off
+ * work it was created to do itself. Autonomy stays, because it is about how a
+ * headless session behaves, not about how many agents are in it.
+ *
  * Pure, so the composition is testable without a library on disk. Idempotent:
  * re-composing an already-composed prompt returns it unchanged.
  */
-export function withOrchestratorGuidance(prompt: string, method: string): string {
+export function withOrchestratorGuidance(prompt: string, method: string, leadsTeam = true): string {
   if (prompt.includes(METHOD_MARKER) || prompt.includes(RULES_MARKER)) return prompt
   const own = prompt.trim()
-  const base = method.trim()
+  const base = leadsTeam ? method.trim() : ''
   return [
     ...(base ? [METHOD_MARKER, base, ''] : []),
-    ...(own ? ['# This project', '', own, ''] : []),
+    // The heading only earns its place under the method, where it marks the
+    // switch from the general to the specific. Alone at the top of a solo
+    // agent's prompt it is just noise.
+    ...(own ? (base ? ['# This project', '', own, ''] : [own, '']) : []),
     RULES_MARKER,
-    `<delegation>\n${DELEGATION_INSTRUCTION}\n</delegation>`,
+    ...(leadsTeam ? [`<delegation>\n${DELEGATION_INSTRUCTION}\n</delegation>`] : []),
     `<autonomy>\n${AUTONOMY_INSTRUCTION}\n</autonomy>`,
     '',
   ].join('\n')
 }
 
-/** Convenience for the common path: load the method, compose against it. */
-export async function composeOrchestratorPrompt(prompt: string): Promise<string> {
-  return withOrchestratorGuidance(prompt, await loadOrchestratorMethod())
+/**
+ * Convenience for the common path: load the method, compose against it.
+ *
+ * A solo agent (`team: false`) skips the read entirely — there is nothing to
+ * warn about when it is missing something it was never going to use.
+ */
+export async function composeOrchestratorPrompt(prompt: string, leadsTeam = true): Promise<string> {
+  const method = leadsTeam ? await loadOrchestratorMethod() : ''
+  return withOrchestratorGuidance(prompt, method, leadsTeam)
 }
 
 // Prompting only steers, so the ceiling on fan-out is enforced, not asked for.

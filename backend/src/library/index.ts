@@ -146,7 +146,14 @@ export function agentToMarkdown(agent: Omit<LibraryAgent, 'path' | 'name'>): str
   // Drop empty optionals so the file stays readable rather than accumulating
   // `tools: null` noise.
   const data = Object.fromEntries(
-    Object.entries(frontmatter).filter(([, v]) => v !== undefined && v !== null),
+    Object.entries(frontmatter).filter(
+      ([k, v]) =>
+        v !== undefined &&
+        v !== null &&
+        // `team: true` is the default and says nothing. Writing only the opt-out
+        // keeps subagent files, where the field means nothing at all, clean.
+        !(k === 'team' && v === true),
+    ),
   )
   return matter.stringify(`\n${prompt.trim()}\n`, data)
 }

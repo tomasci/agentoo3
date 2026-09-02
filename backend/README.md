@@ -90,6 +90,13 @@ believing a report, and owning the integration. An agent file is then free to sa
 only what is true of its project — the seeded
 `library.example/agents/orchestrator.md` is written that way on purpose.
 
+An orchestrator that works alone sets `team: false` in its frontmatter and is
+composed differently: no method, no delegation instruction. For a solo agent
+those are not merely unnecessary, they are wrong — they tell it to hand off the
+work it exists to do. Autonomy still applies, because it describes how a
+headless session behaves rather than how many agents are in it. The seeded
+`global` agent is the example.
+
 The remaining two are hardcoded because they are not craft anyone is meant to
 tune. They are what the platform guarantees about a headless session, so they go
 last and get the final word.

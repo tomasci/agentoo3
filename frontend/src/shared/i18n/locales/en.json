@@ -278,13 +278,18 @@
       "subagent": "subagent"
     },
     "roleHint": {
-      "orchestrator": "Can drive a session and delegate to subagents. Gets a delegation instruction added automatically.",
+      "orchestrator": "Can drive a session. Gets the autonomy guarantee, and the orchestration method unless you turn the team off below.",
       "subagent": "Only reachable by delegation from an orchestrator; never drives a session itself."
     },
     "agent": {
       "name": "Name",
       "nameHint": "Becomes the filename. Lowercase letters, digits and dashes. Cannot be changed later.",
       "role": "Role",
+      "team": "Leads a team of subagents",
+      "teamHint": {
+        "on": "Composed with the library’s orchestration method and told to delegate the work rather than do it.",
+        "off": "A solo agent: it gets neither the method nor the delegation instruction, and does the work itself."
+      },
       "model": "Model",
       "inherit": "Inherit",
       "default": "Default",

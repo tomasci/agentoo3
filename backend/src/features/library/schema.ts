@@ -9,6 +9,10 @@ export const agentSchema = z.object({
     description:
       'orchestrator agents may drive a session and delegate; subagents are only reachable by delegation',
   }),
+  team: z.boolean().openapi({
+    description:
+      'Whether an orchestrator leads a team; false marks a solo agent that gets no orchestration guidance',
+  }),
   description: z.string(),
   tools: z.array(z.string()).optional().openapi({
     description: 'Omit to inherit every tool available to subagents',
@@ -31,6 +35,7 @@ export const agentSummarySchema = agentSchema.omit({ prompt: true }).extend({
 
 const agentBody = {
   role: agentRoleSchema.default('subagent'),
+  team: z.boolean().default(true),
   description: z.string().min(1).max(500),
   tools: z.array(z.string().max(64)).max(64).optional(),
   disallowedTools: z.array(z.string().max(64)).max(64).optional(),
