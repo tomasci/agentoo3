@@ -157,7 +157,7 @@ export function AgentEditorPage({ name }: { name?: string }) {
             <Input
               value={draft.name}
               onChange={(e) => set('name', e.target.value)}
-              placeholder="reviewer"
+              placeholder="tester"
             />
           </Field>
 
