@@ -1,0 +1,6 @@
+.name { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-semibold); }
+
+// `Input` fills its container by default (forms/input.module.scss). The host
+// is a short hostname, not a field that should stretch to match the buttons
+// either side of it in the row.
+.hostField { width: 10rem; flex: 0 0 auto; }
