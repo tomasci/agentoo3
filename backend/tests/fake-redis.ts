@@ -12,6 +12,28 @@ import { type Socket, listen } from 'bun'
 
 type Conn = { subs: Set<string>; buf: string }
 
+/**
+ * Bind, retrying briefly if the port is momentarily unavailable.
+ *
+ * setup-env reserves the port by binding 0 and closing again, so there is a
+ * short gap before this binds it for real. Failing there would abort the file
+ * during load, which reports as a non-zero exit with no failing test to explain
+ * it — the exact symptom the fixed port used to produce.
+ */
+function listenRetrying<T>(
+  options: Parameters<typeof listen<T>>[0],
+  attempts = 40,
+): ReturnType<typeof listen<T>> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return listen<T>(options)
+    } catch (error) {
+      if (attempt >= attempts) throw error
+      Bun.sleepSync(25)
+    }
+  }
+}
+
 export function startFakeRedis(port: number) {
   const conns = new Map<Socket<Conn>, Conn>()
 
@@ -43,7 +65,7 @@ export function startFakeRedis(port: number) {
     return { args, rest: buf.slice(i) }
   }
 
-  const server = listen<Conn>({
+  const server = listenRetrying<Conn>({
     hostname: '127.0.0.1',
     port,
     socket: {
