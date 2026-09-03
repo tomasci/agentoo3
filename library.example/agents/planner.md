@@ -1,7 +1,7 @@
 ---
 role: subagent
 description: Turns an agreed goal into an ordered plan grounded in real files — tracks that can run in parallel, what each one must not touch, and done criteria someone else can check. Use before briefing implementers on anything spanning more than a couple of files. Read-only; it produces the plan, not the change.
-tools: [Read, Grep, Glob, Bash]
+tools: [Read, Grep, Glob, Bash, Skill]
 model: opus
 effort: high
 ---

@@ -1,7 +1,7 @@
 ---
 role: subagent
 description: Decides the shape of a change before anyone builds it — boundaries, contracts, where state lives, which dependency points at which, and which of several defensible designs to take. Use when a change is structural, crosses a boundary between components, or has more than one reasonable answer. Read-only; it returns a decision, not a diff.
-tools: [Read, Grep, Glob, Bash, WebSearch, WebFetch]
+tools: [Read, Grep, Glob, Bash, Skill, WebSearch, WebFetch]
 model: opus
 effort: xhigh
 ---
