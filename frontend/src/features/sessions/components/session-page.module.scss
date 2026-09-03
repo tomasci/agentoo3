@@ -12,53 +12,11 @@
   gap: var(--space-3);
   height: 100%;
   min-height: 0;
+
+  // Header, banner and composer keep their natural height; only .scroll below
+  // grows to take whatever they don't use.
+  > * { flex: none; }
 }
-
-// Header, banner and composer keep their natural height.
-.head,
-.failure,
-.composer {
-  flex: none;
-}
-
-.head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface);
-}
-
-.heading { display: grid; gap: var(--space-1); min-width: 0; }
-.title { margin: 0; font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-semibold); }
-
-.meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  font-size: var(--text-sm);
-  line-height: var(--leading-sm);
-  color: var(--color-text-secondary);
-}
-
-.mono { font-family: var(--font-mono); font-size: var(--text-xs); line-height: var(--leading-xs); }
-
-.controls { display: flex; align-items: center; gap: var(--space-2); flex: none; }
-
-.live {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-size: var(--text-xs);
-  line-height: var(--leading-xs);
-  color: var(--color-text-secondary);
-}
-
-.dot { width: var(--space-2); height: var(--space-2); border-radius: 50%; background: var(--color-text-secondary); }
-.dotLive { background: var(--color-accent); }
 
 .scroll {
   flex: 1 1 auto;
@@ -70,53 +28,23 @@
   padding-right: var(--space-2);
 }
 
-.composer {
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface);
-}
-
-.input {
-  width: 100%;
-  min-height: 4.5rem;
-  max-height: 16rem;
-  resize: vertical;
-  padding: var(--space-3);
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-app);
-  color: var(--color-text-primary);
-  font: inherit;
-  line-height: var(--leading-base);
-
-  &:focus-visible {
-    outline: var(--focus-ring-width) solid var(--color-focus-ring);
-    outline-offset: var(--focus-ring-offset);
-  }
-}
-
-.composerFoot {
-  display: flex;
+.live {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-text-secondary);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-text-secondary);
 }
 
 .hint { font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--color-text-muted); }
-.error { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--color-danger-text); }
-.warn { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--color-text-muted); }
-
-.failure {
-  margin: 0;
-  padding: var(--space-3) var(--space-5);
-  border: 1px solid var(--color-danger);
-  border-radius: var(--radius-lg);
-  background: var(--color-danger-bg);
-  color: var(--color-danger);
-  font-size: var(--text-base);
-  line-height: var(--leading-base);
-  overflow-wrap: anywhere;
-}

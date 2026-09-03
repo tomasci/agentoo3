@@ -1,6 +1,5 @@
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Markdown } from '@/shared/ui'
+import { Alert, Card, Code, Collapsible, DefinitionList, EmptyState, Markdown } from '@/shared/ui'
 import type { SessionMessage } from '../hooks/use-sessions'
 import {
   buildTranscript,
@@ -11,43 +10,18 @@ import {
 } from '../lib/transcript'
 import styles from './transcript.module.scss'
 
-/** A row that is a heading until you open it. */
-function Collapsible({
-  title,
-  badge,
-  badgeClass,
-  note,
-  className,
-  defaultOpen = false,
-  children,
-}: {
-  title: string
-  badge?: string
-  badgeClass?: string
-  note?: string | null
-  className?: string
-  defaultOpen?: boolean
-  children: React.ReactNode
-}) {
-  const [open, setOpen] = useState(defaultOpen)
-  return (
-    <div className={`${styles.row} ${className ?? ''}`}>
-      <button
-        type="button"
-        className={styles.summary}
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-      >
-        <span className={`${styles.chevron} ${open ? styles.chevronOpen : ''}`} aria-hidden="true">
-          ▶
-        </span>
-        {badge && <span className={`${styles.agent} ${badgeClass ?? ''}`}>{badge}</span>}
-        <span className={styles.title}>{title}</span>
-        {note && <span className={styles.note}>{note}</span>}
-      </button>
-      {open && <div className={styles.body}>{children}</div>}
-    </div>
-  )
+type TaskStatus = Extract<TranscriptNode, { kind: 'task' }>['status']
+
+// The row border used to recolour accent for every delegated task regardless
+// of status; Collapsible has no className escape hatch to carry that, so the
+// signal now lives entirely in the badge tone. 'completed' maps to 'neutral',
+// which is exactly the untoned badge look the old code fell back to for
+// anything that wasn't running or failed/killed.
+const TASK_TONE: Record<TaskStatus, 'neutral' | 'accent' | 'danger'> = {
+  running: 'accent',
+  completed: 'neutral',
+  failed: 'danger',
+  killed: 'danger',
 }
 
 function MessageBody({ message }: { message: SessionMessage }) {
@@ -62,12 +36,16 @@ function MessageBody({ message }: { message: SessionMessage }) {
 
   if (!text && !thinking && !error && tools.length === 0) {
     // Nothing recognised. The payload is a last resort, not the normal case.
-    return <pre className={styles.code}>{JSON.stringify(message.payload, null, 2)}</pre>
+    return (
+      <Code block wrap>
+        {JSON.stringify(message.payload, null, 2)}
+      </Code>
+    )
   }
 
   return (
     <>
-      {error && <p className={styles.errorText}>{error}</p>}
+      {error && <Alert tone="danger">{error}</Alert>}
       {/* Agent output is markdown, and reads as noise without it. */}
       {text && <Markdown compact>{text}</Markdown>}
       {thinking && (
@@ -100,25 +78,27 @@ function ToolInput({ input }: { input: unknown }) {
     const entries = Object.entries(input as Record<string, unknown>)
     if (entries.length > 0) {
       return (
-        <dl className={styles.args}>
-          {entries.map(([key, value]) => (
-            <div key={key} className={styles.arg}>
-              <dt className={styles.argKey}>{key}</dt>
-              <dd className={styles.argValue}>
-                {typeof value === 'string' ? (
-                  <pre className={styles.code}>{value}</pre>
-                ) : (
-                  <pre className={styles.code}>{JSON.stringify(value, null, 2)}</pre>
-                )}
-              </dd>
-            </div>
-          ))}
-        </dl>
+        <DefinitionList
+          layout="stacked"
+          items={entries.map(([key, value]) => ({
+            id: key,
+            term: key,
+            description: (
+              <Code block wrap>
+                {typeof value === 'string' ? value : JSON.stringify(value, null, 2)}
+              </Code>
+            ),
+          }))}
+        />
       )
     }
   }
 
-  return <pre className={styles.code}>{JSON.stringify(input, null, 2)}</pre>
+  return (
+    <Code block wrap>
+      {JSON.stringify(input, null, 2)}
+    </Code>
+  )
 }
 
 function Node({ node }: { node: TranscriptNode }) {
@@ -150,22 +130,13 @@ function Node({ node }: { node: TranscriptNode }) {
     )
   }
 
-  const badgeClass =
-    node.status === 'running'
-      ? styles.agentRunning
-      : node.status === 'failed' || node.status === 'killed'
-        ? styles.agentFailed
-        : undefined
-
   return (
     <Collapsible
       title={node.title}
-      badge={node.agent}
-      badgeClass={badgeClass}
+      badge={{ label: node.agent, tone: TASK_TONE[node.status] }}
       // Live progress, but only while it means something: on a finished task the
       // last ping is just whatever it happened to be doing when it stopped.
       note={node.status === 'running' ? node.progress : null}
-      className={styles.task}
     >
       {/* The instruction the orchestrator wrote. Shown first and in full: it is
           the only place the delegation is visible. */}
@@ -193,7 +164,13 @@ export function Transcript({ messages }: { messages: SessionMessage[] }) {
   const nodes = buildTranscript(messages)
 
   if (nodes.length === 0) {
-    return <p className={styles.empty}>{t('sessions.transcript.empty')}</p>
+    // padding="none": EmptyState's own size variant already supplies it, and
+    // Card adds the dashed border round it.
+    return (
+      <Card variant="dashed" padding="none">
+        <EmptyState title={t('sessions.transcript.empty')} />
+      </Card>
+    )
   }
 
   return (

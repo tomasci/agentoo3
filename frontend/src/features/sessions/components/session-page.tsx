@@ -2,7 +2,19 @@ import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { Button } from '@/shared/ui'
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Code,
+  Inline,
+  PageHeader,
+  Spinner,
+  Stack,
+  StatusDot,
+  Textarea,
+} from '@/shared/ui'
 import { useSessionStream } from '../hooks/use-session-stream'
 import {
   useInterruptSession,
@@ -14,6 +26,17 @@ import styles from './session-page.module.scss'
 import { Transcript } from './transcript'
 
 const BUSY = ['queued', 'running']
+
+// A pill's tone for each session status. 'idle'/'queued' get the untoned
+// default: nothing to flag yet.
+const STATUS_TONE = {
+  idle: 'neutral',
+  queued: 'neutral',
+  running: 'accent',
+  interrupted: 'warning',
+  completed: 'success',
+  failed: 'danger',
+} as const
 
 export function SessionPage({ projectId, sessionId }: { projectId: string; sessionId: string }) {
   const { t } = useTranslation()
@@ -64,95 +87,99 @@ export function SessionPage({ projectId, sessionId }: { projectId: string; sessi
     )
   }
 
-  if (session.isPending) return <p>{t('common.loading')}</p>
+  if (session.isPending) return <Spinner label={t('common.loading')} block />
   if (session.isError || !session.data) {
-    return (
-      <p className={styles.error}>{apiErrorMessage(session.error, t('sessions.loadFailed'))}</p>
-    )
+    return <Alert tone="danger">{apiErrorMessage(session.error, t('sessions.loadFailed'))}</Alert>
   }
 
   const data = session.data
 
   return (
     <div className={styles.page}>
-      <header className={styles.head}>
-        <div className={styles.heading}>
-          <h1 className={styles.title}>
-            {data.title ?? t('sessions.untitled', { id: data.id.slice(0, 8) })}
-          </h1>
-          <div className={styles.meta}>
-            <span>{t(`sessions.status.${data.status}`)}</span>
-            {data.orchestrator && <span>{data.orchestrator}</span>}
-            {data.branch && <span className={styles.mono}>{data.branch}</span>}
-            {data.totalCostUsd > 0 && <span>${data.totalCostUsd.toFixed(4)}</span>}
-            {data.pendingPrompts > 0 && (
-              <span>{t('sessions.pendingPrompts', { count: data.pendingPrompts })}</span>
-            )}
-          </div>
-        </div>
-
-        <div className={styles.controls}>
-          <span className={styles.live}>
-            <span
-              className={`${styles.dot} ${connected ? styles.dotLive : ''}`}
-              aria-hidden="true"
-            />
-            {connected ? t('sessions.live') : t('sessions.reconnecting')}
-          </span>
-          {busy && (
-            <Button type="button" onClick={() => interrupt.mutate({ path: { id: sessionId } })}>
-              {t('sessions.stop')}
-            </Button>
-          )}
-          <Button
-            type="button"
-            onClick={() =>
-              void navigate({ to: '/projects/$projectId/sessions', params: { projectId } })
+      <header>
+        <Card padding="md">
+          <PageHeader
+            title={data.title ?? t('sessions.untitled', { id: data.id.slice(0, 8) })}
+            description={
+              // Phrasing content only (Badge is a span, Code an inline <code>):
+              // PageHeader renders `description` inside a <p>, and a <div> in
+              // there would auto-close it.
+              <span className={styles.meta}>
+                <Badge tone={STATUS_TONE[data.status]}>{t(`sessions.status.${data.status}`)}</Badge>
+                {data.orchestrator && <span>{data.orchestrator}</span>}
+                {data.branch && <Code>{data.branch}</Code>}
+                {data.totalCostUsd > 0 && <span>${data.totalCostUsd.toFixed(4)}</span>}
+                {data.pendingPrompts > 0 && (
+                  <span>{t('sessions.pendingPrompts', { count: data.pendingPrompts })}</span>
+                )}
+              </span>
             }
-          >
-            {t('sessions.backToList')}
-          </Button>
-        </div>
+            actions={
+              <>
+                <span className={styles.live}>
+                  <StatusDot tone={connected ? 'accent' : 'neutral'} />
+                  {connected ? t('sessions.live') : t('sessions.reconnecting')}
+                </span>
+                {busy && (
+                  <Button
+                    type="button"
+                    onClick={() => interrupt.mutate({ path: { id: sessionId } })}
+                  >
+                    {t('sessions.stop')}
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  onClick={() =>
+                    void navigate({ to: '/projects/$projectId/sessions', params: { projectId } })
+                  }
+                >
+                  {t('sessions.backToList')}
+                </Button>
+              </>
+            }
+          />
+        </Card>
       </header>
 
-      {data.lastError && (
-        <p className={styles.failure} role="alert">
-          {data.lastError}
-        </p>
-      )}
+      {data.lastError && <Alert tone="danger">{data.lastError}</Alert>}
 
       <div className={styles.scroll} ref={scroller} onScroll={onScroll}>
-        {messages.isPending ? <p>{t('common.loading')}</p> : <Transcript messages={list} />}
+        {messages.isPending ? (
+          <Spinner label={t('common.loading')} block />
+        ) : (
+          <Transcript messages={list} />
+        )}
       </div>
 
-      <div className={styles.composer}>
-        <textarea
-          className={styles.input}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder={t('sessions.composerPlaceholder')}
-          onKeyDown={(e) => {
-            // Enter sends; Shift+Enter is a newline. A prompt is usually one
-            // line, and reaching for the mouse for every send is worse.
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault()
-              submit()
-            }
-          }}
-        />
-        <div className={styles.composerFoot}>
-          <span className={styles.hint}>
-            {busy ? t('sessions.willQueue') : t('sessions.sendHint')}
-          </span>
-          <Button type="button" onClick={submit} disabled={send.isPending || !text.trim()}>
-            {send.isPending ? t('sessions.sending') : t('sessions.send')}
-          </Button>
-        </div>
-        {!data.orchestrator && (
-          <span className={styles.warn}>{t('sessions.needsOrchestrator')}</span>
-        )}
-        {error && <span className={styles.error}>{error}</span>}
-      </div>
+      <Card padding="md">
+        <Stack gap={2}>
+          <Textarea
+            value={text}
+            rows={3}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={t('sessions.composerPlaceholder')}
+            onKeyDown={(e) => {
+              // Enter sends; Shift+Enter is a newline. A prompt is usually one
+              // line, and reaching for the mouse for every send is worse.
+              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault()
+                submit()
+              }
+            }}
+          />
+          <Inline justify="between" gap={3}>
+            <span className={styles.hint}>
+              {busy ? t('sessions.willQueue') : t('sessions.sendHint')}
+            </span>
+            <Button type="button" onClick={submit} disabled={send.isPending || !text.trim()}>
+              {send.isPending ? t('sessions.sending') : t('sessions.send')}
+            </Button>
+          </Inline>
+          {!data.orchestrator && <Alert tone="warning">{t('sessions.needsOrchestrator')}</Alert>}
+          {error && <Alert tone="danger">{error}</Alert>}
+        </Stack>
+      </Card>
     </div>
   )
 }
