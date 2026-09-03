@@ -9,8 +9,33 @@
 //
 // Import this first, before anything that reaches `@/env`.
 
+import { listen } from 'bun'
+
+/**
+ * A free port, obtained by binding 0 and reading back what the kernel assigned.
+ *
+ * This was hardcoded to 6399, which made two overlapping backend test runs
+ * fight over one port — and they do overlap: `pre-push` runs the suite while a
+ * developer, or another session pushing at the same time, may be running it
+ * too. The loser cannot bind, and because that happens while the test file is
+ * still loading it surfaces as a non-zero exit with `0 fail` and no failing
+ * test named. Two of three pushes failed that way, which reads as an unrelated
+ * flake rather than a port conflict.
+ *
+ * Reserved here rather than by the test that starts the server because
+ * REDIS_URL has to be final before anything parses `@/env` — see the note
+ * above. That leaves a short window between this probe closing and the fake
+ * server binding, which is why startFakeRedis retries.
+ */
+function reserveFreePort(): number {
+  const probe = listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } })
+  const { port } = probe
+  probe.stop(true)
+  return port
+}
+
 /** The fake RESP server's port. Shared, because the parsed env is shared. */
-export const FAKE_REDIS_PORT = 6399
+export const FAKE_REDIS_PORT = reserveFreePort()
 
 process.env.REDIS_URL = `redis://127.0.0.1:${FAKE_REDIS_PORT}`
 process.env.DATABASE_URL = 'postgres://u:p@127.0.0.1:5432/db'
