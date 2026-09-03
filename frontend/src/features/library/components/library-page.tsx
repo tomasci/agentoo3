@@ -1,15 +1,22 @@
 import { Link, useNavigate } from '@tanstack/react-router'
-import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  type Table as TableInstance,
-  useReactTable,
-} from '@tanstack/react-table'
+import { createColumnHelper, getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { ActionsMenu, Button, ConfirmDialog, type MenuAction } from '@/shared/ui'
+import {
+  ActionsMenu,
+  Alert,
+  Badge,
+  Button,
+  Code,
+  ConfirmDialog,
+  DataTable,
+  EmptyState,
+  type MenuAction,
+  PageHeader,
+  Spinner,
+  Stack,
+} from '@/shared/ui'
 import {
   type AgentSummary,
   type Skill,
@@ -19,44 +26,6 @@ import {
   useSkills,
 } from '../hooks/use-library'
 import styles from './library.module.scss'
-
-/** The two tables differ only in their columns, so the markup lives here once. */
-function DataTable<Row>({ table }: { table: TableInstance<Row> }) {
-  return (
-    <div className={styles.wrapper}>
-      <table className={styles.table}>
-        <thead>
-          {table.getHeaderGroups().map((group) => (
-            <tr key={group.id}>
-              {group.headers.map((header) => (
-                <th
-                  key={header.id}
-                  className={`${styles.th} ${header.id === 'actions' ? styles.actionsCell : ''}`}
-                >
-                  {flexRender(header.column.columnDef.header, header.getContext())}
-                </th>
-              ))}
-            </tr>
-          ))}
-        </thead>
-        <tbody>
-          {table.getRowModel().rows.map((row) => (
-            <tr key={row.id} className={styles.row}>
-              {row.getVisibleCells().map((cell) => (
-                <td
-                  key={cell.id}
-                  className={`${styles.td} ${cell.column.id === 'actions' ? styles.actionsCell : ''}`}
-                >
-                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
 
 const agentColumn = createColumnHelper<AgentSummary>()
 const skillColumn = createColumnHelper<Skill>()
@@ -90,11 +59,9 @@ export function LibraryPage() {
       agentColumn.accessor('role', {
         header: () => t('library.table.role'),
         cell: (info) => (
-          <span
-            className={`${styles.role} ${info.getValue() === 'orchestrator' ? styles.orchestrator : ''}`}
-          >
+          <Badge tone={info.getValue() === 'orchestrator' ? 'accent' : 'neutral'} variant="outline">
             {t(`library.role.${info.getValue()}`)}
-          </span>
+          </Badge>
         ),
       }),
       agentColumn.accessor('description', {
@@ -103,7 +70,7 @@ export function LibraryPage() {
       }),
       agentColumn.accessor('model', {
         header: () => t('library.table.model'),
-        cell: (info) => <span className={styles.mono}>{info.getValue() ?? '—'}</span>,
+        cell: (info) => <Code>{info.getValue() ?? '—'}</Code>,
       }),
       agentColumn.accessor('usedByProjects', {
         header: () => t('library.table.usedBy'),
@@ -162,11 +129,11 @@ export function LibraryPage() {
       skillColumn.accessor('extraFiles', {
         header: () => t('library.table.files'),
         cell: (info) => (
-          <span className={styles.mono}>
+          <Code>
             {info.getValue().length > 0
               ? t('library.bundledCount', { count: info.getValue().length })
               : '—'}
-          </span>
+          </Code>
         ),
       }),
       skillColumn.accessor('usedByProjects', {
@@ -217,44 +184,44 @@ export function LibraryPage() {
   })
 
   return (
-    <div className={styles.page}>
+    <Stack gap={8}>
       <p className={styles.intro}>{t('library.intro')}</p>
 
-      <section className={styles.section}>
-        <div className={styles.sectionHead}>
-          <h2 className={styles.title}>{t('library.agents')}</h2>
-          <Link to="/library/agents/new">
-            <Button type="button">{t('library.newAgent')}</Button>
-          </Link>
-        </div>
+      <Stack gap={3}>
+        <PageHeader
+          level={2}
+          title={t('library.agents')}
+          actions={
+            <Link to="/library/agents/new">
+              <Button type="button">{t('library.newAgent')}</Button>
+            </Link>
+          }
+        />
 
-        {agents.isError && (
-          <p className={styles.error}>{apiErrorMessage(agents.error, t('library.loadFailed'))}</p>
+        {agents.isError && <Alert>{apiErrorMessage(agents.error, t('library.loadFailed'))}</Alert>}
+        {!agents.isError && agents.isPending && <Spinner label={t('common.loading')} block />}
+        {!agents.isError && !agents.isPending && (
+          <DataTable table={agentTable} empty={<EmptyState title={t('library.noAgents')} />} />
         )}
-        {agents.isPending && <p className={styles.empty}>{t('common.loading')}</p>}
-        {!agents.isPending && (agents.data ?? []).length === 0 && (
-          <p className={styles.empty}>{t('library.noAgents')}</p>
-        )}
-        {(agents.data ?? []).length > 0 && <DataTable table={agentTable} />}
-      </section>
+      </Stack>
 
-      <section className={styles.section}>
-        <div className={styles.sectionHead}>
-          <h2 className={styles.title}>{t('library.skills')}</h2>
-          <Link to="/library/skills/new">
-            <Button type="button">{t('library.newSkill')}</Button>
-          </Link>
-        </div>
+      <Stack gap={3}>
+        <PageHeader
+          level={2}
+          title={t('library.skills')}
+          actions={
+            <Link to="/library/skills/new">
+              <Button type="button">{t('library.newSkill')}</Button>
+            </Link>
+          }
+        />
 
-        {skills.isError && (
-          <p className={styles.error}>{apiErrorMessage(skills.error, t('library.loadFailed'))}</p>
+        {skills.isError && <Alert>{apiErrorMessage(skills.error, t('library.loadFailed'))}</Alert>}
+        {!skills.isError && skills.isPending && <Spinner label={t('common.loading')} block />}
+        {!skills.isError && !skills.isPending && (
+          <DataTable table={skillTable} empty={<EmptyState title={t('library.noSkills')} />} />
         )}
-        {skills.isPending && <p className={styles.empty}>{t('common.loading')}</p>}
-        {!skills.isPending && (skills.data ?? []).length === 0 && (
-          <p className={styles.empty}>{t('library.noSkills')}</p>
-        )}
-        {(skills.data ?? []).length > 0 && <DataTable table={skillTable} />}
-      </section>
+      </Stack>
 
       <ConfirmDialog
         open={pendingAgent !== null}
@@ -292,6 +259,6 @@ export function LibraryPage() {
           )
         }}
       />
-    </div>
+    </Stack>
   )
 }
