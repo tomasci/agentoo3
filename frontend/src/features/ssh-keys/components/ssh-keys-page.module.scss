@@ -1,116 +1,14 @@
-@use '@/styles/variables' as v;
-
-.page { display: grid; gap: v.$space-lg; }
-
-.intro {
-  margin: 0;
-  font-size: 0.875rem;
-  color: var(--muted-fg);
-  line-height: 1.6;
-  max-width: 46rem;
-}
-
-.card {
-  padding: v.$space-lg;
-  border: 1px solid var(--border);
-  border-radius: v.$radius;
-  background: var(--surface);
-}
-
-.formCard {
-  padding: v.$space-lg;
-  border: 1px dashed var(--border);
-  border-radius: v.$radius;
-}
-
-.heading { margin: 0 0 v.$space-md; font-size: 1rem; font-weight: 600; }
-
-.form { display: grid; gap: v.$space-md; max-width: 32rem; }
-.field { display: grid; gap: 0.35rem; }
-.label { font-size: 0.8125rem; color: var(--muted-fg); }
-
-.input {
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-
-  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-}
-
-.hint { font-size: 0.75rem; color: var(--muted-fg); }
-.error { color: var(--warn); font-size: 0.8125rem; }
-
-.head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: v.$space-md;
-}
-
-.name { margin: 0; font-size: 1rem; font-weight: 600; }
-.fingerprint {
-  margin: 0.15rem 0 0;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 0.75rem;
-  color: var(--muted-fg);
-  overflow-wrap: anywhere;
-}
-
-.pubkey {
-  margin: v.$space-md 0 0;
-  padding: v.$space-sm;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--bg);
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 0.75rem;
-  word-break: break-all;
-  max-height: 6rem;
-  overflow-y: auto;
-}
-
-.actions { display: flex; gap: v.$space-sm; flex-wrap: wrap; align-items: center; margin-top: v.$space-md; }
-
-.testResult {
-  font-size: 0.8125rem;
-  &.ok { color: var(--ok); }
-  &.bad { color: var(--warn); }
-}
-
-.hostInput {
-  padding: 0.4rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-  font-size: 0.8125rem;
-  width: 10rem;
-}
+.heading { margin: 0 0 var(--space-3); font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-semibold); }
 
 .list {
   display: grid;
-  gap: v.$space-md;
+  gap: var(--space-3);
   grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr));
 }
 
-.empty {
-  padding: v.$space-xl v.$space-lg;
-  text-align: center;
-  color: var(--muted-fg);
-  border: 1px solid var(--border);
-  border-radius: v.$radius;
-  font-size: 0.9375rem;
-}
-
+// Structural indentation only — the old font-size/color pair just duplicated
+// the body default (see src/styles/_reset.scss) under a different name.
 .steps {
-  margin: v.$space-sm 0 0;
-  padding-left: 1.2rem;
-  font-size: 0.8125rem;
-  color: var(--muted-fg);
-  line-height: 1.7;
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
 }

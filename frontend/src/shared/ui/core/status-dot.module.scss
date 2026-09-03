@@ -1,0 +1,25 @@
+.root {
+  display: inline-block;
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+.toneNeutral { background: var(--color-text-muted); }
+.toneAccent { background: var(--color-accent); }
+.toneSuccess { background: var(--color-success); }
+.toneWarning { background: var(--color-warning); }
+.toneDanger { background: var(--color-danger); }
+
+// Reduced motion collapses every --dur-* globally with no whitelist, so a
+// paused pulse still reads as "a dot" with no state left to infer — this must
+// never be the only signal (see status-dot.tsx).
+.pulse {
+  animation: pulse var(--dur-progress) var(--ease-in-out) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}

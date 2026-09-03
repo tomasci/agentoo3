@@ -1,0 +1,38 @@
+.root {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius-full);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+// Soft: a tinted fill. Outline: transparent fill, coloured border only — for
+// placing on a surface that already carries the tone's own colour nearby.
+.variantSoft {
+  border: 1px solid transparent;
+}
+
+.variantOutline {
+  border: 1px solid;
+  background: transparent;
+}
+
+.toneNeutral.variantSoft { background: var(--color-surface); color: var(--color-text-secondary); }
+.toneNeutral.variantOutline { border-color: var(--color-border); color: var(--color-text-secondary); }
+
+.toneAccent.variantSoft { background: var(--color-accent-subtle-bg); border-color: var(--color-accent-subtle-border); color: var(--color-accent-text); }
+.toneAccent.variantOutline { border-color: var(--color-accent-subtle-border); color: var(--color-accent-text); }
+
+.toneSuccess.variantSoft { background: var(--color-success-bg); border-color: var(--color-success-border); color: var(--color-success-text); }
+.toneSuccess.variantOutline { border-color: var(--color-success-border); color: var(--color-success-text); }
+
+.toneWarning.variantSoft { background: var(--color-warning-bg); border-color: var(--color-warning-border); color: var(--color-warning-text); }
+.toneWarning.variantOutline { border-color: var(--color-warning-border); color: var(--color-warning-text); }
+
+.toneDanger.variantSoft { background: var(--color-danger-bg); border-color: var(--color-danger-border); color: var(--color-danger-text); }
+.toneDanger.variantOutline { border-color: var(--color-danger-border); color: var(--color-danger-text); }

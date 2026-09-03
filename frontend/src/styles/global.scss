@@ -1,49 +1,69 @@
-@use './variables' as v;
+// Primitives first, then the two themes that consume them, then the reset
+// that consumes the semantic layer. Order matters for readability, not for
+// the cascade — custom properties are resolved lazily, so declaration order
+// across files doesn't change behaviour, but a theme file that reads oddly
+// before its primitives exist is a bad sign when someone greps this later.
+@use './palette';
+@use './scales';
+@use './theme-light';
+@use './theme-dark';
+@use './reset';
 
+// No whitelist: anything that leans on motion to say "this is still
+// happening" (a spinner, a pulsing dot) must also say so in a static way
+// (text, an icon, a colour), because this rule removes the motion
+// unconditionally rather than case-by-case. See docs/design-tokens.md.
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0.01ms;
+    --dur-base: 0.01ms;
+    --dur-slow: 0.01ms;
+    --dur-progress: 0.01ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+// --- BACK-COMPAT SHIM -------------------------------------------------
+// ~20 module files still reference the pre-token custom properties
+// (--bg, --surface, --fg, …) directly. This block makes each old name a
+// pass-through to its semantic replacement so those files keep rendering
+// unmigrated, rather than resolving to nothing. It is deleted once Phase 4
+// (design-system-audit.md §7) migrates the last consumer — deleting it
+// before that point is not a safe no-op, it is a silent regression: an
+// unmigrated file falls back to the browser's initial value for the
+// property it uses `var(--x, fallback)` against, or to nothing at all,
+// which reads as visibly broken rather than subtly stale.
+//
+// Only :root needs this, not :root[data-theme='dark']: each shim name
+// points at a --color-* token, and that token is itself redeclared under
+// [data-theme='dark'] with higher selector specificity. var() re-resolves
+// against the current cascaded value of the property it names, so once the
+// dark rule wins for --color-bg-app, --bg picks it up automatically without
+// a second, dark-scoped copy of the shim.
 :root {
-  --bg: #ffffff;
-  --surface: #f7f7f8;
-  --fg: #16161a;
-  --muted-fg: #6b6b76;
-  --muted: #c9c9d1;
-  --border: #e2e2e8;
-  --accent: #2f6feb;
-  --accent-fg: #ffffff;
-  --ok: #1f9d55;
-  --warn: #c2721a;
-  --danger: #c2410c;
-}
+  --bg: var(--color-bg-app);
+  --surface: var(--color-surface);
+  --fg: var(--color-text-primary);
+  --muted-fg: var(--color-text-secondary);
+  --muted: var(--color-text-disabled);
+  --border: var(--color-border);
+  --accent: var(--color-accent);
+  --accent-fg: var(--color-text-on-accent);
+  --ok: var(--color-success);
+  --warn: var(--color-warning);
+  --danger: var(--color-danger);
 
-:root[data-theme='dark'] {
-  --bg: #0f1013;
-  --surface: #17181d;
-  --fg: #ececf1;
-  --muted-fg: #9a9aa6;
-  --muted: #4a4a55;
-  --border: #2a2b33;
-  --accent: #5b8def;
-  --accent-fg: #0f1013;
-  --ok: #3fbf72;
-  --warn: #e0a458;
-  --danger: #f0785a;
-}
-
-* { box-sizing: border-box; }
-
-// The shell is a full-viewport grid; without this the document collapses to
-// content height and the status bar floats mid-page.
-html,
-body,
-#root {
-  height: 100%;
-}
-
-body {
-  margin: 0;
-  overflow: hidden;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
+  // Referenced at transcript.module.scss:20 but never defined — see
+  // design-system-audit.md §1.1. Not a rename of an existing token, just
+  // the missing definition, added here so it disappears with the rest of
+  // the shim rather than needing its own follow-up.
+  --accent-soft: var(--color-accent-subtle-bg);
 }

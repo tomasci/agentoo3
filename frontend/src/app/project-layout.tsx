@@ -1,6 +1,7 @@
 import { Outlet, useParams } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useProjects } from '@/features/projects'
+import { Alert, Spinner } from '@/shared/ui'
 
 /**
  * Wraps every page under /projects/$projectId.
@@ -17,8 +18,8 @@ export function ProjectLayout() {
 
   const project = projects?.find((p) => p.id === projectId)
 
-  if (isPending) return <p>{t('common.loading')}</p>
-  if (!project) return <p>{t('projects.notFound')}</p>
+  if (isPending) return <Spinner label={t('common.loading')} block />
+  if (!project) return <Alert tone="danger">{t('projects.notFound')}</Alert>
 
   return <Outlet />
 }

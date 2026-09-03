@@ -1,0 +1,68 @@
+.root {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid;
+  border-radius: var(--radius-lg);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  flex: 1;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.content {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+}
+
+.action {
+  flex-shrink: 0;
+}
+
+// Text and title are deliberately not tinted per-tone (see alert.tsx): the
+// border and background already carry the colour, and error text specifically
+// uses --color-danger-text at all times, never the tone-generic text colour,
+// because it is the one channel guaranteed to clear contrast on its own
+// surface (component-contract.md).
+.toneNeutral {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+.toneAccent {
+  border-color: var(--color-accent-subtle-border);
+  background: var(--color-accent-subtle-bg);
+  color: var(--color-accent-text);
+}
+
+.toneSuccess {
+  border-color: var(--color-success-border);
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+}
+
+.toneWarning {
+  border-color: var(--color-warning-border);
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+}
+
+.toneDanger {
+  border-color: var(--color-danger);
+  background: var(--color-danger-bg);
+  color: var(--color-danger-text);
+}

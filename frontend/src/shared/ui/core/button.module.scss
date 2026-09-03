@@ -1,0 +1,87 @@
+@use '@/shared/ui/mixins' as ui;
+
+.root {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+
+  @include ui.focus-ring;
+  @include ui.disabled;
+
+  // The canonical loading implementation: the label never leaves the layout,
+  // it just goes invisible, so the button never changes width when it starts
+  // or stops loading.
+  &[data-loading] .label { visibility: hidden; }
+}
+
+.label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+// Centred over the (now-invisible) label rather than beside it, so the
+// spinner doesn't reflow the button.
+.spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.variantPrimary {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-text-on-accent);
+
+  &:hover:not(:disabled, [data-disabled]) { border-color: var(--color-accent-hover); background: var(--color-accent-hover); }
+  &:active:not(:disabled, [data-disabled]) { border-color: var(--color-accent-active); background: var(--color-accent-active); }
+}
+
+.variantSecondary {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+
+  &:hover:not(:disabled, [data-disabled]) { background: var(--color-surface-hover); }
+  &:active:not(:disabled, [data-disabled]) { background: var(--color-surface-active); }
+}
+
+.variantGhost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-primary);
+
+  &:hover:not(:disabled, [data-disabled]) { background: var(--color-surface-hover); }
+  &:active:not(:disabled, [data-disabled]) { background: var(--color-surface-active); }
+}
+
+// No --color-danger-hover/-active exist in the token set (design-tokens.md
+// lists only the base/-text/-bg/-border steps for status colours), so hover
+// and active dim the same way disabled does rather than inventing a token.
+.variantDanger {
+  border-color: var(--color-danger);
+  background: var(--color-danger);
+  color: var(--color-text-on-accent);
+
+  &:hover:not(:disabled, [data-disabled]) { opacity: 0.9; }
+  &:active:not(:disabled, [data-disabled]) { opacity: 0.8; }
+}
+
+.sizeSm { min-height: var(--control-height-sm); padding: 0 var(--space-3); font-size: var(--text-sm); }
+.sizeMd { min-height: var(--control-height-md); padding: 0 var(--space-4); font-size: var(--text-base); }
+.sizeLg { min-height: var(--control-height-lg); padding: 0 var(--space-5); font-size: var(--text-md); }
+
+.fullWidth { width: 100%; }

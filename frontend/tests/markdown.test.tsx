@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { Markdown } from '../src/shared/ui/markdown'
+import { Markdown } from '../src/shared/ui/core/markdown'
 
 const html = (md: string) => renderToStaticMarkup(<Markdown>{md}</Markdown>)
 

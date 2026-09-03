@@ -2,7 +2,24 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { Button, ConfirmDialog } from '@/shared/ui'
+import {
+  Alert,
+  Button,
+  Card,
+  Checkbox,
+  ConfirmDialog,
+  Field,
+  Inline,
+  Input,
+  NumberInput,
+  PageHeader,
+  Select,
+  type SelectOption,
+  Spinner,
+  Stack,
+  Switch,
+  Textarea,
+} from '@/shared/ui'
 import { useAgent, useCreateAgent, useDeleteAgent, useUpdateAgent } from '../hooks/use-library'
 import { AVAILABLE_TOOLS, EFFORTS, MODELS } from '../model/tools'
 import styles from './library.module.scss'
@@ -14,7 +31,7 @@ interface Draft {
   description: string
   model: string
   effort: string
-  maxTurns: string
+  maxTurns: number | null
   tools: string[]
   restrictTools: boolean
   prompt: string
@@ -27,7 +44,7 @@ const EMPTY: Draft = {
   description: '',
   model: '',
   effort: '',
-  maxTurns: '',
+  maxTurns: null,
   tools: [],
   restrictTools: false,
   prompt: '',
@@ -56,7 +73,7 @@ export function AgentEditorPage({ name }: { name?: string }) {
       description: agent.description,
       model: agent.model ?? '',
       effort: agent.effort ?? '',
-      maxTurns: agent.maxTurns ? String(agent.maxTurns) : '',
+      maxTurns: agent.maxTurns ?? null,
       // An agent with no `tools` inherits everything; the checkboxes only mean
       // something once you opt into restricting it.
       tools: agent.tools ?? [],
@@ -78,7 +95,7 @@ export function AgentEditorPage({ name }: { name?: string }) {
     ...(draft.restrictTools ? { tools: draft.tools } : {}),
     ...(draft.model ? { model: draft.model } : {}),
     ...(draft.effort ? { effort: draft.effort as 'low' } : {}),
-    ...(draft.maxTurns ? { maxTurns: Number(draft.maxTurns) } : {}),
+    ...(draft.maxTurns != null ? { maxTurns: draft.maxTurns } : {}),
   }
 
   const save = () => {
@@ -100,198 +117,160 @@ export function AgentEditorPage({ name }: { name?: string }) {
   }
 
   const busy = create.isPending || update.isPending
-  if (!isNew && isPending) return <p>{t('common.loading')}</p>
+  if (!isNew && isPending) return <Spinner label={t('common.loading')} block />
+
+  const roleOptions: SelectOption[] = [
+    {
+      value: 'subagent',
+      label: t('library.role.subagent'),
+      description: t('library.roleHint.subagent'),
+    },
+    {
+      value: 'orchestrator',
+      label: t('library.role.orchestrator'),
+      description: t('library.roleHint.orchestrator'),
+    },
+  ]
+  const modelOptions: SelectOption[] = MODELS.map((m) => ({
+    value: m,
+    label: m || t('library.agent.inherit'),
+  }))
+  const effortOptions: SelectOption[] = EFFORTS.map((e2) => ({
+    value: e2,
+    label: e2 || t('library.agent.default'),
+  }))
 
   return (
-    <div className={styles.editor}>
+    <Stack gap={5}>
       <Link to="/library" className={styles.back}>
         ← {t('library.backToLibrary')}
       </Link>
 
-      <section className={styles.card}>
+      <PageHeader title={isNew ? t('library.newAgent') : draft.name || name} />
+
+      <Card>
         <div className={styles.grid}>
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="agent-name">
-              {t('library.agent.name')}
-            </label>
-            <input
-              id="agent-name"
-              className={styles.input}
+          <Field
+            label={t('library.agent.name')}
+            hint={isNew ? t('library.agent.nameHint') : t('library.agent.renameHint')}
+          >
+            <Input
               value={draft.name}
               onChange={(e) => set('name', e.target.value)}
               placeholder="tester"
             />
-            <span className={styles.hint}>
-              {isNew ? t('library.agent.nameHint') : t('library.agent.renameHint')}
-            </span>
-          </div>
+          </Field>
 
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="agent-role">
-              {t('library.agent.role')}
-            </label>
-            <select
-              id="agent-role"
-              className={styles.select}
+          <Field label={t('library.agent.role')} hint={t(`library.roleHint.${draft.role}`)}>
+            <Select
+              options={roleOptions}
               value={draft.role}
-              onChange={(e) => set('role', e.target.value as Draft['role'])}
-            >
-              <option value="subagent">{t('library.role.subagent')}</option>
-              <option value="orchestrator">{t('library.role.orchestrator')}</option>
-            </select>
-            <span className={styles.hint}>{t(`library.roleHint.${draft.role}`)}</span>
-          </div>
+              onValueChange={(v) => set('role', (v ?? 'subagent') as Draft['role'])}
+            />
+          </Field>
 
           {draft.role === 'orchestrator' && (
-            <div className={styles.field}>
-              <label className={styles.tool}>
-                <input
-                  type="checkbox"
-                  checked={draft.team}
-                  onChange={(e) => set('team', e.target.checked)}
-                />
-                {t('library.agent.team')}
-              </label>
-              <span className={styles.hint}>
-                {t(`library.agent.teamHint.${draft.team ? 'on' : 'off'}`)}
-              </span>
-            </div>
+            <Switch
+              label={t('library.agent.team')}
+              description={t(`library.agent.teamHint.${draft.team ? 'on' : 'off'}`)}
+              checked={draft.team}
+              onCheckedChange={(checked) => set('team', checked)}
+            />
           )}
 
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="agent-model">
-              {t('library.agent.model')}
-            </label>
-            <select
-              id="agent-model"
-              className={styles.select}
+          <Field label={t('library.agent.model')}>
+            <Select
+              options={modelOptions}
               value={draft.model}
-              onChange={(e) => set('model', e.target.value)}
-            >
-              {MODELS.map((m) => (
-                <option key={m} value={m}>
-                  {m || t('library.agent.inherit')}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="agent-effort">
-              {t('library.agent.effort')}
-            </label>
-            <select
-              id="agent-effort"
-              className={styles.select}
-              value={draft.effort}
-              onChange={(e) => set('effort', e.target.value)}
-            >
-              {EFFORTS.map((e2) => (
-                <option key={e2} value={e2}>
-                  {e2 || t('library.agent.default')}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="agent-turns">
-              {t('library.agent.maxTurns')}
-            </label>
-            <input
-              id="agent-turns"
-              className={styles.input}
-              type="number"
-              min="1"
-              value={draft.maxTurns}
-              onChange={(e) => set('maxTurns', e.target.value)}
-              placeholder={t('library.agent.unlimited')}
+              onValueChange={(v) => set('model', v ?? '')}
             />
-          </div>
+          </Field>
+
+          <Field label={t('library.agent.effort')}>
+            <Select
+              options={effortOptions}
+              value={draft.effort}
+              onValueChange={(v) => set('effort', v ?? '')}
+            />
+          </Field>
+
+          <Field label={t('library.agent.maxTurns')} hint={t('library.agent.unlimited')}>
+            <NumberInput value={draft.maxTurns} onValueChange={(v) => set('maxTurns', v)} min={1} />
+          </Field>
         </div>
 
-        <div className={styles.field} style={{ marginTop: '0.75rem' }}>
-          <label className={styles.label} htmlFor="agent-desc">
-            {t('library.agent.description')}
-          </label>
-          <input
-            id="agent-desc"
-            className={styles.input}
+        <Field label={t('library.agent.description')} hint={t('library.agent.descriptionHint')}>
+          <Input
             value={draft.description}
             onChange={(e) => set('description', e.target.value)}
             placeholder={t('library.agent.descriptionPlaceholder')}
           />
-          <span className={styles.hint}>{t('library.agent.descriptionHint')}</span>
-        </div>
-      </section>
+        </Field>
+      </Card>
 
-      <section className={styles.card}>
-        <label className={styles.tool} style={{ marginBottom: '0.5rem' }}>
-          <input
-            type="checkbox"
+      <Card>
+        <Stack gap={3}>
+          <Checkbox
+            label={t('library.agent.restrictTools')}
+            description={t('library.agent.toolsHint')}
             checked={draft.restrictTools}
-            onChange={(e) => set('restrictTools', e.target.checked)}
+            onCheckedChange={(checked) => set('restrictTools', checked)}
           />
-          {t('library.agent.restrictTools')}
-        </label>
-        <p className={styles.hint}>{t('library.agent.toolsHint')}</p>
-        {draft.restrictTools && (
-          <div className={styles.tools} style={{ marginTop: '0.75rem' }}>
-            {AVAILABLE_TOOLS.map((tool) => (
-              <label key={tool} className={styles.tool}>
-                <input
-                  type="checkbox"
+          {draft.restrictTools && (
+            <div className={styles.tools}>
+              {AVAILABLE_TOOLS.map((tool) => (
+                <Checkbox
+                  key={tool}
+                  label={tool}
                   checked={draft.tools.includes(tool)}
-                  onChange={(e) =>
+                  onCheckedChange={(checked) =>
                     set(
                       'tools',
-                      e.target.checked
-                        ? [...draft.tools, tool]
-                        : draft.tools.filter((x) => x !== tool),
+                      checked ? [...draft.tools, tool] : draft.tools.filter((x) => x !== tool),
                     )
                   }
                 />
-                {tool}
-              </label>
-            ))}
-          </div>
-        )}
-      </section>
+              ))}
+            </div>
+          )}
+        </Stack>
+      </Card>
 
-      <section className={styles.field}>
-        <label className={styles.label} htmlFor="agent-prompt">
-          {t('library.agent.prompt')}
-        </label>
-        <textarea
-          id="agent-prompt"
-          className={styles.prompt}
+      <Field
+        label={t('library.agent.prompt')}
+        hint={
+          draft.role === 'orchestrator'
+            ? t('library.agent.promptHintOrchestrator')
+            : t('library.agent.promptHint')
+        }
+      >
+        <Textarea
+          mono
+          rows={20}
           value={draft.prompt}
           onChange={(e) => set('prompt', e.target.value)}
           spellCheck={false}
           placeholder={t('library.agent.promptPlaceholder')}
         />
-        <span className={styles.hint}>
-          {draft.role === 'orchestrator'
-            ? t('library.agent.promptHintOrchestrator')
-            : t('library.agent.promptHint')}
-        </span>
-      </section>
+      </Field>
 
-      <div className={styles.controls}>
-        <Button
-          type="button"
-          disabled={busy || !draft.name || !draft.description || !draft.prompt}
-          onClick={save}
-        >
-          {busy ? t('common.working') : t('common.save')}
-        </Button>
-        {!isNew && (
-          <Button type="button" onClick={() => setConfirmDelete(true)}>
-            {t('common.delete')}
+      <Stack gap={3}>
+        {error && <Alert>{error}</Alert>}
+        <Inline gap={2}>
+          <Button
+            type="button"
+            disabled={busy || !draft.name || !draft.description || !draft.prompt}
+            onClick={save}
+          >
+            {busy ? t('common.working') : t('common.save')}
           </Button>
-        )}
-        {error && <span className={styles.error}>{error}</span>}
-      </div>
+          {!isNew && (
+            <Button type="button" onClick={() => setConfirmDelete(true)}>
+              {t('common.delete')}
+            </Button>
+          )}
+        </Inline>
+      </Stack>
 
       <ConfirmDialog
         open={confirmDelete}
@@ -304,6 +283,6 @@ export function AgentEditorPage({ name }: { name?: string }) {
           remove.mutate({ path: { name } }, { onSuccess: () => void navigate({ to: '/library' }) })
         }
       />
-    </div>
+    </Stack>
   )
 }

@@ -1,0 +1,73 @@
+// Semantic aliases, dark theme. Re-declares the complete --color-* set from
+// _theme-light.scss under the attribute selector; nothing here is additive
+// or partial, because :root[data-theme='dark'] wins the cascade outright —
+// a token missing here silently falls back to the light value, which reads
+// as a light-mode leak rather than an error.
+:root[data-theme='dark'] {
+  // Elevation is surface lightening here, not shadow (see --shadow-* below).
+  // Steps follow the audit's 3-point ladder: sunken 975 -> app 950 ->
+  // surface 925 -> raised 910 -> overlay 875.
+  --color-bg-app: var(--neutral-950);
+  --color-surface: var(--neutral-925);
+  --color-surface-raised: var(--neutral-910);
+  --color-surface-overlay: var(--neutral-875);
+  --color-surface-sunken: var(--neutral-975);
+  --color-surface-hover: var(--neutral-910);
+  --color-surface-active: var(--neutral-875);
+  --color-surface-disabled: var(--neutral-800);
+  --color-surface-code: var(--neutral-975);
+  --color-text-primary: var(--neutral-200);
+  --color-text-secondary: var(--neutral-400);
+  --color-text-muted: var(--neutral-500);
+  --color-text-disabled: var(--neutral-700);
+  --color-text-inverted: var(--neutral-900);
+  --color-text-on-accent: var(--neutral-950);
+  --color-text-code: var(--neutral-300);
+
+  // Borders sit one or more plane-steps above their surface, so a border
+  // reads as a seam between planes rather than an outline drawn on top.
+  --color-border-subtle: var(--neutral-910);
+  --color-border: var(--neutral-875);
+
+  // The only step that clears WCAG 1.4.11 (3:1) on --color-surface-raised:
+  // neutral-600 measures 3.05:1, neutral-850 only 1.27:1 — badly short.
+  // Reserved for form controls (input/select/textarea); --color-border
+  // stays soft for cards and dividers, where the seam should be barely
+  // visible rather than a boundary someone needs to resolve.
+  --color-border-strong: var(--neutral-600);
+
+  // Dark accent is 400, not the 600-weight light accent — a 600 indigo
+  // fill on near-black is both low-contrast and visually dense.
+  --color-accent: var(--indigo-400);
+  --color-accent-hover: var(--indigo-300);
+  --color-accent-active: var(--indigo-500);
+  --color-accent-subtle-bg: var(--indigo-950);
+  --color-accent-subtle-border: var(--indigo-900);
+  --color-accent-text: var(--indigo-400);
+  --color-focus-ring: var(--indigo-300);
+  --color-success: var(--green-solid-dark);
+  --color-success-text: var(--green-text-dark);
+  --color-success-bg: var(--green-bg-dark);
+  --color-success-border: var(--green-border-dark);
+  --color-warning: var(--amber-solid-dark);
+  --color-warning-text: var(--amber-text-dark);
+  --color-warning-bg: var(--amber-bg-dark);
+  --color-warning-border: var(--amber-border-dark);
+  --color-danger: var(--red-solid-dark);
+  --color-danger-text: var(--red-text-dark);
+  --color-danger-bg: var(--red-bg-dark);
+  --color-danger-border: var(--red-border-dark);
+  --color-scrim: rgb(0 0 0 / 62%);
+
+  // A drop shadow on near-black separates nothing, so xs/sm — the levels
+  // used for barely-elevated elements like inline hover states — are
+  // switched off rather than kept as an invisible no-op declaration.
+  // md/lg are floating layers (menus, dialogs) and get a real shadow plus a
+  // faint inset top highlight so the upper edge of the panel reads as lit,
+  // not just darker than what's behind it.
+  --shadow-xs: none;
+  --shadow-sm: none;
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 40%), inset 0 1px 0 rgb(255 255 255 / 4%);
+  --shadow-lg: 0 8px 28px rgb(0 0 0 / 55%), inset 0 1px 0 rgb(255 255 255 / 5%);
+  --shadow-focus: 0 0 0 var(--focus-ring-width) var(--color-focus-ring);
+}

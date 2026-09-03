@@ -1,54 +1,14 @@
-@use '@/styles/variables' as v;
+@use '@/styles/breakpoints' as bp;
 
+// The picker owns the whole width of an empty tab, so it centres on a
+// readable measure rather than stretching across an ultrawide monitor. Every
+// other rhythm on this screen — the sections, the card padding — comes from
+// `Stack`/`Card`; this is the one layout concern neither owns.
 .page {
-  display: grid;
-  gap: v.$space-lg;
-  // The picker owns the whole width of an empty tab, so it centres on a
-  // readable measure rather than stretching across an ultrawide monitor.
   max-width: 52rem;
   margin: 0 auto;
 }
 
-.intro { display: grid; gap: 0.25rem; }
-
-.title {
-  margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-}
-
-.lead {
-  margin: 0;
-  color: var(--muted-fg);
-  font-size: 0.875rem;
-}
-
-.sectionTitle {
-  margin: 0 0 v.$space-md;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted-fg);
-}
-
-.empty {
-  padding: v.$space-xl v.$space-lg;
-  text-align: center;
-  color: var(--muted-fg);
-  border: 1px solid var(--border);
-  border-radius: v.$radius;
-  font-size: 0.9375rem;
-}
-
-.problem {
-  padding: v.$space-md;
-  border: 1px solid var(--warn);
-  border-radius: v.$radius-sm;
-  color: var(--warn);
-  font-size: 0.875rem;
-}
-
-@media (max-width: 40rem) {
+@include bp.below(sm) {
   .page { max-width: none; }
 }

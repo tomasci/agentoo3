@@ -1,12 +1,7 @@
-import {
-  createColumnHelper,
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from '@tanstack/react-table'
+import { createColumnHelper, getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ActionsMenu, ConfirmDialog, type MenuAction } from '@/shared/ui'
+import { ActionsMenu, Code, ConfirmDialog, DataTable, type MenuAction } from '@/shared/ui'
 import { type Project, useDeleteProject } from '../hooks/use-projects'
 import { ProjectStatusBadge } from './project-status'
 import styles from './projects-table.module.scss'
@@ -43,7 +38,7 @@ export function ProjectsTable({
               {project.name}
             </button>
           ) : (
-            <span className={`${styles.nameLink} ${styles.namePlain}`}>{project.name}</span>
+            <span className={styles.namePlain}>{project.name}</span>
           )
         },
       }),
@@ -53,7 +48,7 @@ export function ProjectsTable({
       }),
       columnHelper.accessor('path', {
         header: () => t('projects.table.path'),
-        cell: (info) => <span className={styles.path}>{info.getValue()}</span>,
+        cell: (info) => <Code wrap>{info.getValue()}</Code>,
       }),
       columnHelper.display({
         id: 'actions',
@@ -90,38 +85,7 @@ export function ProjectsTable({
 
   return (
     <>
-      <div className={styles.wrapper}>
-        <table className={styles.table}>
-          <thead>
-            {table.getHeaderGroups().map((group) => (
-              <tr key={group.id}>
-                {group.headers.map((header) => (
-                  <th
-                    key={header.id}
-                    className={`${styles.th} ${header.id === 'actions' ? styles.actionsCell : ''}`}
-                  >
-                    {flexRender(header.column.columnDef.header, header.getContext())}
-                  </th>
-                ))}
-              </tr>
-            ))}
-          </thead>
-          <tbody>
-            {table.getRowModel().rows.map((row) => (
-              <tr key={row.id} className={styles.row}>
-                {row.getVisibleCells().map((cell) => (
-                  <td
-                    key={cell.id}
-                    className={`${styles.td} ${cell.column.id === 'actions' ? styles.actionsCell : ''}`}
-                  >
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable table={table} />
 
       <ConfirmDialog
         open={pendingDelete !== null}

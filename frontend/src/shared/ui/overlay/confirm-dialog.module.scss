@@ -1,0 +1,4 @@
+// ConfirmDialog has no look of its own: it's Dialog's backdrop/positioner/
+// content/title/description/footer, and Dialog.footer already lays out the
+// two buttons (flex, gap, justify-end). File kept for the component+module
+// pairing convention — see copy-button.module.scss.

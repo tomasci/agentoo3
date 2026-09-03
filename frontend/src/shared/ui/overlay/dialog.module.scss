@@ -1,0 +1,71 @@
+// Dialog emits no inline z-index (unlike the popper-based Menu/Tooltip), so
+// backdrop, positioner and content all declare --z-modal themselves.
+@keyframes overlay-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+@keyframes overlay-fade-out { from { opacity: 1; } to { opacity: 0; } }
+
+@keyframes dialog-in { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+
+@keyframes dialog-out { from { opacity: 1; transform: scale(1); } to { opacity: 0; transform: scale(0.96); } }
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--color-scrim);
+  backdrop-filter: blur(2px);
+  z-index: var(--z-modal);
+
+  // @zag-js/presence drives unmount off animationend, so this is the enter/
+  // exit transition the previous plain dialog never had, not just decoration.
+  &[data-state='open'] { animation: overlay-fade-in var(--dur-base) var(--ease-out); }
+  &[data-state='closed'] { animation: overlay-fade-out var(--dur-base) var(--ease-out); }
+}
+
+.positioner {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-5);
+  z-index: var(--z-modal);
+}
+
+.content {
+  width: 100%;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface-overlay);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-modal);
+
+  // Content takes programmatic focus (tabIndex: -1) rather than being an
+  // operable element itself, so the ring belongs on whatever inside it is
+  // actually focused — see component-contract.md.
+  &:focus-visible { outline: none; }
+
+  &[data-state='open'] { animation: dialog-in var(--dur-slow) var(--ease-out); }
+  &[data-state='closed'] { animation: dialog-out var(--dur-slow) var(--ease-out); }
+}
+
+.title { margin: 0 0 var(--space-2); font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-semibold); }
+
+.description {
+  margin: 0 0 var(--space-5);
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-base);
+  overflow-wrap: anywhere;
+}
+
+.body { margin-bottom: var(--space-5); }
+
+.footer { display: flex; gap: var(--space-2); justify-content: flex-end; }
+
+// Today's width, preserved as the 'sm' step; 'md'/'lg' are new headroom for
+// dialogs bigger than a confirmation, sized off the same layout scale as the
+// rest of the app rather than an invented literal.
+.sizeSm { max-width: 28rem; }
+.sizeMd { max-width: var(--layout-content-width); }
+.sizeLg { max-width: 56rem; }
