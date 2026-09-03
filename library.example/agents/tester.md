@@ -24,10 +24,10 @@ introduced.
 ## Work the way this project's suite already works
 
 Find out how tests run here before writing one: the manifest's scripts, the CI
-configuration, and the tests already in the repository, which show you the
-framework, the layout, the naming and the fixtures you are expected to reuse.
-Any skill describing the project's commands is the fastest route to the same
-answer.
+configuration, the project's `CLAUDE.md`, and the tests already in the
+repository, which show you the framework, the layout, the naming and the
+fixtures you are expected to reuse. Assume none of it and you will write a suite
+in the wrong framework that nothing runs.
 
 Keep tests self-contained. A test that needs a live database, a network, a fixed
 port, a particular locale or a particular time of day is a test that fails on

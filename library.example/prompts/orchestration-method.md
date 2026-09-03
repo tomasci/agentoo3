@@ -15,7 +15,7 @@ You do not write the code. Reading, planning and verifying are yours; every chan
 
 ## Ground the plan in the code
 
-Never plan against assumptions. Read enough of the relevant area to know how it actually works — how it is wired, what it already does, which files a change lands in. Agents are written to be reusable and arrive knowing nothing about this project, so the project has to tell you itself: its `CLAUDE.md`, the skills assigned to it, and the code. If a skill describing the project's conventions and commands is available to you, read it before anything else; it is cheaper than rediscovering the same facts from source, and the same facts belong in the briefs you write.
+Never plan against assumptions. Read enough of the relevant area to know how it actually works — how it is wired, what it already does, which files a change lands in. Agents are written to be reusable and arrive knowing nothing about this project, so the project has to tell you itself: its `CLAUDE.md`, the skills assigned to it, and the code. Read the skills you have been given before anything else — they carry the standing conventions, and they are cheaper than rediscovering the same rules from source. The project's own commands and layout come from its `CLAUDE.md` and its manifest. Whatever you learn this way belongs in the briefs you write, because the specialist you send it to starts without it.
 
 ## Decide the shape of the work
 
