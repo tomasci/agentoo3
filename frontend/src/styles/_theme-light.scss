@@ -14,9 +14,9 @@
   --color-surface-active: var(--neutral-200);
   --color-surface-disabled: var(--neutral-200);
   --color-surface-code: var(--neutral-100);
-
   --color-text-primary: var(--neutral-900);
   --color-text-secondary: var(--neutral-700);
+
   // neutral-600 is the step the audit corrected for contrast specifically
   // for this pairing (muted text over --color-surface) — see _palette.scss.
   --color-text-muted: var(--neutral-600);
@@ -24,16 +24,15 @@
   --color-text-inverted: var(--neutral-50);
   --color-text-on-accent: var(--neutral-0);
   --color-text-code: var(--neutral-900);
-
   --color-border-subtle: var(--neutral-200);
   --color-border: var(--neutral-300);
+
   // The only step that clears WCAG 1.4.11 (3:1 for UI component
   // boundaries) on white: neutral-500 measures 3.22:1, neutral-400 only
   // 2.18:1. Reserved for form controls (input/select/textarea), which
   // must stay legible as a boundary; --color-border stays soft for
   // cards and dividers, where near-invisible separation is the goal.
   --color-border-strong: var(--neutral-500);
-
   --color-accent: var(--indigo-600);
   --color-accent-hover: var(--indigo-700);
   --color-accent-active: var(--indigo-800);
@@ -41,17 +40,14 @@
   --color-accent-subtle-border: var(--indigo-200);
   --color-accent-text: var(--indigo-700);
   --color-focus-ring: var(--indigo-500);
-
   --color-success: var(--green-solid-light);
   --color-success-text: var(--green-text-light);
   --color-success-bg: var(--green-bg-light);
   --color-success-border: var(--green-border-light);
-
   --color-warning: var(--amber-solid-light);
   --color-warning-text: var(--amber-text-light);
   --color-warning-bg: var(--amber-bg-light);
   --color-warning-border: var(--amber-border-light);
-
   --color-danger: var(--red-solid-light);
   --color-danger-text: var(--red-text-light);
   --color-danger-bg: var(--red-bg-light);

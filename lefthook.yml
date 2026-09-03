@@ -34,6 +34,16 @@ pre-commit:
       root: "frontend/"
       glob: "frontend/**/*.{ts,tsx}"
       run: bun run typecheck
+    # The design tokens are only a system if nothing can bypass them, and a
+    # raw hex or a stray 13px is invisible in review once a file is 200 lines
+    # long. This is the gate that makes the two-tier boundary real: module
+    # stylesheets may reference semantic tokens but never the primitives
+    # underneath them. The token files themselves are exempt by construction —
+    # the strict rules are scoped to *.module.scss in .stylelintrc.json.
+    frontend-styles:
+      root: "frontend/"
+      glob: "frontend/**/*.scss"
+      run: bunx stylelint {staged_files}
     backend-check:
       root: "backend/"
       glob: "backend/**/*.{ts,json,jsonc}"

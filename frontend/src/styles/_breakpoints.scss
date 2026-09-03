@@ -7,6 +7,8 @@
 // that whole block into each module's output, once per module. A map and
 // two mixins compile to nothing on their own, so this is the one file in
 // this directory a *.module.scss is allowed to @use.
+@use 'sass:map';
+
 $breakpoints: (
   sm: 40rem,
   md: 56rem,
@@ -15,19 +17,21 @@ $breakpoints: (
 );
 
 @mixin up($name) {
-  @if not map-has-key($breakpoints, $name) {
-    @error "Unknown breakpoint `#{$name}`. Known: #{map-keys($breakpoints)}.";
+  @if not map.has-key($breakpoints, $name) {
+    @error "Unknown breakpoint `#{$name}`. Known: #{map.keys($breakpoints)}.";
   }
-  @media (min-width: map-get($breakpoints, $name)) {
+
+  @media (min-width: map.get($breakpoints, $name)) {
     @content;
   }
 }
 
 @mixin below($name) {
-  @if not map-has-key($breakpoints, $name) {
-    @error "Unknown breakpoint `#{$name}`. Known: #{map-keys($breakpoints)}.";
+  @if not map.has-key($breakpoints, $name) {
+    @error "Unknown breakpoint `#{$name}`. Known: #{map.keys($breakpoints)}.";
   }
-  @media (max-width: map-get($breakpoints, $name) - 0.0625rem) {
+
+  @media (max-width: map.get($breakpoints, $name) - 0.0625rem) {
     @content;
   }
 }

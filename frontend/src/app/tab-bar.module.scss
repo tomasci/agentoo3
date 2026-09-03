@@ -5,6 +5,7 @@
   grid-area: tabs;
   display: flex;
   align-items: stretch;
+
   // No token sits at 2px (the scale jumps 1px -> 4px); --space-px is the
   // nearer of the two steps, so the tab gap narrows slightly.
   gap: var(--space-px);
@@ -35,7 +36,12 @@
   background: var(--color-bg-app);
   color: var(--color-text-primary);
   border-color: var(--color-border);
+
+  // Cancels the 1px border below exactly, a device-pixel concern rather than
+  // a spacing value, so it stays literal rather than becoming a --space-* step.
+  // stylelint-disable-next-line declaration-property-unit-allowed-list
   margin-bottom: -1px;
+  // stylelint-disable-next-line declaration-property-unit-allowed-list
   padding-bottom: 1px;
 }
 

@@ -62,6 +62,7 @@
 
 .scroll {
   flex: 1 1 auto;
+
   // Without this a flex item refuses to shrink below its content, and the
   // scrollbar never appears.
   min-height: 0;

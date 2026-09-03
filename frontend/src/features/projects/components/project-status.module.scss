@@ -17,6 +17,7 @@
   flex: none;
 
   &.ready { background: var(--color-success); }
+
   &.pending,
   &.cloning { background: var(--color-accent); }
   &.needs_manual { background: var(--color-warning); }

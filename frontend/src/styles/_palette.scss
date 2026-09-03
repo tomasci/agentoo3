@@ -10,7 +10,7 @@
 :root {
   // Neutrals — warm, hue 40, S 6-12%. Over-sampled 850-975: dark elevation
   // lives entirely in that range and needs ~3% lightness steps.
-  --neutral-0: #ffffff;
+  --neutral-0: #fff;
   --neutral-50: #fbfaf9;
   --neutral-100: #f6f5f3;
   --neutral-200: #edebe8;
@@ -53,7 +53,6 @@
   --green-text-dark: #84cdab;
   --green-solid-light: #359769;
   --green-solid-dark: #4fbb88;
-
   --amber-bg-light: #faf4ea;
   --amber-border-light: #ebd4ad;
   --amber-text-light: #7e5816;
@@ -62,7 +61,6 @@
   --amber-text-dark: #ddba7e;
   --amber-solid-light: #b6832b;
   --amber-solid-dark: #d2a14b;
-
   --red-bg-light: #fbf0ee;
   --red-border-light: #eec2bf;
   --red-text-light: #922920;

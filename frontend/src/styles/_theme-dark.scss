@@ -16,7 +16,6 @@
   --color-surface-active: var(--neutral-875);
   --color-surface-disabled: var(--neutral-800);
   --color-surface-code: var(--neutral-975);
-
   --color-text-primary: var(--neutral-200);
   --color-text-secondary: var(--neutral-400);
   --color-text-muted: var(--neutral-500);
@@ -29,6 +28,7 @@
   // reads as a seam between planes rather than an outline drawn on top.
   --color-border-subtle: var(--neutral-910);
   --color-border: var(--neutral-875);
+
   // The only step that clears WCAG 1.4.11 (3:1) on --color-surface-raised:
   // neutral-600 measures 3.05:1, neutral-850 only 1.27:1 — badly short.
   // Reserved for form controls (input/select/textarea); --color-border
@@ -45,22 +45,18 @@
   --color-accent-subtle-border: var(--indigo-900);
   --color-accent-text: var(--indigo-400);
   --color-focus-ring: var(--indigo-300);
-
   --color-success: var(--green-solid-dark);
   --color-success-text: var(--green-text-dark);
   --color-success-bg: var(--green-bg-dark);
   --color-success-border: var(--green-border-dark);
-
   --color-warning: var(--amber-solid-dark);
   --color-warning-text: var(--amber-text-dark);
   --color-warning-bg: var(--amber-bg-dark);
   --color-warning-border: var(--amber-border-dark);
-
   --color-danger: var(--red-solid-dark);
   --color-danger-text: var(--red-text-dark);
   --color-danger-bg: var(--red-bg-dark);
   --color-danger-border: var(--red-border-dark);
-
   --color-scrim: rgb(0 0 0 / 62%);
 
   // A drop shadow on near-black separates nothing, so xs/sm — the levels

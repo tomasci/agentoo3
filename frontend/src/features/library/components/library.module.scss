@@ -44,6 +44,7 @@
   text-decoration: none;
   font-weight: var(--weight-medium);
   &:hover { text-decoration: underline; }
+
   &:focus-visible {
     outline: var(--focus-ring-width) solid var(--color-focus-ring);
     outline-offset: var(--focus-ring-offset);
@@ -147,9 +148,11 @@
 
 .hint { font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--color-text-muted); }
 .error { color: var(--color-danger-text); font-size: var(--text-sm); line-height: var(--leading-sm); }
+
 // Named for what it is. It was `.row`, which collided with the table-row
 // class above and turned every <tr> into a flex container.
 .controls { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+
 .back {
   font-size: var(--text-sm);
   line-height: var(--leading-sm);

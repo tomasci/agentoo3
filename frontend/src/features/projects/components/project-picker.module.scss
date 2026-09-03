@@ -3,6 +3,7 @@
 .page {
   display: grid;
   gap: var(--space-5);
+
   // The picker owns the whole width of an empty tab, so it centres on a
   // readable measure rather than stretching across an ultrawide monitor.
   max-width: 52rem;

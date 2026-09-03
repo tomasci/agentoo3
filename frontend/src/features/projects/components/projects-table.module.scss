@@ -48,6 +48,7 @@
   font-weight: var(--weight-medium);
 
   &:hover { text-decoration: underline; }
+
   &:focus-visible {
     outline: var(--focus-ring-width) solid var(--color-focus-ring);
     outline-offset: var(--focus-ring-offset);

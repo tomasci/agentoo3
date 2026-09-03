@@ -60,6 +60,7 @@
   --ok: var(--color-success);
   --warn: var(--color-warning);
   --danger: var(--color-danger);
+
   // Referenced at transcript.module.scss:20 but never defined — see
   // design-system-audit.md §1.1. Not a rename of an existing token, just
   // the missing definition, added here so it disappears with the rest of
