@@ -181,10 +181,11 @@ picked from a list rather than typed — adoption is restricted to `SOURCES_DIR`
 and ones already in use are shown as taken — with the path to copy into shown
 alongside for anyone placing a project there by hand.
 
-The API client is generated from the backend's OpenAPI document with kubb during
-installation — neither the spec nor the generated client is committed, so the
-client always matches the backend running on that machine. Stack and layout:
-`frontend/README.md`.
+The API client is generated from the backend's OpenAPI document with kubb —
+neither the spec nor the generated client is committed, so the client always
+matches the backend running on that machine. The installer generates it, and so
+do the git hooks via `scripts/gen-api-client.sh`, since a session's fresh
+worktree starts without one. Stack and layout: `frontend/README.md`.
 
 ## Claude Code
 

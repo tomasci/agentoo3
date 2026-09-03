@@ -51,7 +51,9 @@ done
 if (( ${#missing[@]} > 0 )); then
   printf 'Files a clean checkout needs are not tracked:\n\n' >&2
   printf '  %s\n' "${missing[@]}" >&2
-  printf '\nRun codegen and commit the result, or fix the .gitignore hiding them.\n' >&2
+  # These are hand-written sources, not codegen output — the generated client is
+  # git-ignored on purpose and must stay that way. Committing them is the fix.
+  printf '\nCommit them, or fix the .gitignore hiding them.\n' >&2
   exit 1
 fi
 
