@@ -2,6 +2,15 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { projectPlugin } from '@/lib/paths'
 
 /**
+ * The plugin's name, which is also the namespace every agent in it is addressed
+ * by: an agent file `tester.md` is `agentoo:tester` at the session, not
+ * `tester`. Exported because the orchestrator's roster has to name specialists
+ * in the form that actually resolves — a brief addressed to a bare name fails
+ * to find an agent that is sitting right there.
+ */
+export const PLUGIN_NAME = 'agentoo'
+
+/**
  * Make the project's symlink farm loadable as a Claude Code plugin.
  *
  * A directory is only recognised as a plugin if it holds
@@ -18,7 +27,7 @@ export async function ensurePluginManifest(slug: string): Promise<string> {
     `${JSON.stringify(
       {
         // Kebab-case and no spaces: the loader rejects anything else.
-        name: 'agentoo',
+        name: PLUGIN_NAME,
         version: '1.0.0',
         description: 'Agents and skills selected for this project.',
       },

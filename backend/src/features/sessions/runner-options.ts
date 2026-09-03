@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import type { Options } from '@anthropic-ai/claude-agent-sdk'
 import type { sessions } from '@/db/schema'
 import { syncProjectPlugin } from '@/features/library/service'
@@ -6,8 +7,13 @@ import { configureRepoSsh, isGitRepo } from '@/lib/git'
 import { logger } from '@/lib/logger'
 import { projectPlugin, projectRepo } from '@/lib/paths'
 import { gitSshCommand, keyProblem } from '@/lib/ssh'
-import { getAgent } from '@/library/index'
-import { composeOrchestratorPrompt, delegationEnv } from '@/library/orchestrator-prompt'
+import { getAgent, listAgents, subagents } from '@/library/index'
+import {
+  composeOrchestratorPrompt,
+  delegationEnv,
+  type Specialist,
+} from '@/library/orchestrator-prompt'
+import { PLUGIN_NAME } from '@/queue/plugin-manifest'
 
 /** Deterministic ceiling on delegation, paired with the prompt-level guidance. */
 const MAX_SPAWN_DEPTH = 2
@@ -17,10 +23,12 @@ const MAX_CONCURRENT_SUBAGENTS = 3
  * Build the SDK options for this session.
  *
  * The orchestrator's markdown body becomes the system prompt, composed between
- * the library's shared orchestration method and the delegation and autonomy
- * guarantees. Its subagents are not listed here: they reach
- * the session through the project's plugin directory, which is the same set the
- * library page assigns, so what runs matches what the UI shows.
+ * the library's shared orchestration method and the delegation, roster and
+ * autonomy guarantees. Its subagents reach the session through the project's
+ * plugin directory, which is the same set the library page assigns, so what runs
+ * matches what the UI shows — and the roster in the prompt is read back out of
+ * that directory rather than assembled separately, so the team the orchestrator
+ * is told about is exactly the team the SDK loads.
  */
 export async function optionsFor(
   session: typeof sessions.$inferSelect,
@@ -63,6 +71,18 @@ export async function optionsFor(
     throw new Error(`Agent "${orchestrator.name}" is a subagent and cannot drive a session`)
   }
 
+  // Read from the plugin copy, not the library: this is the set that will load,
+  // already narrowed to this project's assignment. Orchestrators in it are
+  // skipped — `role` says who may drive a session and who may be delegated to,
+  // and offering the lead a copy of itself as a specialist invites a loop the
+  // spawn-depth cap would have to catch.
+  const specialists: Specialist[] = orchestrator?.team
+    ? subagents(await listAgents(join(pluginRoot, 'agents'))).map((a) => ({
+        name: `${PLUGIN_NAME}:${a.name}`,
+        description: a.description,
+      }))
+    : []
+
   return {
     cwd,
     abortController,
@@ -71,7 +91,11 @@ export async function optionsFor(
     // most useful context a project has.
     settingSources: ['project'],
     ...(orchestrator && {
-      systemPrompt: await composeOrchestratorPrompt(orchestrator.prompt, orchestrator.team),
+      systemPrompt: await composeOrchestratorPrompt(
+        orchestrator.prompt,
+        orchestrator.team,
+        specialists,
+      ),
     }),
     ...(orchestrator?.model && { model: orchestrator.model }),
     // Full tool access, deliberately: this runs on a single-user box behind a

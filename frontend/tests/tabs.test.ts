@@ -26,7 +26,7 @@ test('a URL names its own tab, so links open what the sender saw', () => {
   expect(activeTabIdForPath('/projects/abc/sessions/s1')).toBe(projectTabId('abc'))
   expect(activeTabIdForPath('/tab/new-2')).toBe('new-2')
   expect(activeTabIdForPath('/library')).toBe(SYSTEM_TAB_ID)
-  expect(activeTabIdForPath('/library/agents/reviewer')).toBe(SYSTEM_TAB_ID)
+  expect(activeTabIdForPath('/library/agents/tester')).toBe(SYSTEM_TAB_ID)
   expect(activeTabIdForPath('/settings')).toBe(SYSTEM_TAB_ID)
   // Not a project page: no id, so it is not any project's tab.
   expect(activeTabIdForPath('/projects')).toBe(SYSTEM_TAB_ID)

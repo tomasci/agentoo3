@@ -119,7 +119,7 @@ export function AgentEditorPage({ name }: { name?: string }) {
               className={styles.input}
               value={draft.name}
               onChange={(e) => set('name', e.target.value)}
-              placeholder="reviewer"
+              placeholder="tester"
             />
             <span className={styles.hint}>
               {isNew ? t('library.agent.nameHint') : t('library.agent.renameHint')}
