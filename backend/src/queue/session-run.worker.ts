@@ -15,6 +15,7 @@ import { messages, projects, sessions } from '@/db/schema'
 import { env, hasClaudeCredential } from '@/env'
 import { optionsFor } from '@/features/sessions/runner-options'
 import { type TranscriptMessage, titleFor } from '@/features/sessions/titles'
+import { installWorkspaceDeps } from '@/features/sessions/workspace-deps'
 import { publishSessionEvent, subscribeControl } from '@/lib/events'
 import { logger } from '@/lib/logger'
 import { enqueueSessionRun, QUEUE_SESSION_RUN, redisConnection, type SessionRunJob } from './index'
@@ -159,6 +160,13 @@ async function runTurn(job: SessionRunJob): Promise<void> {
   try {
     const options = await optionsFor(claimed, project.slug, abortController, project.sshKeyId)
     logger.info(`Session ${sessionId} running in ${options.cwd}`)
+
+    // Before the agent gets the checkout, not when the worktree was created: it
+    // keeps session creation a fast API call, and it is here that the directory
+    // is definitely about to be used. Skips itself once node_modules exists, so
+    // only the first turn pays for it. `cwd` is optional on the SDK's options
+    // type even though optionsFor always sets it.
+    if (options.cwd) await installWorkspaceDeps(options.cwd)
 
     for await (const message of query({ prompt, options })) {
       if (message.type === 'system' && 'subtype' in message) {
