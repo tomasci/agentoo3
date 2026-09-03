@@ -1,8 +1,7 @@
-import { Dialog, Portal } from '@ark-ui/react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Button } from '../core/button'
-import styles from './confirm-dialog.module.scss'
+import { Dialog } from './dialog'
 
 interface ConfirmDialogProps {
   open: boolean
@@ -36,33 +35,27 @@ export function ConfirmDialog({
   const { t } = useTranslation()
 
   return (
-    <Dialog.Root
+    <Dialog
       open={open}
-      onOpenChange={(details) => onOpenChange(details.open)}
+      onOpenChange={onOpenChange}
+      title={title}
+      description={description}
       role="alertdialog"
-    >
-      <Portal>
-        <Dialog.Backdrop className={styles.backdrop} />
-        <Dialog.Positioner className={styles.positioner}>
-          <Dialog.Content className={styles.content}>
-            <Dialog.Title className={styles.title}>{title}</Dialog.Title>
-            <Dialog.Description className={styles.description}>{description}</Dialog.Description>
-            <div className={styles.actions}>
-              <Dialog.CloseTrigger asChild>
-                <Button type="button">{t('common.cancel')}</Button>
-              </Dialog.CloseTrigger>
-              <Button
-                type="button"
-                variant={destructive ? 'danger' : 'primary'}
-                disabled={busy}
-                onClick={onConfirm}
-              >
-                {busy ? t('common.working') : (confirmLabel ?? t('common.delete'))}
-              </Button>
-            </div>
-          </Dialog.Content>
-        </Dialog.Positioner>
-      </Portal>
-    </Dialog.Root>
+      footer={
+        <>
+          <Button type="button" onClick={() => onOpenChange(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button
+            type="button"
+            variant={destructive ? 'danger' : 'primary'}
+            loading={busy}
+            onClick={onConfirm}
+          >
+            {confirmLabel ?? t('common.delete')}
+          </Button>
+        </>
+      }
+    />
   )
 }

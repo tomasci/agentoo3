@@ -1,0 +1,103 @@
+@use '@/shared/ui/mixins' as ui;
+
+// Zag measures the content's own height and exposes it as --height so a
+// height animation has something other than 'auto' to animate to/from — the
+// documented pattern for @zag-js/collapsible.
+@keyframes collapsible-open { from { height: 0; } to { height: var(--height); } }
+
+@keyframes collapsible-close { from { height: var(--height); } to { height: 0; } }
+
+.root {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-app);
+  overflow: hidden;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  text-align: left;
+  color: var(--color-text-primary);
+  cursor: pointer;
+
+  &:hover { background: var(--color-surface); }
+
+  @include ui.focus-ring;
+}
+
+.indicator {
+  flex: none;
+  display: inline-flex;
+  width: var(--space-3);
+  color: var(--color-text-secondary);
+
+  // A transition, not a keyframe animation: the indicator never unmounts, so
+  // there is no animationend event for anything to wait on.
+  transition: transform var(--dur-fast) var(--ease-out);
+
+  &[data-state='open'] { transform: rotate(90deg); }
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-text-secondary);
+}
+
+.content {
+  overflow: hidden;
+
+  &[data-state='open'] { animation: collapsible-open var(--dur-base) var(--ease-out); }
+  &[data-state='closed'] { animation: collapsible-close var(--dur-base) var(--ease-out); }
+}
+
+.body {
+  padding: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.badge {
+  flex: none;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+}
+
+// Restates the un-toned look from .badge so the Record has a real class per
+// Tone member — an empty ruleset here would trip stylelint's block-no-empty.
+.badgeToneNeutral { border-color: var(--color-border); color: var(--color-text-muted); }
+.badgeToneAccent { border-color: var(--color-accent); color: var(--color-accent-text); }
+.badgeToneSuccess { border-color: var(--color-success); color: var(--color-success-text); }
+.badgeToneWarning { border-color: var(--color-warning); color: var(--color-warning-text); }
+.badgeToneDanger { border-color: var(--color-danger); color: var(--color-danger-text); }

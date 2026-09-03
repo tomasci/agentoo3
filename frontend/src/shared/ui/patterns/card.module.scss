@@ -1,0 +1,22 @@
+.root {
+  border-radius: var(--radius-lg);
+}
+
+// Dark `--shadow-sm` is `none` (elevation there is a lighter surface, not a
+// shadow — design-tokens.md), so solid pairs the shadow with
+// `--color-surface-raised`; relying on the shadow alone would be invisible in
+// dark theme.
+.variantSolid {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.variantDashed {
+  border: 1px dashed var(--color-border);
+  background: transparent;
+}
+
+.paddingNone { padding: var(--space-0); }
+.paddingSm { padding: var(--space-3); }
+.paddingMd { padding: var(--space-5); }

@@ -1,0 +1,72 @@
+@use '@/shared/ui/mixins' as ui;
+
+.root {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  cursor: pointer;
+
+  &[data-disabled] { cursor: not-allowed; }
+}
+
+.control {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  // Sized like the checkbox scale step in design-tokens.md, not a spacing
+  // gap — there is no dedicated control-size token for a 16px box.
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.1875rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+
+  @include ui.disabled;
+  @include ui.invalid;
+
+  &[data-state='checked'] {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+  }
+
+  // The hidden native checkbox is the real focusable element (see
+  // checkbox.tsx); this is the "ring goes on .control" rule, wired through
+  // :has() instead of a pseudo-class this decorative box can never match.
+  .root:has(input:focus-visible) & {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+}
+
+.indicator {
+  display: flex;
+  color: var(--color-text-on-accent);
+  font-size: var(--text-2xs);
+  line-height: 1;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.label {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-text-primary);
+
+  .root[data-disabled] & { color: var(--color-text-disabled); }
+}
+
+.description {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-text-muted);
+}

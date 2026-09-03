@@ -1,0 +1,23 @@
+@keyframes tooltip-in { from { opacity: 0; } to { opacity: 1; } }
+
+@keyframes tooltip-out { from { opacity: 1; } to { opacity: 0; } }
+
+// z-index on Content, never on Positioner: @zag-js/popper sets the
+// positioner's z-index inline from Content's computed value, so a class
+// here would be dead code (component-contract.md).
+.content {
+  position: relative;
+  z-index: var(--z-tooltip);
+  max-width: 16rem;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-overlay);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+
+  &[data-state='open'] { animation: tooltip-in var(--dur-fast) var(--ease-out); }
+  &[data-state='closed'] { animation: tooltip-out var(--dur-fast) var(--ease-out); }
+}

@@ -1,0 +1,52 @@
+@use '@/shared/ui/mixins' as ui;
+
+.root {
+  width: 100%;
+}
+
+// The bordered box lives here, not on .input: the steppers sit inside the
+// same visual control, the way Select's trigger — not its value text — owns
+// control-surface.
+.control {
+  @include ui.control-surface;
+
+  display: flex;
+  align-items: stretch;
+  padding: 0;
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  padding: 0 var(--space-2);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: center;
+
+  @include ui.focus-ring;
+}
+
+.trigger {
+  appearance: none;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-sm);
+  border: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font: inherit;
+  cursor: pointer;
+
+  &:hover:not(:disabled, [data-disabled]) { color: var(--color-text-primary); }
+
+  @include ui.focus-ring;
+  @include ui.disabled;
+}
+
+.sizeSm { min-height: var(--control-height-sm); font-size: var(--text-sm); }
+.sizeMd { min-height: var(--control-height-md); font-size: var(--text-base); }
+.sizeLg { min-height: var(--control-height-lg); font-size: var(--text-md); }

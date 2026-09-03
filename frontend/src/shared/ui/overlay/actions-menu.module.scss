@@ -1,3 +1,5 @@
+@use '@/shared/ui/mixins' as ui;
+
 .trigger {
   appearance: none;
   border: 1px solid transparent;
@@ -9,17 +11,19 @@
   line-height: var(--leading-md);
   cursor: pointer;
 
-  &:hover { background: var(--color-bg-app); color: var(--color-text-primary); border-color: var(--color-border); }
+  &:hover { background: var(--color-surface-hover); color: var(--color-text-primary); border-color: var(--color-border); }
 
-  &:focus-visible {
-    outline: var(--focus-ring-width) solid var(--color-focus-ring);
-    outline-offset: var(--focus-ring-offset);
-  }
+  @include ui.focus-ring;
 }
 
-.positioner { z-index: var(--z-dropdown); }
-
+// No .positioner class at all: @zag-js/popper sets an inline
+// `z-index: var(--z-index)` on the positioner from Content's *computed*
+// z-index, so a class-level z-index here was always dead code (verified —
+// see component-contract.md). Positioning itself is Ark's own inline styles;
+// nothing is left for this element to own.
 .content {
+  position: relative;
+  z-index: var(--z-dropdown);
   min-width: 10rem;
   padding: var(--space-1);
   border: 1px solid var(--color-border);
@@ -27,6 +31,8 @@
   background: var(--color-surface-overlay);
   box-shadow: var(--shadow-md);
 
+  // Content holds focus while items are highlighted — it isn't itself an
+  // operable element, so the ring goes on the item, not here.
   &:focus-visible { outline: none; }
 }
 
@@ -41,8 +47,12 @@
   cursor: pointer;
   user-select: none;
 
-  &[data-highlighted] { background: var(--color-bg-app); }
-  &[data-disabled] { opacity: 0.5; cursor: not-allowed; }
+  // This — not :hover — is the keyboard-and-pointer highlight; a separate
+  // :hover would double up with it.
+  &[data-highlighted] { background: var(--color-surface-hover); }
+
+  @include ui.disabled;
+  @include ui.focus-ring-inset;
 }
 
-.destructive { color: var(--color-danger); }
+.itemDestructive { color: var(--color-danger); }

@@ -1,0 +1,17 @@
+@use '@/shared/ui/mixins' as ui;
+
+.root {
+  @include ui.control-surface;
+
+  // control-surface's min-height/padding fit a single-line input; a textarea
+  // needs to grow with `rows` instead of being pinned to the control-height
+  // token, and wants vertical padding since content wraps across lines.
+  min-height: auto;
+  padding: var(--space-2) var(--space-3);
+  line-height: var(--leading-base);
+}
+
+.mono { font-family: var(--font-mono); }
+
+.resizeNone { resize: none; }
+.resizeVertical { resize: vertical; }

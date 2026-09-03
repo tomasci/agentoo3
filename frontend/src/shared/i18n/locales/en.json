@@ -12,7 +12,8 @@
     "actions": "Actions",
     "working": "Working…",
     "save": "Save",
-    "edit": "Edit"
+    "edit": "Edit",
+    "noOptions": "No options available"
   },
   "health": {
     "checking": "Checking backend…",

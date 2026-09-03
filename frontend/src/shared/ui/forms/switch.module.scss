@@ -1,0 +1,80 @@
+@use '@/shared/ui/mixins' as ui;
+
+.root {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+
+  &[data-disabled] { cursor: not-allowed; }
+}
+
+.control {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+
+  // No token for this scale — a switch track isn't a spacing gap or a form
+  // control matched by control-height-*, it's its own fixed shape.
+  width: 2rem;
+  height: 1.125rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-sunken);
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+
+  @include ui.disabled;
+  @include ui.invalid;
+
+  &[data-state='checked'] {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+  }
+
+  // See checkbox.module.scss for why this is :has() rather than a
+  // pseudo-class on the element itself — the hidden input is what's really
+  // focused, not this decorative track.
+  .root:has(input:focus-visible) & {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+}
+
+.thumb {
+  position: absolute;
+  top: 0.0625rem;
+  left: 0.0625rem;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-xs);
+  transition: transform var(--dur-fast) var(--ease-out);
+
+  .control[data-state='checked'] & {
+    transform: translateX(0.875rem);
+  }
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.label {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-text-primary);
+
+  .root[data-disabled] & { color: var(--color-text-disabled); }
+}
+
+.description {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-text-muted);
+}

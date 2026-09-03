@@ -1,4 +1,8 @@
+export { Badge } from './badge'
 export { Button } from './button'
+export { Code } from './code'
 export { CopyButton } from './copy-button'
+export { Inline, Stack } from './layout'
 export { Markdown } from './markdown'
 export { Spinner } from './spinner'
+export { StatusDot } from './status-dot'
