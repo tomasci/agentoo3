@@ -4,6 +4,7 @@ import { AgentEditorPage, LibraryPage, SkillEditorPage } from '@/features/librar
 import { SettingsPage } from '@/features/settings'
 import { SshKeysPage } from '@/features/ssh-keys'
 import { SYSTEM_HOME } from '@/shared/store/tabs'
+import { Button, EmptyState } from '@/shared/ui'
 import { ProjectLayout } from './project-layout'
 import {
   NewTabRoute,
@@ -148,10 +149,14 @@ export const routeTree = rootRoute.addChildren([
 function NotFound() {
   const { t } = useTranslation()
   return (
-    <div style={{ padding: '3rem 0', textAlign: 'center' }}>
-      <p style={{ margin: '0 0 1rem', color: 'var(--muted-fg)' }}>{t('notFound.message')}</p>
-      <Link to={SYSTEM_HOME}>{t('notFound.back')}</Link>
-    </div>
+    <EmptyState
+      title={t('notFound.message')}
+      action={
+        <Button asChild variant="secondary">
+          <Link to={SYSTEM_HOME}>{t('notFound.back')}</Link>
+        </Button>
+      }
+    />
   )
 }
 

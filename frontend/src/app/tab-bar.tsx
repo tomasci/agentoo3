@@ -11,20 +11,21 @@ import { useTabs } from './use-tabs'
  * were opened, and the [+] at the end starts an empty one. A project's tab is
  * labelled with its current name, read from the project list rather than copied
  * at open time, so renaming a project renames its tab.
+ *
+ * This is a `nav`/list, not an ARIA tablist: a tablist promises a
+ * `role="tabpanel"` for each tab to control, and there has never been one —
+ * the "panel" is the whole router outlet, shared by every tab. That left a
+ * `role="tab"` with no `aria-controls` pointing anywhere, which announces a
+ * relationship to assistive tech that doesn't exist. `aria-current="page"`
+ * says the true, simpler thing: this is the page you're on. Roving
+ * `tabIndex`/arrow-key stepping went with it — that behaviour belongs to the
+ * tab widget pattern, and a plain list of buttons is already correct with the
+ * browser's normal Tab order, one stop per button.
  */
 export function TabBar() {
   const { t } = useTranslation()
   const { tabs, activeId, addTab, selectTab, closeTab } = useTabs()
   const { data: projects } = useProjects()
-
-  // A tablist is expected to move with the arrow keys, with only the selected
-  // tab in the page's tab order. Without this the role would promise a keyboard
-  // interface the row does not have.
-  const step = (from: string, delta: number) => {
-    const index = tabs.findIndex((tab) => tab.id === from)
-    const next = tabs[index + delta]
-    if (next) selectTab(next.id)
-  }
 
   const labelFor = (tab: Tab) => {
     if (tab.kind === 'system') return t('tabs.system')
@@ -34,64 +35,58 @@ export function TabBar() {
   }
 
   return (
-    <div className={styles.bar} role="tablist" aria-label={t('tabs.label')}>
-      {tabs.map((tab) => {
-        const selected = tab.id === activeId
-        return (
-          // The close button is a real button, so the tab itself cannot be one:
-          // a button inside a button is invalid HTML and unreachable by keyboard.
-          <div
-            key={tab.id}
-            className={`${styles.tab} ${selected ? styles.tabActive : ''} ${
-              tab.kind === 'system' ? styles.tabSystem : ''
-            }`}
-            // Middle-click closes, the way it does in a browser.
-            onAuxClick={(event) => {
-              if (event.button === 1 && tab.kind !== 'system') {
-                event.preventDefault()
-                closeTab(tab.id)
-              }
-            }}
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              tabIndex={selected ? 0 : -1}
-              className={styles.tabButton}
-              onClick={() => selectTab(tab.id)}
-              onKeyDown={(event) => {
-                if (event.key === 'ArrowRight') step(tab.id, 1)
-                else if (event.key === 'ArrowLeft') step(tab.id, -1)
-                else return
-                event.preventDefault()
+    <nav className={styles.bar} aria-label={t('tabs.label')}>
+      <ul className={styles.list}>
+        {tabs.map((tab) => {
+          const active = tab.id === activeId
+          return (
+            // The close button is a real button, so the tab itself cannot be one:
+            // a button inside a button is invalid HTML and unreachable by keyboard.
+            <li
+              key={tab.id}
+              className={`${styles.tab} ${active ? styles.tabActive : ''} ${
+                tab.kind === 'system' ? styles.tabSystem : ''
+              }`}
+              // Middle-click closes, the way it does in a browser.
+              onAuxClick={(event) => {
+                if (event.button === 1 && tab.kind !== 'system') {
+                  event.preventDefault()
+                  closeTab(tab.id)
+                }
               }}
             >
-              {tab.kind === 'system' && (
-                <span className={styles.tabIcon} aria-hidden="true">
-                  ⚙
-                </span>
-              )}
-              <span className={styles.tabLabel}>{labelFor(tab)}</span>
-            </button>
-
-            {tab.kind !== 'system' && (
               <button
                 type="button"
-                className={styles.close}
-                aria-label={t('tabs.close', { name: labelFor(tab) })}
-                onClick={() => closeTab(tab.id)}
+                aria-current={active ? 'page' : undefined}
+                className={styles.tabButton}
+                onClick={() => selectTab(tab.id)}
               >
-                ✕
+                {tab.kind === 'system' && (
+                  <span className={styles.tabIcon} aria-hidden="true">
+                    ⚙
+                  </span>
+                )}
+                <span className={styles.tabLabel}>{labelFor(tab)}</span>
               </button>
-            )}
-          </div>
-        )
-      })}
+
+              {tab.kind !== 'system' && (
+                <button
+                  type="button"
+                  className={styles.close}
+                  aria-label={t('tabs.close', { name: labelFor(tab) })}
+                  onClick={() => closeTab(tab.id)}
+                >
+                  ✕
+                </button>
+              )}
+            </li>
+          )
+        })}
+      </ul>
 
       <button type="button" className={styles.add} aria-label={t('tabs.add')} onClick={addTab}>
         +
       </button>
-    </div>
+    </nav>
   )
 }

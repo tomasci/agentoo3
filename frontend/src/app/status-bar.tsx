@@ -3,7 +3,17 @@ import { useTranslation } from 'react-i18next'
 import { useHealth } from '@/features/health'
 import { useSshKeys } from '@/features/ssh-keys'
 import { formatBytes, useSystem } from '@/features/system'
+import { StatusDot, Tooltip } from '@/shared/ui'
 import styles from './layout.module.scss'
+
+// StatusDot only speaks in the five shared tones — 'down' covers both "still
+// checking" and "actually unreachable", so it reads as neutral rather than
+// alarming: a slow health check should not look identical to a real failure.
+const DOT_TONE = {
+  ok: 'success',
+  warn: 'warning',
+  down: 'neutral',
+} as const
 
 /**
  * The IDE-style strip along the bottom.
@@ -38,7 +48,7 @@ export function StatusBar() {
   return (
     <footer className={styles.status}>
       <span className={styles.statusItem}>
-        <span className={`${styles.dot} ${styles[state]}`} aria-hidden="true" />
+        <StatusDot tone={DOT_TONE[state]} />
         {label}
       </span>
 
@@ -52,35 +62,68 @@ export function StatusBar() {
       )}
 
       {/* Host load. Three figures, pushed to the right with the version: enough
-          to notice the box filling up or pinned, without becoming a dashboard. */}
+          to notice the box filling up or pinned, without becoming a dashboard.
+          Each figure's detail lives in a Tooltip rather than `title=`, which
+          never reaches a keyboard user; the visible text stays styled on its
+          own wrapper so the tooltip's own trigger — the part that must not
+          carry a className, per the component contract — can stay a plain,
+          focusable span. */}
       {system && (
         <>
-          <span
-            className={`${styles.statusItem} ${styles.statusSpacer} ${styles.metric}`}
-            title={t('status.cpuTitle', { cores: system.cpu.cores, load: system.cpu.load1 })}
-          >
-            {t('status.cpu', { percent: Math.round(system.cpu.usagePercent) })}
+          <span className={`${styles.statusItem} ${styles.statusSpacer} ${styles.metric}`}>
+            <Tooltip
+              content={t('status.cpuTitle', { cores: system.cpu.cores, load: system.cpu.load1 })}
+            >
+              {/* biome-ignore lint/a11y/noNoninteractiveTabindex: read-only status
+                  text with nothing to activate — a button would promise
+                  interactivity that isn't there. It still needs a stop in the
+                  tab order, because Ark's Tooltip opens on trigger focus, not
+                  by making an unfocusable trigger focusable for you. */}
+              <span tabIndex={0}>
+                {t('status.cpu', { percent: Math.round(system.cpu.usagePercent) })}
+              </span>
+            </Tooltip>
           </span>
           <span
             className={`${styles.statusItem} ${styles.metric} ${system.memory.usedPercent >= 90 ? styles.metricHigh : ''}`}
-            title={t('status.memTitle', {
-              used: formatBytes(system.memory.usedBytes),
-              total: formatBytes(system.memory.totalBytes),
-            })}
           >
-            {t('status.mem', {
-              used: formatBytes(system.memory.usedBytes),
-              percent: Math.round(system.memory.usedPercent),
-            })}
+            <Tooltip
+              content={t('status.memTitle', {
+                used: formatBytes(system.memory.usedBytes),
+                total: formatBytes(system.memory.totalBytes),
+              })}
+            >
+              {/* biome-ignore lint/a11y/noNoninteractiveTabindex: read-only status
+                  text with nothing to activate — a button would promise
+                  interactivity that isn't there. It still needs a stop in the
+                  tab order, because Ark's Tooltip opens on trigger focus, not
+                  by making an unfocusable trigger focusable for you. */}
+              <span tabIndex={0}>
+                {t('status.mem', {
+                  used: formatBytes(system.memory.usedBytes),
+                  percent: Math.round(system.memory.usedPercent),
+                })}
+              </span>
+            </Tooltip>
           </span>
           <span
             className={`${styles.statusItem} ${styles.metric} ${system.disk.usedPercent >= 90 ? styles.metricHigh : ''}`}
-            title={t('status.diskTitle', {
-              path: system.disk.path,
-              free: formatBytes(system.disk.totalBytes - system.disk.usedBytes),
-            })}
           >
-            {t('status.disk', { percent: Math.round(system.disk.usedPercent) })}
+            <Tooltip
+              content={t('status.diskTitle', {
+                path: system.disk.path,
+                free: formatBytes(system.disk.totalBytes - system.disk.usedBytes),
+              })}
+            >
+              {/* biome-ignore lint/a11y/noNoninteractiveTabindex: read-only status
+                  text with nothing to activate — a button would promise
+                  interactivity that isn't there. It still needs a stop in the
+                  tab order, because Ark's Tooltip opens on trigger focus, not
+                  by making an unfocusable trigger focusable for you. */}
+              <span tabIndex={0}>
+                {t('status.disk', { percent: Math.round(system.disk.usedPercent) })}
+              </span>
+            </Tooltip>
           </span>
         </>
       )}

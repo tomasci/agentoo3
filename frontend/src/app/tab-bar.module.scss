@@ -5,13 +5,25 @@
   grid-area: tabs;
   display: flex;
   align-items: stretch;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+// The tab row itself: a real list, so its overflow scrolls independently of
+// the [+] button, which stays put rather than scrolling out of reach.
+.list {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 
   // No token sits at 2px (the scale jumps 1px -> 4px); --space-px is the
   // nearer of the two steps, so the tab gap narrows slightly.
   gap: var(--space-px);
-  padding: var(--space-1) var(--space-2) 0;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
   overflow-x: auto;
   scrollbar-width: thin;
 }
