@@ -2,7 +2,7 @@
   "name": "agentoo-frontend",
   "private": true,
   "type": "module",
-  "version": "0.1.46",
+  "version": "0.1.47",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -53,6 +53,8 @@
     "kubb": "5.0.5",
     "lefthook": "2.1.12",
     "sass": "1.103.1",
+    "stylelint": "16.26.0",
+    "stylelint-config-standard-scss": "17.0.0",
     "typescript": "7.0.2",
     "vite": "8.2.2"
   }
