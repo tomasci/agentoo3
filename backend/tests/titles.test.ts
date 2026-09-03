@@ -21,9 +21,9 @@ test('a progress ping gets no row of its own', () => {
   // It is emitted at the top level with no parent_tool_use_id, so a row here
   // lands beside the orchestrator's steps and repeats work already nested in
   // the subagent's group. The transcript shows these as progress on the group.
-  expect(titleFor(m({ type: 'system', subtype: 'task_progress', subagent_type: 'reviewer',
+  expect(titleFor(m({ type: 'system', subtype: 'task_progress', subagent_type: 'tester',
     summary: 'checking the SSE endpoint' }), 'x')).toBeNull()
-  expect(titleFor(m({ type: 'system', subtype: 'task_progress', subagent_type: 'reviewer',
+  expect(titleFor(m({ type: 'system', subtype: 'task_progress', subagent_type: 'tester',
     last_tool_name: 'Grep' }), 'x')).toBeNull()
 })
 

@@ -5,6 +5,12 @@ description: How this project is laid out and what the commands are. Read before
 
 # Project conventions
 
+Agents are written to be reusable and arrive knowing nothing about where they
+have landed, so this is where a project describes itself: layout, commands, and
+the handful of rules that are not obvious from reading one file. This copy
+describes *this* repository — assign it to this project only, and write another
+for the next one rather than stretching this one to fit.
+
 ## Layout
 
 - `frontend/` — React + Vite, run by Bun. Features under `src/features/<name>/`,
@@ -21,6 +27,7 @@ Both `frontend/` and `backend/`:
 bun run typecheck
 bun run lint          # biome
 bun run lint:fix
+bun test tests/       # what pre-push runs
 ```
 
 `frontend/`: `bun run build`. `backend/`: `bun run db:generate` after a schema
