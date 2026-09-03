@@ -32,7 +32,7 @@ bun run start       # serve dist/ with Bun (what the service runs)
 bun run typecheck
 bun run lint        # biome check
 bun run lint:fix
-bun run codegen     # kubb: regenerate the API client from the committed spec
+bun run codegen     # kubb: regenerate the API client from backend/openapi.json
 bun run hooks       # install lefthook git hooks
 ```
 
@@ -45,7 +45,7 @@ src/
     projects/          hooks/ components/ model/ lib/ index.ts
     health/            hooks/ components/ index.ts
   shared/
-    api/               client config + generated/ (kubb output, committed)
+    api/               client config + generated/ (kubb output, git-ignored)
     config/            parsed env
     i18n/              i18next setup + locales (en, ru)
     lib/               logger
@@ -154,7 +154,12 @@ cd frontend && bun run codegen     # types, zod schemas, query hooks, clients
 bun run build
 ```
 
-The installer does this for you: step `backend` renders the spec, step
+You rarely have to. `scripts/gen-api-client.sh` does both steps in order, and
+the git hooks call it: `pre-push` unconditionally, `pre-commit` only when a
+checkout has no client at all. That matters because every session runs on its
+own fresh worktree, so every session starts without one.
+
+The installer does the same two steps: step `backend` renders the spec, step
 `frontend` generates against it. That is why `backend` runs first.
 
 Generated code is excluded from Biome, and `noUnusedLocals` is deliberately off
