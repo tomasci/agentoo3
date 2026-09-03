@@ -1,0 +1,33 @@
+// Breakpoints stay in Sass, never a CSS custom property: a media query
+// cannot read a custom property's value, so there is no way to make this
+// part of the token layer above without losing the ability to gate layout.
+//
+// This file must emit ZERO CSS. Every *.module.scss is its own Sass
+// compilation unit — @use-ing a partial that contains declarations copies
+// that whole block into each module's output, once per module. A map and
+// two mixins compile to nothing on their own, so this is the one file in
+// this directory a *.module.scss is allowed to @use.
+$breakpoints: (
+  sm: 40rem,
+  md: 56rem,
+  lg: 72rem,
+  xl: 90rem,
+);
+
+@mixin up($name) {
+  @if not map-has-key($breakpoints, $name) {
+    @error "Unknown breakpoint `#{$name}`. Known: #{map-keys($breakpoints)}.";
+  }
+  @media (min-width: map-get($breakpoints, $name)) {
+    @content;
+  }
+}
+
+@mixin below($name) {
+  @if not map-has-key($breakpoints, $name) {
+    @error "Unknown breakpoint `#{$name}`. Known: #{map-keys($breakpoints)}.";
+  }
+  @media (max-width: map-get($breakpoints, $name) - 0.0625rem) {
+    @content;
+  }
+}

@@ -1,0 +1,117 @@
+// Primitive non-colour tokens: type, spacing, radii, motion, z-index and the
+// handful of fixed layout dimensions. Same two-tier rule as _palette.scss —
+// these are theme-independent so they live on bare :root, not per-theme.
+:root {
+  // Type. Inter leads for x-height and l/I/1 disambiguation; -apple-system
+  // sits near the end of the stack deliberately, a fallback rather than the
+  // identity. No webfont — no new dependency for this phase.
+  --font-sans: 'InterVariable', 'Inter', 'IBM Plex Sans', 'Segoe UI Variable Text',
+    'Segoe UI', Roboto, ui-sans-serif, system-ui, -apple-system, 'Helvetica Neue',
+    Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'IBM Plex Mono', 'Cascadia Mono', 'SF Mono', Menlo,
+    Consolas, 'DejaVu Sans Mono', 'Liberation Mono', ui-monospace, monospace;
+
+  // Sizes carry a paired absolute line-height (rem, not unitless) so row
+  // heights stay predictable, and a paired tracking value.
+  --text-2xs: 0.6875rem;
+  --leading-2xs: 1rem;
+  --tracking-2xs: 0.01em;
+
+  --text-xs: 0.75rem;
+  --leading-xs: 1.125rem;
+  --tracking-xs: 0.005em;
+
+  --text-sm: 0.8125rem;
+  --leading-sm: 1.25rem;
+  --tracking-sm: 0;
+
+  --text-base: 0.875rem;
+  --leading-base: 1.375rem;
+  --tracking-base: 0;
+
+  --text-md: 1rem;
+  --leading-md: 1.625rem;
+  --tracking-md: -0.006em;
+
+  --text-lg: 1.125rem;
+  --leading-lg: 1.625rem;
+  --tracking-lg: -0.01em;
+
+  --text-xl: 1.375rem;
+  --leading-xl: 1.875rem;
+  --tracking-xl: -0.014em;
+
+  --text-2xl: 1.75rem;
+  --leading-2xl: 2.25rem;
+  --tracking-2xl: -0.018em;
+
+  --text-3xl: 2.25rem;
+  --leading-3xl: 2.625rem;
+  --tracking-3xl: -0.022em;
+
+  // The two unitless exceptions: a code block's own rhythm, and the one
+  // tracking value that replaces three competing uppercase micro-label
+  // values (0.03em / 0.04em / 0.06em) found in the audit.
+  --leading-code: 1.55;
+  --tracking-caps: 0.06em;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  // Spacing, base 4px. Every existing Sass value maps exactly onto this
+  // scale (see design-system-audit.md §6.5); nothing here is snapped.
+  --space-0: 0;
+  --space-px: 1px;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  // Radii scale by element class, not instance size.
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-full: 9999px;
+
+  // Motion. --dur-progress is a loop period, not a transition, which is why
+  // it sits outside the 120-200ms band the rest of the scale holds to.
+  --dur-fast: 120ms;
+  --dur-base: 160ms;
+  --dur-slow: 200ms;
+  --dur-progress: 900ms;
+
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-in: cubic-bezier(0.55, 0.06, 0.68, 0.19);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-linear: linear;
+
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 100;
+  --z-dropdown: 1000;
+  --z-overlay: 1100;
+  --z-modal: 1200;
+  --z-toast: 1300;
+  --z-tooltip: 1400;
+
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  // Control height: 32px default, 28/36 for sm/lg.
+  --control-height-sm: 1.75rem;
+  --control-height-md: 2rem;
+  --control-height-lg: 2.25rem;
+
+  --layout-sidebar-width: 13.5rem;
+  --layout-content-width: 42rem;
+  --layout-statusbar-height: 1.75rem;
+}

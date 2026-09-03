@@ -1,0 +1,72 @@
+// Semantic aliases, light theme (default — no [data-theme] attribute needed).
+// Every declaration resolves to a primitive from _palette.scss; component
+// SCSS never reaches past this layer. See docs/design-tokens.md.
+:root {
+  // Surfaces. Light elevation is communicated by shadow (see --shadow-*
+  // below), not by surface colour, so raised/overlay share the base white —
+  // unlike dark, where elevation *is* a lighter surface.
+  --color-bg-app: var(--neutral-0);
+  --color-surface: var(--neutral-100);
+  --color-surface-raised: var(--neutral-0);
+  --color-surface-overlay: var(--neutral-0);
+  --color-surface-sunken: var(--neutral-200);
+  --color-surface-hover: var(--neutral-100);
+  --color-surface-active: var(--neutral-200);
+  --color-surface-disabled: var(--neutral-200);
+  --color-surface-code: var(--neutral-100);
+
+  --color-text-primary: var(--neutral-900);
+  --color-text-secondary: var(--neutral-700);
+  // neutral-600 is the step the audit corrected for contrast specifically
+  // for this pairing (muted text over --color-surface) — see _palette.scss.
+  --color-text-muted: var(--neutral-600);
+  --color-text-disabled: var(--neutral-400);
+  --color-text-inverted: var(--neutral-50);
+  --color-text-on-accent: var(--neutral-0);
+  --color-text-code: var(--neutral-900);
+
+  --color-border-subtle: var(--neutral-200);
+  --color-border: var(--neutral-300);
+  // The only step that clears WCAG 1.4.11 (3:1 for UI component
+  // boundaries) on white: neutral-500 measures 3.22:1, neutral-400 only
+  // 2.18:1. Reserved for form controls (input/select/textarea), which
+  // must stay legible as a boundary; --color-border stays soft for
+  // cards and dividers, where near-invisible separation is the goal.
+  --color-border-strong: var(--neutral-500);
+
+  --color-accent: var(--indigo-600);
+  --color-accent-hover: var(--indigo-700);
+  --color-accent-active: var(--indigo-800);
+  --color-accent-subtle-bg: var(--indigo-100);
+  --color-accent-subtle-border: var(--indigo-200);
+  --color-accent-text: var(--indigo-700);
+  --color-focus-ring: var(--indigo-500);
+
+  --color-success: var(--green-solid-light);
+  --color-success-text: var(--green-text-light);
+  --color-success-bg: var(--green-bg-light);
+  --color-success-border: var(--green-border-light);
+
+  --color-warning: var(--amber-solid-light);
+  --color-warning-text: var(--amber-text-light);
+  --color-warning-bg: var(--amber-bg-light);
+  --color-warning-border: var(--amber-border-light);
+
+  --color-danger: var(--red-solid-light);
+  --color-danger-text: var(--red-text-light);
+  --color-danger-bg: var(--red-bg-light);
+  --color-danger-border: var(--red-border-light);
+
+  // rgb(32 31 29 / …) is neutral-900 as raw channels — a scrim needs a
+  // variable alpha, which var() can't graft onto a token, so it's written
+  // out rather than composed.
+  --color-scrim: rgb(32 31 29 / 32%);
+
+  // Warm rgb(32 31 29 / …), not black — pure black under warm neutrals
+  // reads grey-blue.
+  --shadow-xs: 0 1px 2px rgb(32 31 29 / 5%);
+  --shadow-sm: 0 1px 2px rgb(32 31 29 / 4%), 0 2px 6px rgb(32 31 29 / 5%);
+  --shadow-md: 0 2px 4px rgb(32 31 29 / 4%), 0 6px 16px rgb(32 31 29 / 7%);
+  --shadow-lg: 0 4px 8px rgb(32 31 29 / 5%), 0 16px 32px rgb(32 31 29 / 10%);
+  --shadow-focus: 0 0 0 var(--focus-ring-width) var(--color-focus-ring);
+}

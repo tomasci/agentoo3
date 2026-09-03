@@ -1,0 +1,74 @@
+// Primitive colour tokens only. Nothing here is theme-aware and nothing here
+// is consumed outside the two theme files — component SCSS reaches for
+// `--color-*` semantic aliases, never these. See docs/design-tokens.md.
+//
+// Values are the audit's proposed scales (design-system-audit.md §6.1–6.3),
+// copied verbatim. `--neutral-600` is `#6E695E`, not the originally proposed
+// `#787368`: the latter measures 4.33:1 on `--color-surface`, below the
+// 4.5:1 floor, and this step is muted text on a card — one of the most
+// common pairs in the app.
+:root {
+  // Neutrals — warm, hue 40, S 6-12%. Over-sampled 850-975: dark elevation
+  // lives entirely in that range and needs ~3% lightness steps.
+  --neutral-0: #ffffff;
+  --neutral-50: #fbfaf9;
+  --neutral-100: #f6f5f3;
+  --neutral-200: #edebe8;
+  --neutral-300: #dddad5;
+  --neutral-400: #b4afa7;
+  --neutral-500: #948f84;
+  --neutral-600: #6e695e;
+  --neutral-700: #5a564e;
+  --neutral-800: #3e3c37;
+  --neutral-850: #32302c;
+  --neutral-875: #282622;
+  --neutral-900: #201f1d;
+  --neutral-910: #1f1e1b;
+  --neutral-925: #171614;
+  --neutral-950: #0f0e0d;
+  --neutral-975: #0b0a09;
+
+  // Accent — indigo, hue 233. Deliberately desaturated (S 50-55%) against
+  // stock framework blues (90%+) so it reads as chosen, not default.
+  --indigo-50: #f3f4fc;
+  --indigo-100: #e7e9f8;
+  --indigo-200: #ccd0f0;
+  --indigo-300: #a8afe6;
+  --indigo-400: #848fdb;
+  --indigo-500: #616ed1;
+  --indigo-600: #4452c0;
+  --indigo-700: #3642a1;
+  --indigo-800: #2d367b;
+  --indigo-900: #252b5b;
+  --indigo-950: #181c39;
+
+  // Status hues, restrained — never a second accent. Steps named for their
+  // role (bg/border/text/solid) rather than a numeric scale, since each
+  // theme uses its own fixed set from design-system-audit.md §6.3.
+  --green-bg-light: #edf7f3;
+  --green-border-light: #b9dfcd;
+  --green-text-light: #1c6945;
+  --green-bg-dark: #0f241a;
+  --green-border-dark: #19382a;
+  --green-text-dark: #84cdab;
+  --green-solid-light: #359769;
+  --green-solid-dark: #4fbb88;
+
+  --amber-bg-light: #faf4ea;
+  --amber-border-light: #ebd4ad;
+  --amber-text-light: #7e5816;
+  --amber-bg-dark: #281d0c;
+  --amber-border-dark: #413116;
+  --amber-text-dark: #ddba7e;
+  --amber-solid-light: #b6832b;
+  --amber-solid-dark: #d2a14b;
+
+  --red-bg-light: #fbf0ee;
+  --red-border-light: #eec2bf;
+  --red-text-light: #922920;
+  --red-bg-dark: #2a100e;
+  --red-border-dark: #471e1a;
+  --red-text-dark: #e88f87;
+  --red-solid-light: #c94236;
+  --red-solid-dark: #de695e;
+}
