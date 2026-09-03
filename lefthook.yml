@@ -14,6 +14,13 @@ pre-commit:
     bump-build:
       priority: 1
       run: bun scripts/bump-build.ts
+    # Only when the checkout has none at all, which costs a directory test on a
+    # normal commit. Without it, frontend-types below cannot typecheck in a
+    # session's fresh worktree. pre-push is what keeps it honest, regenerating
+    # unconditionally rather than trusting whatever this left behind.
+    api-client:
+      priority: 2
+      run: ./scripts/gen-api-client.sh --if-missing
     # Milliseconds, and it catches a class of failure that only shows up on a
     # clean checkout: a source file the build imports but git ignores.
     sources-tracked:
@@ -37,20 +44,38 @@ pre-commit:
       glob: "backend/**/*.ts"
       run: bun run typecheck
 
+# `jobs` rather than `commands`, because this hook has an ordering constraint a
+# flat parallel list cannot express: the client has to exist before anything
+# typechecks, builds or imports it.
 pre-push:
-  parallel: true
-  commands:
-    frontend-build:
-      root: "frontend/"
-      run: bun run build
-    backend-types:
-      root: "backend/"
-      run: bun run typecheck
-    # Seconds, not milliseconds — the event-bus tests stand up a fake Redis — so
-    # these run on push rather than on every commit.
-    backend-tests:
-      root: "backend/"
-      run: bun test tests/
-    frontend-tests:
-      root: "frontend/"
-      run: bun test tests/
+  jobs:
+    # openapi.json and the generated client are git-ignored on purpose — see
+    # backend/.gitignore — so any checkout that has not been through install.sh
+    # has neither, and every frontend job below dies with a wall of "Cannot find
+    # module @/shared/api/generated/...". That is not the rare case: each session
+    # runs on its own fresh worktree, so it is the usual one.
+    #
+    # Regenerated unconditionally, not just when absent: this is the last gate
+    # before code leaves the machine, and it is the point of not committing the
+    # client that the checks run against routes as they are now.
+    - name: api-client
+      run: ./scripts/gen-api-client.sh
+
+    - name: checks
+      group:
+        parallel: true
+        jobs:
+          - name: frontend-build
+            root: "frontend/"
+            run: bun run build
+          - name: backend-types
+            root: "backend/"
+            run: bun run typecheck
+          # Seconds, not milliseconds — the event-bus tests stand up a fake
+          # Redis — so these run on push rather than on every commit.
+          - name: backend-tests
+            root: "backend/"
+            run: bun test tests/
+          - name: frontend-tests
+            root: "frontend/"
+            run: bun test tests/
