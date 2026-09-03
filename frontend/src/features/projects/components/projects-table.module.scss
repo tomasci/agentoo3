@@ -1,42 +1,8 @@
-.wrapper {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  overflow-x: auto;
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--text-base);
-  line-height: var(--leading-base);
-}
-
-.th {
-  text-align: left;
-  font-weight: var(--weight-semibold);
-  font-size: var(--text-xs);
-  line-height: var(--leading-xs);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
-  white-space: nowrap;
-}
-
-.td {
-  padding: var(--space-3) var(--space-3);
-  border-bottom: 1px solid var(--color-border);
-  vertical-align: middle;
-}
-
-.row:last-child .td { border-bottom: 0; }
-.row:hover { background: var(--color-surface); }
-
 .nameLink {
   // A button, because opening a project is an action on the workspace rather
   // than a link to an address — reset to read as the text it used to be.
+  // Focus ring comes from `DataTable`'s own `.row a, button` rule
+  // (focus-ring-inset), not repeated here.
   padding: 0;
   border: 0;
   background: none;
@@ -48,31 +14,7 @@
   font-weight: var(--weight-medium);
 
   &:hover { text-decoration: underline; }
-
-  &:focus-visible {
-    outline: var(--focus-ring-width) solid var(--color-focus-ring);
-    outline-offset: var(--focus-ring-offset);
-    border-radius: var(--radius-sm);
-  }
 }
 
 // Not openable yet, so it is text, not a target.
 .namePlain { color: var(--color-text-secondary); cursor: default; }
-
-.path {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  line-height: var(--leading-xs);
-  color: var(--color-text-secondary);
-  overflow-wrap: anywhere;
-}
-
-.actionsCell { width: 1%; text-align: right; white-space: nowrap; }
-
-.empty {
-  padding: var(--space-8) var(--space-5);
-  text-align: center;
-  color: var(--color-text-secondary);
-  font-size: var(--text-base);
-  line-height: var(--leading-base);
-}

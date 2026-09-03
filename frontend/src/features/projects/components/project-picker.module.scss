@@ -1,58 +1,12 @@
 @use '@/styles/breakpoints' as bp;
 
+// The picker owns the whole width of an empty tab, so it centres on a
+// readable measure rather than stretching across an ultrawide monitor. Every
+// other rhythm on this screen — the sections, the card padding — comes from
+// `Stack`/`Card`; this is the one layout concern neither owns.
 .page {
-  display: grid;
-  gap: var(--space-5);
-
-  // The picker owns the whole width of an empty tab, so it centres on a
-  // readable measure rather than stretching across an ultrawide monitor.
   max-width: 52rem;
   margin: 0 auto;
-}
-
-.intro { display: grid; gap: var(--space-1); }
-
-.title {
-  margin: 0;
-  font-size: var(--text-lg);
-  line-height: var(--leading-lg);
-  font-weight: var(--weight-semibold);
-}
-
-.lead {
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--text-base);
-  line-height: var(--leading-base);
-}
-
-.sectionTitle {
-  margin: 0 0 var(--space-3);
-  font-size: var(--text-2xs);
-  line-height: var(--leading-2xs);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-caps);
-  text-transform: uppercase;
-  color: var(--color-text-muted);
-}
-
-.empty {
-  padding: var(--space-8) var(--space-5);
-  text-align: center;
-  color: var(--color-text-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  font-size: var(--text-base);
-  line-height: var(--leading-base);
-}
-
-.problem {
-  padding: var(--space-3);
-  border: 1px solid var(--color-warning);
-  border-radius: var(--radius-sm);
-  color: var(--color-warning);
-  font-size: var(--text-base);
-  line-height: var(--leading-base);
 }
 
 @include bp.below(sm) {
