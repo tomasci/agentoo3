@@ -70,7 +70,7 @@
       }
     },
     {
-      "files": ["src/shared/ui/markdown.module.scss"],
+      "files": ["src/shared/ui/core/markdown.module.scss"],
       "rules": {
         "declaration-property-unit-allowed-list": {
           "/^padding/": ["rem", "%", "em"],

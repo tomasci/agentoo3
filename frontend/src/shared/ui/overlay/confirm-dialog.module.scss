@@ -36,9 +36,3 @@
 }
 
 .actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
-
-.danger {
-  background: var(--color-danger);
-  border-color: var(--color-danger);
-  color: var(--color-text-on-accent);
-}

@@ -1,7 +1,7 @@
 import { Dialog, Portal } from '@ark-ui/react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Button } from './button'
+import { Button } from '../core/button'
 import styles from './confirm-dialog.module.scss'
 
 interface ConfirmDialogProps {
@@ -53,7 +53,7 @@ export function ConfirmDialog({
               </Dialog.CloseTrigger>
               <Button
                 type="button"
-                className={destructive ? styles.danger : undefined}
+                variant={destructive ? 'danger' : 'primary'}
                 disabled={busy}
                 onClick={onConfirm}
               >

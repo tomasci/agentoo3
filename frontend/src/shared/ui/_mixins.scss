@@ -1,0 +1,65 @@
+// The one focus ring. 14 copies with 3 different offsets existed before this.
+@mixin focus-ring {
+  &:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+}
+
+// For elements filling a clipping parent — menu items, select items, table
+// rows, segment items. A positive offset is painted outside the scroll box and
+// vanishes, which is the real reason three offsets existed.
+@mixin focus-ring-inset {
+  &:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: calc(var(--focus-ring-offset) * -1);
+  }
+}
+
+@mixin disabled {
+  &:disabled,
+  &[data-disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+// --color-danger, NOT --color-danger-border. The -border step is a pale banner
+// border (#EEC2BF light / #471E1A dark) that measures 1.6:1 and 1.26:1 against
+// a control surface — invisible. --color-danger measures 4.87:1 light and
+// 5.41:1 dark, clear of the 3:1 WCAG 1.4.11 floor for non-text UI.
+@mixin invalid {
+  &[data-invalid] {
+    border-color: var(--color-danger);
+
+    // A thickness channel, not decoration: doubles the apparent border without
+    // a 1px layout shift, so invalid is perceptible without relying on hue.
+    box-shadow: inset 0 0 0 1px var(--color-danger);
+  }
+
+  &[data-invalid]:focus-visible { outline-color: var(--color-danger); }
+}
+
+// The shared shape of every text-entry control and the select trigger. This is
+// what keeps separately-built inputs on identical metrics.
+@mixin control-surface {
+  appearance: none;
+  width: 100%;
+  min-height: var(--control-height-md);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+  transition: border-color var(--dur-fast) var(--ease-out);
+
+  &::placeholder { color: var(--color-text-muted); }
+  &:hover:not(:disabled, [data-disabled]) { border-color: var(--color-text-muted); }
+
+  @include focus-ring;
+  @include disabled;
+  @include invalid;
+}
