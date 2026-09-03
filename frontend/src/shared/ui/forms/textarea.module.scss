@@ -9,6 +9,19 @@
   min-height: auto;
   padding: var(--space-2) var(--space-3);
   line-height: var(--leading-base);
+
+  // `--textarea-max-rows` is set inline by the component itself (see
+  // textarea.tsx), only when `maxRows` is passed — never by a caller's
+  // `style` prop, which the contract still forbids. Left unset, `var()` with
+  // no fallback is invalid at computed-value time, so the whole declaration
+  // falls back to `max-height`'s initial value (`none`); the "applied only
+  // when set" behaviour comes from that spec rule, not a sentinel default.
+  // `--leading-base` is an absolute rem (design-tokens.md), so a plain
+  // unitless number times it is a valid length; the border and padding are
+  // added because the box is border-box.
+  max-height: calc(
+    (var(--textarea-max-rows) * var(--leading-base)) + (var(--space-2) * 2) + 2px
+  );
 }
 
 .mono { font-family: var(--font-mono); }

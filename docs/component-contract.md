@@ -258,6 +258,26 @@ viewport and it is not configurable. Do not fight it with `!important`;
   `animationDuration === "0s"`, so the global reduced-motion kill cannot strand
   an exit animation.
 
+## The escape hatch working as designed
+
+Four migrations hit a real gap in the library and worked around it instead of
+widening the API. All four workarounds have been deleted in favour of rule 3
+above — this is the record of what closed the gap, so the next person who hits
+a wall reaches for the same move rather than inventing a new workaround:
+
+- `Card` had no way to render the red "danger zone" border/surface a migration
+  needed — it added a `tone?: 'neutral' | 'danger'` prop instead of softening
+  the card.
+- `Textarea` had no height ceiling — it added `maxRows?: number`, computed in
+  SCSS from a component-owned custom property (still not `className`/`style`
+  from a caller).
+- `Select` had no `id` — it added one, landing on Ark's hidden native
+  `<select>` alongside `name`, replacing a ref-callback that stamped it on
+  after mount.
+- `Tone`/`Size`/`NoStyle` were not exported from the barrel, forcing one deep
+  import into `shared/ui/lib`. They are now re-exported through the existing
+  sub-barrel structure.
+
 ## Definition of done, per track
 
 ```

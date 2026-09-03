@@ -1,6 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { Badge, StatusDot } from '@/shared/ui'
-import type { Tone } from '@/shared/ui/lib/types'
+import { Badge, StatusDot, type Tone } from '@/shared/ui'
 import { isInFlight, type Project, type ProjectStatus } from '../hooks/use-projects'
 import styles from './project-status.module.scss'
 

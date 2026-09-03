@@ -28,6 +28,8 @@ interface SelectProps {
   onValueChange?: (value: string | null) => void
   placeholder?: string
   name?: string
+  /** Lands on the hidden `<select>`, alongside `name` — see its comment below. */
+  id?: string
   disabled?: boolean
   size?: Size
   /**
@@ -52,6 +54,7 @@ export function Select({
   onValueChange,
   placeholder,
   name,
+  id,
   disabled = false,
   size = 'md',
   ref,
@@ -77,8 +80,10 @@ export function Select({
         </ArkSelect.Trigger>
       </ArkSelect.Control>
       {/* Always rendered, not gated on `name`: `ref` needs a real element to
-          land on regardless of whether this select ever posts a native form. */}
-      <ArkSelect.HiddenSelect ref={ref} name={name} />
+          land on regardless of whether this select ever posts a native form.
+          `id` lands here too — this is the real, focusable/queryable
+          `HTMLSelectElement`, not the trigger button. */}
+      <ArkSelect.HiddenSelect ref={ref} name={name} id={id} />
       <Portal>
         <ArkSelect.Positioner className={styles.positioner}>
           <ArkSelect.Content className={styles.content}>

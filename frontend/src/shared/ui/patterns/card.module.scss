@@ -17,6 +17,16 @@
   background: transparent;
 }
 
+// Border and background only — `.toneDanger` composes with either variant
+// (source order after both, so it wins the shared `border-color`/`background`
+// properties) rather than duplicating the shadow or border style each carries.
+// `-border` here, not `-danger`: this is a tinted banner surface, not a form
+// control (component-contract.md's escape-hatch note on the two danger tokens).
+.toneDanger {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-bg);
+}
+
 .paddingNone { padding: var(--space-0); }
 .paddingSm { padding: var(--space-3); }
 .paddingMd { padding: var(--space-5); }

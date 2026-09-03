@@ -1,5 +1,4 @@
 import { useAtom } from 'jotai'
-import type { Ref } from 'react'
 import { useTranslation } from 'react-i18next'
 import { SUPPORTED_LANGUAGES } from '@/shared/i18n'
 import { themeAtom } from '@/shared/store/ui'
@@ -7,15 +6,6 @@ import { Card, Field, PageHeader, Select, type SelectOption, Stack } from '@/sha
 import styles from './settings-page.module.scss'
 
 const LANGUAGE_NAMES: Record<string, string> = { en: 'English', ru: 'Русский' }
-
-// `Select`'s public props stop at `name`/`ref` — no `id` (see forms/select.tsx).
-// The real, focusable/queryable element it renders is the hidden native
-// `<select>` the `ref` prop already exposes, so that's where these land.
-function idRef(id: string): Ref<HTMLSelectElement> {
-  return (el) => {
-    if (el) el.id = id
-  }
-}
 
 /**
  * Installation-wide preferences, and only those — a project tab has no business
@@ -47,7 +37,7 @@ export function SettingsPage() {
         <Stack gap={5}>
           <Field label={t('settings.language')} hint={t('settings.languageHint')}>
             <Select
-              ref={idRef('settings-language')}
+              id="settings-language"
               options={languageOptions}
               value={i18n.resolvedLanguage}
               onValueChange={(value) => value && void i18n.changeLanguage(value)}
@@ -58,7 +48,7 @@ export function SettingsPage() {
               says which state it is in, only which way it will flip. */}
           <Field label={t('settings.theme')} hint={t('settings.themeHint')}>
             <Select
-              ref={idRef('settings-theme')}
+              id="settings-theme"
               options={themeOptions}
               value={theme}
               onValueChange={(value) => setTheme(value === 'light' ? 'light' : 'dark')}

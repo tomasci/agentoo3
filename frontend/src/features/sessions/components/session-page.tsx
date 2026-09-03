@@ -157,6 +157,7 @@ export function SessionPage({ projectId, sessionId }: { projectId: string; sessi
           <Textarea
             value={text}
             rows={3}
+            maxRows={11}
             onChange={(e) => setText(e.target.value)}
             placeholder={t('sessions.composerPlaceholder')}
             onKeyDown={(e) => {

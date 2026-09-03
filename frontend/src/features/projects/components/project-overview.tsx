@@ -157,7 +157,7 @@ export function ProjectOverview({
         </Stack>
       </Card>
 
-      <Card>
+      <Card tone="danger">
         <Stack gap={2}>
           <h3 className={styles.dangerTitle}>{t('projects.overview.danger')}</h3>
           <p className={styles.hint}>
