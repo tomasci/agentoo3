@@ -43,7 +43,7 @@ beforeAll(async () => {
   repo = join(dir, 'repo')
   worktree = join(dir, 'wt')
 
-  await git(['init', '-q', '--bare', origin])
+  await git(['init', '-q', '--bare', origin], dir)
   // A real remote advertises the branch its HEAD names. `git init --bare`
   // defaults to master, so without this the clone lands on an unborn branch and
   // every assertion below fails for reasons that have nothing to do with ssh.
@@ -56,7 +56,7 @@ beforeAll(async () => {
   await git(['remote', 'add', 'origin', origin], seed)
   await git(['push', '-q', 'origin', 'main'], seed)
 
-  await git(['clone', '-q', origin, repo])
+  await git(['clone', '-q', origin, repo], dir)
 })
 
 afterAll(async () => {

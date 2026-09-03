@@ -10,6 +10,30 @@ export interface GitResult {
 }
 
 /**
+ * Environment variables that tell git which repository to act on, overriding
+ * `cwd` entirely.
+ *
+ * These must never be inherited. Git exports them to hook processes, so a
+ * command run from a hook — `bun test` in pre-push, say — inherits an absolute
+ * GIT_DIR pointing at the repository being pushed. Every `git()` call below then
+ * targets that repository no matter what `cwd` it was handed, because GIT_DIR
+ * wins over cwd. That is not hypothetical: it re-inited this project's own
+ * checkout, committed a test fixture over `main`, and registered a /tmp worktree
+ * in it, twice. Stripping them makes `cwd` the only thing that selects a repo.
+ */
+const REPO_LOCATION_VARS = [
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_COMMON_DIR',
+  'GIT_INDEX_FILE',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_NAMESPACE',
+  'GIT_PREFIX',
+  'GIT_CEILING_DIRECTORIES',
+] as const
+
+/**
  * Run git without ever prompting.
  *
  * A clone of a private repo must fail fast rather than block a worker forever
@@ -22,10 +46,13 @@ export async function git(
   cwd?: string,
   options: { sshCommand?: string } = {},
 ): Promise<GitResult> {
+  const inherited = { ...process.env }
+  for (const key of REPO_LOCATION_VARS) delete inherited[key]
+
   const proc = Bun.spawn(['git', ...args], {
     cwd,
     env: {
-      ...process.env,
+      ...inherited,
       GIT_TERMINAL_PROMPT: '0',
       GIT_ASKPASS: '',
       SSH_ASKPASS: '',
