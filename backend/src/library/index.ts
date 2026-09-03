@@ -49,9 +49,16 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-/** Every agent in the library. A malformed file is reported and skipped, not fatal. */
-export async function listAgents(): Promise<LibraryAgent[]> {
-  const dir = AGENTS_DIR()
+/**
+ * Every agent in a directory of agent markdown. A malformed file is reported and
+ * skipped, not fatal.
+ *
+ * Defaults to the library, but takes a directory because a project's plugin
+ * folder holds the same file format and is the only honest answer to "which
+ * agents does this session actually have" — it is the copy the SDK loads, so
+ * reading it cannot disagree with what runs.
+ */
+export async function listAgents(dir: string = AGENTS_DIR()): Promise<LibraryAgent[]> {
   if (!(await exists(dir))) return []
 
   const entries = await readdir(dir, { withFileTypes: true })
