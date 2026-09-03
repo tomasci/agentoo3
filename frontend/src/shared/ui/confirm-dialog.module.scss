@@ -1,11 +1,9 @@
-@use '@/styles/variables' as v;
-
 .backdrop {
   position: fixed;
   inset: 0;
-  background: rgb(0 0 0 / 0.5);
+  background: var(--color-scrim);
   backdrop-filter: blur(2px);
-  z-index: 40;
+  z-index: var(--z-overlay);
 }
 
 .positioner {
@@ -14,33 +12,33 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: v.$space-lg;
-  z-index: 41;
+  padding: var(--space-5);
+  z-index: var(--z-modal);
 }
 
 .content {
   width: min(28rem, 100%);
-  padding: v.$space-lg;
-  border: 1px solid var(--border);
-  border-radius: v.$radius;
-  background: var(--surface);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.28);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface-overlay);
+  box-shadow: var(--shadow-lg);
 }
 
-.title { margin: 0 0 v.$space-sm; font-size: 1rem; font-weight: 600; }
+.title { margin: 0 0 var(--space-2); font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-semibold); }
 
 .description {
-  margin: 0 0 v.$space-lg;
-  font-size: 0.875rem;
-  color: var(--muted-fg);
-  line-height: 1.6;
+  margin: 0 0 var(--space-5);
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-base);
   overflow-wrap: anywhere;
 }
 
-.actions { display: flex; gap: v.$space-sm; justify-content: flex-end; }
+.actions { display: flex; gap: var(--space-2); justify-content: flex-end; }
 
 .danger {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: #fff;
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: var(--color-text-on-accent);
 }

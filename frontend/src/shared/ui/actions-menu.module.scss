@@ -1,29 +1,31 @@
-@use '@/styles/variables' as v;
-
 .trigger {
   appearance: none;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--muted-fg);
-  border-radius: v.$radius-sm;
-  padding: 0.15rem 0.4rem;
-  font-size: 1rem;
-  line-height: 1.2;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-sm);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
   cursor: pointer;
 
-  &:hover { background: var(--bg); color: var(--fg); border-color: var(--border); }
-  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  &:hover { background: var(--color-bg-app); color: var(--color-text-primary); border-color: var(--color-border); }
+
+  &:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
 }
 
-.positioner { z-index: 30; }
+.positioner { z-index: var(--z-dropdown); }
 
 .content {
   min-width: 10rem;
-  padding: 0.25rem;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--surface);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 0.24);
+  padding: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-overlay);
+  box-shadow: var(--shadow-md);
 
   &:focus-visible { outline: none; }
 }
@@ -31,15 +33,16 @@
 .item {
   display: block;
   width: 100%;
-  padding: 0.4rem 0.6rem;
-  border-radius: calc(v.$radius-sm - 2px);
-  font-size: 0.8125rem;
-  color: var(--fg);
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-text-primary);
   cursor: pointer;
   user-select: none;
 
-  &[data-highlighted] { background: var(--bg); }
+  &[data-highlighted] { background: var(--color-bg-app); }
   &[data-disabled] { opacity: 0.5; cursor: not-allowed; }
 }
 
-.destructive { color: var(--danger); }
+.destructive { color: var(--color-danger); }

@@ -1,54 +1,59 @@
-@use '@/styles/variables' as v;
+@use '@/styles/breakpoints' as bp;
 
 .page {
   display: grid;
-  gap: v.$space-lg;
+  gap: var(--space-5);
   // The picker owns the whole width of an empty tab, so it centres on a
   // readable measure rather than stretching across an ultrawide monitor.
   max-width: 52rem;
   margin: 0 auto;
 }
 
-.intro { display: grid; gap: 0.25rem; }
+.intro { display: grid; gap: var(--space-1); }
 
 .title {
   margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
+  font-size: var(--text-lg);
+  line-height: var(--leading-lg);
+  font-weight: var(--weight-semibold);
 }
 
 .lead {
   margin: 0;
-  color: var(--muted-fg);
-  font-size: 0.875rem;
+  color: var(--color-text-secondary);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
 }
 
 .sectionTitle {
-  margin: 0 0 v.$space-md;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
-  color: var(--muted-fg);
+  color: var(--color-text-muted);
 }
 
 .empty {
-  padding: v.$space-xl v.$space-lg;
+  padding: var(--space-8) var(--space-5);
   text-align: center;
-  color: var(--muted-fg);
-  border: 1px solid var(--border);
-  border-radius: v.$radius;
-  font-size: 0.9375rem;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
 }
 
 .problem {
-  padding: v.$space-md;
-  border: 1px solid var(--warn);
-  border-radius: v.$radius-sm;
-  color: var(--warn);
-  font-size: 0.875rem;
+  padding: var(--space-3);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  color: var(--color-warning);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
 }
 
-@media (max-width: 40rem) {
+@include bp.below(sm) {
   .page { max-width: none; }
 }

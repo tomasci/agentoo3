@@ -1,4 +1,4 @@
-@use '@/styles/variables' as v;
+@use '@/styles/breakpoints' as bp;
 
 // Four fixed regions and one scrolling one, the way an IDE is laid out:
 //
@@ -14,7 +14,7 @@
 // status bar stay put without `position: fixed` and the overlap bugs that brings.
 .shell {
   display: grid;
-  grid-template-columns: v.$sidebar-width 1fr;
+  grid-template-columns: var(--layout-sidebar-width) 1fr;
   grid-template-rows: auto 1fr auto;
   grid-template-areas:
     'tabs    tabs'
@@ -38,10 +38,10 @@
   grid-area: sidebar;
   display: flex;
   flex-direction: column;
-  gap: v.$space-lg;
-  padding: v.$space-lg v.$space-md;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
+  gap: var(--space-5);
+  padding: var(--space-5) var(--space-3);
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface);
   overflow-y: auto;
 }
 
@@ -49,67 +49,80 @@
   display: block;
   color: inherit;
   text-decoration: none;
-  padding: 0 v.$space-sm;
+  padding: 0 var(--space-2);
 
-  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  &:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+    border-radius: var(--radius-sm);
+  }
 }
 
 .logo {
   margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-size: var(--text-lg);
+  line-height: var(--leading-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-lg);
   overflow-wrap: anywhere;
 }
 
 .tagline {
-  margin: 0.15rem 0 0;
-  font-size: 0.75rem;
-  color: var(--muted-fg);
-  line-height: 1.4;
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-xs);
   overflow-wrap: anywhere;
 }
 
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: var(--space-1);
 }
 
 .sidebarSection {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: var(--space-2);
 }
 
 .sectionLabel {
-  padding: 0 v.$space-sm;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  padding: 0 var(--space-2);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
-  color: var(--muted-fg);
+  color: var(--color-text-muted);
 }
 
 
 
 .navItem {
   display: block;
-  padding: 0.45rem v.$space-sm;
-  border-radius: v.$radius-sm;
-  color: var(--muted-fg);
+  padding: var(--space-2) var(--space-2);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
   text-decoration: none;
-  font-size: 0.875rem;
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
   border-left: 2px solid transparent;
 
-  &:hover { color: var(--fg); background: var(--bg); }
-  &:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  &:hover { color: var(--color-text-primary); background: var(--color-surface-raised); }
 
+  &:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: -2px;
+  }
+
+  // Reads as accented rather than merely hovered, to distinguish "current page"
+  // from ":hover" at a glance.
   &[aria-current='page'] {
-    color: var(--fg);
-    background: var(--bg);
-    border-left-color: var(--accent);
-    font-weight: 500;
+    color: var(--color-text-primary);
+    background: var(--color-accent-subtle-bg);
+    border-left-color: var(--color-accent);
+    font-weight: var(--weight-medium);
   }
 }
 
@@ -118,25 +131,26 @@
 .body {
   grid-area: body;
   overflow-y: auto;
-  padding: v.$space-xl v.$space-lg;
+  padding: var(--space-8) var(--space-5);
 }
 
 .status {
   grid-area: status;
   display: flex;
   align-items: center;
-  gap: v.$space-md;
-  padding: 0.3rem v.$space-md;
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-  font-size: 0.75rem;
-  color: var(--muted-fg);
-  min-height: 1.75rem;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-text-secondary);
+  min-height: var(--layout-statusbar-height);
   overflow-x: auto;
   white-space: nowrap;
 }
 
-.statusItem { display: inline-flex; align-items: center; gap: 0.35rem; }
+.statusItem { display: inline-flex; align-items: center; gap: var(--space-2); }
 .statusSpacer { margin-left: auto; }
 
 .dot {
@@ -145,20 +159,20 @@
   border-radius: 50%;
   flex: none;
 
-  &.ok { background: var(--ok); }
-  &.warn { background: var(--warn); }
-  &.down { background: var(--muted); }
+  &.ok { background: var(--color-success); }
+  &.warn { background: var(--color-warning); }
+  &.down { background: var(--color-text-disabled); }
 }
 
 .statusLink {
-  color: var(--accent);
+  color: var(--color-accent);
   text-decoration: none;
   &:hover { text-decoration: underline; }
 }
 
 // Narrow screens: the sidebar becomes a strip across the top rather than eating
 // half the width.
-@media (max-width: 40rem) {
+@include bp.below(sm) {
   .shell {
     grid-template-columns: 1fr;
     grid-template-areas:
@@ -180,28 +194,28 @@
   .sidebar {
     flex-direction: row;
     align-items: center;
-    gap: v.$space-md;
+    gap: var(--space-3);
     border-right: 0;
-    border-bottom: 1px solid var(--border);
-    padding: v.$space-sm v.$space-md;
+    border-bottom: 1px solid var(--color-border);
+    padding: var(--space-2) var(--space-3);
     overflow-x: auto;
   }
 
   .tagline { display: none; }
   .nav { flex-direction: row; }
-  .sidebarSection { flex-direction: row; align-items: center; gap: v.$space-sm; }
+  .sidebarSection { flex-direction: row; align-items: center; gap: var(--space-2); }
   .sectionLabel { display: none; }
   .navItem { border-left: 0; border-bottom: 2px solid transparent; }
-  .navItem[aria-current='page'] { border-left: 0; border-bottom-color: var(--accent); }
-  .body { padding: v.$space-lg v.$space-md; }
+  .navItem[aria-current='page'] { border-left: 0; border-bottom-color: var(--color-accent); }
+  .body { padding: var(--space-5) var(--space-3); }
 }
 
 // Host load in the status bar. Tabular figures so a changing percentage does
 // not make the row jitter as digits change width.
 .metric {
   font-variant-numeric: tabular-nums;
-  color: var(--muted-fg);
+  color: var(--color-text-muted);
   white-space: nowrap;
 }
 
-.metricHigh { color: var(--danger, #c0392b); }
+.metricHigh { color: var(--color-danger); }

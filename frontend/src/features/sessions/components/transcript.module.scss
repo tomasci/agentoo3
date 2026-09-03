@@ -1,13 +1,11 @@
-@use '@/styles/variables' as v;
-
-.transcript { display: grid; gap: v.$space-sm; align-content: start; }
+.transcript { display: grid; gap: var(--space-2); align-content: start; }
 
 .empty {
-  padding: v.$space-xl;
+  padding: var(--space-8);
   text-align: center;
-  color: var(--muted-fg);
-  border: 1px dashed var(--border);
-  border-radius: v.$radius;
+  color: var(--color-text-secondary);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
 }
 
 // --- the human's own messages -------------------------------------------------
@@ -15,10 +13,10 @@
 .prompt {
   justify-self: end;
   max-width: min(46rem, 100%);
-  padding: v.$space-md v.$space-lg;
-  border-radius: v.$radius;
-  background: var(--accent-soft, var(--surface));
-  border: 1px solid var(--border);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--color-accent-subtle-bg);
+  border: 1px solid var(--color-border);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -30,44 +28,51 @@
 
 .promptLabel {
   display: block;
-  font-size: 0.6875rem;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted-fg);
-  margin-bottom: 0.25rem;
+  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-1);
 }
 
 // --- collapsible activity rows ------------------------------------------------
 
 .row {
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-app);
   overflow: hidden;
 }
 
 .summary {
   display: flex;
   align-items: center;
-  gap: v.$space-sm;
+  gap: var(--space-2);
   width: 100%;
-  padding: 0.5rem v.$space-md;
+  padding: var(--space-2) var(--space-3);
   background: none;
   border: 0;
   font: inherit;
-  font-size: 0.8125rem;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
   text-align: left;
-  color: var(--fg);
+  color: var(--color-text-primary);
   cursor: pointer;
 }
 
-.summary:hover { background: var(--surface); }
+.summary:hover { background: var(--color-surface); }
+
+.summary:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
 
 .chevron {
   flex: none;
-  width: 0.75rem;
-  color: var(--muted-fg);
-  transition: transform 120ms ease;
+  width: var(--space-3);
+  color: var(--color-text-secondary);
+  transition: transform var(--dur-fast) var(--ease-out);
 }
 
 .chevronOpen { transform: rotate(90deg); }
@@ -86,86 +91,90 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.75rem;
-  color: var(--muted-fg);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-text-secondary);
 }
 
 .body {
-  padding: v.$space-md;
-  border-top: 1px solid var(--border);
+  padding: var(--space-3);
+  border-top: 1px solid var(--color-border);
   display: grid;
-  gap: v.$space-md;
+  gap: var(--space-3);
 }
 
-.text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
+.text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: var(--leading-code); }
 
 // --- delegated tasks ----------------------------------------------------------
 
-.task { border-color: var(--accent); }
+.task { border-color: var(--color-accent); }
 
 .agent {
   flex: none;
-  font-size: 0.6875rem;
-  font-weight: 600;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  font-weight: var(--weight-semibold);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: 0.1rem 0.4rem;
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--muted-fg);
-  border: 1px solid var(--border);
+  letter-spacing: var(--tracking-caps);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
 }
 
-.agentRunning { border-color: var(--accent); color: var(--accent); }
-.agentFailed { border-color: var(--danger, #c0392b); color: var(--danger, #c0392b); }
+.agentRunning { border-color: var(--color-accent); color: var(--color-accent); }
+.agentFailed { border-color: var(--color-danger); color: var(--color-danger); }
 
 .children {
   display: grid;
-  gap: v.$space-sm;
-  padding-left: v.$space-md;
-  border-left: 2px solid var(--border);
-  margin-left: v.$space-sm;
+  gap: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--color-border);
+  margin-left: var(--space-2);
 }
 
 // The prompt the orchestrator wrote for a subagent. Called out, because seeing
 // it is the whole reason the tree is nested.
 .delegation {
-  padding: v.$space-md;
-  border-radius: v.$radius-sm;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
 }
 
 .delegationLabel {
   display: block;
-  font-size: 0.6875rem;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted-fg);
-  margin-bottom: 0.35rem;
+  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-2);
 }
 
 
 
 // --- tool calls ---------------------------------------------------------------
 
-.tool { display: grid; gap: 0.35rem; }
+.tool { display: grid; gap: var(--space-2); }
 
 .toolName {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8125rem;
-  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-accent);
 }
 
 .code {
   margin: 0;
-  padding: v.$space-sm;
-  border-radius: v.$radius-sm;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.75rem;
-  line-height: 1.5;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-code);
   overflow-x: auto;
   max-height: 20rem;
   white-space: pre-wrap;
@@ -174,46 +183,49 @@
 
 // Tool arguments as a labelled list. A JSON dump buries the one line that
 // matters — the command, the file path — in punctuation and escaping.
-.args { margin: 0; display: grid; gap: v.$space-sm; }
-.arg { display: grid; gap: 0.2rem; }
+.args { margin: 0; display: grid; gap: var(--space-2); }
+.arg { display: grid; gap: var(--space-1); }
 
 .argKey {
-  font-size: 0.6875rem;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted-fg);
+  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-muted);
 }
 
 .argValue { margin: 0; min-width: 0; }
 
 .thinking {
-  padding-left: v.$space-md;
-  border-left: 2px solid var(--border);
-  color: var(--muted-fg);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--color-border);
+  color: var(--color-text-secondary);
   font-style: italic;
 }
 
 .thinkingLabel {
   display: block;
   font-style: normal;
-  font-size: 0.6875rem;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 0.35rem;
+  letter-spacing: var(--tracking-caps);
+  margin-bottom: var(--space-2);
 }
 
 .errorText {
   margin: 0;
-  color: var(--danger, #c0392b);
-  font-size: 0.8125rem;
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
   overflow-wrap: anywhere;
 }
 
 // The reply that closes a turn. Full size and always open: everything above it
 // is working, this is the result of it.
 .answer {
-  padding: v.$space-md v.$space-lg;
-  border: 1px solid var(--border);
-  border-radius: v.$radius;
-  background: var(--bg);
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-app);
 }

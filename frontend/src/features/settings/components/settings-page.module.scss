@@ -1,28 +1,30 @@
-@use '@/styles/variables' as v;
+@use '@/styles/breakpoints' as bp;
 
 .page {
   display: grid;
-  gap: v.$space-lg;
-  max-width: v.$content-width;
+  gap: var(--space-5);
+  max-width: var(--layout-content-width);
 }
 
 .title {
   margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
+  font-size: var(--text-lg);
+  line-height: var(--leading-lg);
+  font-weight: var(--weight-semibold);
 }
 
 .lead {
-  margin: 0.25rem 0 0;
-  color: var(--muted-fg);
-  font-size: 0.875rem;
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
 }
 
 .card {
   display: grid;
-  border: 1px solid var(--border);
-  border-radius: v.$radius;
-  background: var(--surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
 }
 
 // A row per setting: label and explanation on the left, control on the right,
@@ -31,37 +33,46 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: v.$space-lg;
-  padding: v.$space-md v.$space-lg;
+  gap: var(--space-5);
+  padding: var(--space-3) var(--space-5);
 
-  & + & { border-top: 1px solid var(--border); }
+  & + & { border-top: 1px solid var(--color-border); }
 }
 
 .label {
   display: grid;
-  gap: 0.15rem;
-  font-size: 0.9375rem;
+  gap: var(--space-1);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
 }
 
 .hint {
-  color: var(--muted-fg);
-  font-size: 0.75rem;
-  line-height: 1.45;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
 }
 
 .control {
   flex: none;
   min-width: 9rem;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--bg);
-  color: var(--fg);
+  padding: var(--space-2) var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-app);
+  color: var(--color-text-primary);
   font: inherit;
-  font-size: 0.8125rem;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+
+  &:hover { background: var(--color-surface-hover); }
+
+  &:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
 }
 
-@media (max-width: 40rem) {
-  .setting { flex-direction: column; align-items: stretch; gap: v.$space-sm; }
+@include bp.below(sm) {
+  .setting { flex-direction: column; align-items: stretch; gap: var(--space-2); }
   .control { width: 100%; }
 }

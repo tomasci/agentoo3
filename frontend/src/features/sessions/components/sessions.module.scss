@@ -1,6 +1,4 @@
-@use '@/styles/variables' as v;
-
-.page { display: grid; gap: v.$space-lg; }
+.page { display: grid; gap: var(--space-5); }
 
 .back {
   appearance: none;
@@ -8,8 +6,9 @@
   background: none;
   padding: 0;
   font: inherit;
-  font-size: 0.8125rem;
-  color: var(--accent);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-accent);
   cursor: pointer;
   justify-self: start;
 }
@@ -18,108 +17,114 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: v.$space-md;
-  padding: v.$space-lg;
-  border: 1px solid var(--border);
-  border-radius: v.$radius;
-  background: var(--surface);
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
 }
 
-.projectName { margin: 0; font-size: 1.25rem; font-weight: 600; }
+.projectName { margin: 0; font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: var(--weight-semibold); }
 
 .meta {
-  margin: v.$space-sm 0 0;
+  margin: var(--space-2) 0 0;
   display: grid;
-  gap: 0.2rem;
-  font-size: 0.75rem;
-  color: var(--muted-fg);
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-text-secondary);
 }
 
 .metaRow {
   display: flex;
-  gap: 0.4rem;
+  gap: var(--space-2);
   dt { flex: none; min-width: 4.5rem; }
-  dd { margin: 0; overflow-wrap: anywhere; font-family: ui-monospace, Menlo, monospace; }
+  dd { margin: 0; overflow-wrap: anywhere; font-family: var(--font-mono); }
 }
 
 .formCard {
-  padding: v.$space-lg;
-  border: 1px dashed var(--border);
-  border-radius: v.$radius;
+  padding: var(--space-5);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-lg);
 }
 
-.heading { margin: 0 0 v.$space-md; font-size: 1rem; font-weight: 600; }
-.form { display: grid; gap: v.$space-md; max-width: 34rem; }
-.label { font-size: 0.8125rem; color: var(--muted-fg); }
+.heading { margin: 0 0 var(--space-3); font-size: var(--text-md); line-height: var(--leading-md); font-weight: var(--weight-semibold); }
+.form { display: grid; gap: var(--space-3); max-width: 34rem; }
+.label { font-size: var(--text-sm); line-height: var(--leading-sm); color: var(--color-text-secondary); }
 
 .input {
   width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--bg);
-  color: var(--fg);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-app);
+  color: var(--color-text-primary);
   font: inherit;
 
-  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  &:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
 }
 
-.hint { font-size: 0.75rem; color: var(--muted-fg); line-height: 1.55; }
-.error { color: var(--warn); font-size: 0.8125rem; }
-.row { display: flex; gap: v.$space-sm; align-items: center; flex-wrap: wrap; }
+.hint { font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--color-text-muted); }
+.error { color: var(--color-danger-text); font-size: var(--text-sm); line-height: var(--leading-sm); }
+.row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 
 .list {
   display: grid;
-  gap: v.$space-md;
+  gap: var(--space-3);
   grid-template-columns: repeat(auto-fill, minmax(26rem, 1fr));
 }
 
 .session {
-  padding: v.$space-lg;
-  border: 1px solid var(--border);
-  border-radius: v.$radius;
-  background: var(--surface);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
 }
 
 .sessionHead {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: v.$space-md;
+  gap: var(--space-3);
 }
 
-.sessionTitle { margin: 0; font-size: 0.9375rem; font-weight: 600; }
+.sessionTitle { margin: 0; font-size: var(--text-base); line-height: var(--leading-base); font-weight: var(--weight-semibold); }
 
-.badges { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+.badges { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
 
 .badge {
-  font-size: 0.6875rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.1rem 0.5rem;
-  color: var(--muted-fg);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  padding: var(--space-1) var(--space-2);
+  color: var(--color-text-secondary);
   white-space: nowrap;
 }
 
-.shared { border-color: var(--warn); color: var(--warn); }
+.shared { border-color: var(--color-warning); color: var(--color-warning); }
 
 .empty {
-  padding: v.$space-xl v.$space-lg;
+  padding: var(--space-8) var(--space-5);
   text-align: center;
-  color: var(--muted-fg);
-  border: 1px solid var(--border);
-  border-radius: v.$radius;
-  font-size: 0.9375rem;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
 }
 
 .notice {
-  padding: v.$space-md;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--bg);
-  font-size: 0.8125rem;
-  color: var(--muted-fg);
-  line-height: 1.6;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-app);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-text-secondary);
 }
 
 .sessionLink {
@@ -127,4 +132,9 @@
   text-decoration: none;
 }
 
-.sessionLink:hover { color: var(--accent); text-decoration: underline; }
+.sessionLink:hover { color: var(--color-accent); text-decoration: underline; }
+
+.sessionLink:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
