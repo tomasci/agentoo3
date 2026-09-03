@@ -33,9 +33,27 @@ async function memory(): Promise<SystemStats['memory']> {
   }
 }
 
-interface CpuSample {
+export interface CpuSample {
   idle: number
   total: number
+}
+
+/**
+ * Busy percentage between two /proc/stat reads.
+ *
+ * Exported so the interval behaviour can be asserted against fixed numbers.
+ * Testing it through `systemStats()` meant comparing two live samples and
+ * requiring them to differ, which is unsatisfiable on a saturated machine:
+ * both intervals are legitimately 100% and no comparison can then tell a delta
+ * from an average. That assertion failed two pushes out of three, because
+ * pre-push runs four jobs at once and pegs the CPU it is measuring.
+ */
+export function cpuUsageBetween(last: CpuSample, sample: CpuSample): number {
+  const totalDelta = sample.total - last.total
+  const idleDelta = sample.idle - last.idle
+  // Counters can appear to go backwards across a suspend or a container move.
+  if (totalDelta <= 0) return 0
+  return clamp(round(((totalDelta - idleDelta) / totalDelta) * 100))
 }
 
 /** The aggregate `cpu` line of /proc/stat: cumulative jiffies per state. */
@@ -70,13 +88,7 @@ async function cpu(): Promise<SystemStats['cpu']> {
     return { usagePercent: Math.min(100, round((load1 / Math.max(cores, 1)) * 100)), cores, load1 }
   }
 
-  const totalDelta = sample.total - last.total
-  const idleDelta = sample.idle - last.idle
-  // Counters can appear to go backwards across a suspend or a container move.
-  if (totalDelta <= 0) return { usagePercent: 0, cores, load1 }
-
-  const busy = ((totalDelta - idleDelta) / totalDelta) * 100
-  return { usagePercent: clamp(round(busy)), cores, load1 }
+  return { usagePercent: cpuUsageBetween(last, sample), cores, load1 }
 }
 
 /**
