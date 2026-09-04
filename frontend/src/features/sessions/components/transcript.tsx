@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Alert,
@@ -274,9 +274,12 @@ function Node({ node }: { node: TranscriptNode }) {
   )
 }
 
-export function Transcript({ messages }: { messages: SessionMessage[] }) {
+function TranscriptView({ messages }: { messages: SessionMessage[] }) {
   const { t } = useTranslation()
-  const nodes = buildTranscript(messages)
+  // Keyed on the array identity, which React Query keeps stable between
+  // fetches: rebuilding the tree is O(every message in the session), and it was
+  // running on every render rather than only when a message arrived.
+  const nodes = useMemo(() => buildTranscript(messages), [messages])
 
   if (nodes.length === 0) {
     // padding="none": EmptyState's own size variant already supplies it, and
@@ -296,3 +299,12 @@ export function Transcript({ messages }: { messages: SessionMessage[] }) {
     </div>
   )
 }
+
+/**
+ * Memoised because the composer's `text` state lives in the same component that
+ * renders this one, so every keystroke re-rendered the whole transcript — an
+ * entire tree rebuild plus every row, synchronously, per character. The
+ * controlled textarea could not keep up and silently dropped the keystrokes
+ * typed during the render, progressively worse the longer the session got.
+ */
+export const Transcript = memo(TranscriptView)

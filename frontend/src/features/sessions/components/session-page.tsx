@@ -14,6 +14,7 @@ import {
 } from '@/shared/ui'
 import { useSessionStream } from '../hooks/use-session-stream'
 import {
+  type SessionMessage,
   useInterruptSession,
   useSendMessage,
   useSession,
@@ -35,6 +36,13 @@ const STATUS_TONE = {
   failed: 'danger',
 } as const
 
+// A shared empty array rather than a fresh `[]` per render: `Transcript` is
+// memoised on this identity, and a new one each time would defeat it for the
+// whole of the first load.
+const NO_MESSAGES: SessionMessage[] = []
+
+// `projectId` stays in the prop type — the route still supplies it — but is no
+// longer destructured: the only thing that read it was the back-to-list button.
 export function SessionPage({ sessionId }: { projectId: string; sessionId: string }) {
   const { t } = useTranslation()
   const session = useSession(sessionId)
@@ -48,7 +56,7 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   const scroller = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
 
-  const list = messages.data ?? []
+  const list = messages.data ?? NO_MESSAGES
   const busy = BUSY.includes(session.data?.status ?? '')
 
   // Follow the transcript only while the reader is already at the bottom, so
@@ -71,14 +79,23 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
     const value = text.trim()
     if (!value) return
     setError(null)
+    // Cleared now, not in `onSuccess`. Enter sends and people carry straight on
+    // typing the next prompt, but the clear used to wait for the round-trip to
+    // come back — so the box still held the sent text, the next few keystrokes
+    // appended to it, and the late `setText('')` then wiped them. Consistently
+    // the first two or three characters of every message after the first.
+    setText('')
+    pinned.current = true
     send.mutate(
       { path: { id: sessionId }, body: { text: value } },
       {
-        onSuccess: () => {
-          setText('')
-          pinned.current = true
+        onError: (e) => {
+          // Hand the text back rather than losing it, but only into a box still
+          // empty: by now the next prompt may already be part-typed, and
+          // restoring over that would repeat the bug this replaced.
+          setText((current) => (current === '' ? value : current))
+          setError(apiErrorMessage(e, t('sessions.sendFailed')))
         },
-        onError: (e) => setError(apiErrorMessage(e, t('sessions.sendFailed'))),
       },
     )
   }
