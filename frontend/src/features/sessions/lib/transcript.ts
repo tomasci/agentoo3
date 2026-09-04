@@ -12,10 +12,10 @@ import type { SessionMessage } from '../hooks/use-sessions'
  */
 
 export type TranscriptNode =
-  | { kind: 'prompt'; id: string; seq: number; text: string }
-  | { kind: 'event'; id: string; seq: number; message: SessionMessage }
+  | { kind: 'prompt'; id: string; seq: number; text: string; createdAt: string }
+  | { kind: 'event'; id: string; seq: number; message: SessionMessage; createdAt: string }
   /** The reply that closes a turn: shown open, at full size, as markdown. */
-  | { kind: 'answer'; id: string; seq: number; text: string }
+  | { kind: 'answer'; id: string; seq: number; text: string; createdAt: string }
   | {
       kind: 'task'
       id: string
@@ -29,6 +29,7 @@ export type TranscriptNode =
       /** Latest progress ping, shown while the task is still running. */
       progress: string | null
       children: TranscriptNode[]
+      createdAt: string
     }
 
 type TaskNode = Extract<TranscriptNode, { kind: 'task' }>
@@ -67,6 +68,7 @@ export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
         id: message.id,
         seq: message.seq,
         text: str(payload, 'text') ?? '',
+        createdAt: message.createdAt,
       })
       continue
     }
@@ -91,6 +93,7 @@ export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
         status: 'running',
         progress: null,
         children: [],
+        createdAt: message.createdAt,
       }
       listFor(parent).push(group)
       if (toolUseId) groups.set(toolUseId, group)
@@ -124,7 +127,13 @@ export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
     // init handshake, tool results already shown under their call.
     if (!message.title) continue
 
-    listFor(parent).push({ kind: 'event', id: message.id, seq: message.seq, message })
+    listFor(parent).push({
+      kind: 'event',
+      id: message.id,
+      seq: message.seq,
+      message,
+      createdAt: message.createdAt,
+    })
   }
 
   markAnswers(roots)
@@ -155,7 +164,13 @@ function markAnswers(roots: TranscriptNode[]): void {
         if (answer?.kind === 'event') {
           const text = textOf(answer.message)
           if (text) {
-            roots[candidate] = { kind: 'answer', id: answer.id, seq: answer.seq, text }
+            roots[candidate] = {
+              kind: 'answer',
+              id: answer.id,
+              seq: answer.seq,
+              text,
+              createdAt: answer.createdAt,
+            }
           }
         }
         candidate = -1

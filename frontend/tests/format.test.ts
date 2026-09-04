@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test'
+import { formatFullTime, formatTime } from '../src/features/sessions/lib/format'
 import { formatBytes } from '../src/features/system/lib/format'
 
 test('bytes are scaled to the shortest readable unit', () => {
@@ -25,4 +26,20 @@ test('nonsense input does not render as NaN in the status bar', () => {
 
 test('very large values stay in a real unit', () => {
   expect(formatBytes(1024 ** 6)).toContain('PB')
+})
+
+test('a message time is formatted as 24-hour HH:MM, not relative', () => {
+  const time = formatTime('2026-09-04T14:32:00Z')
+  // Two digits either side of a separator — never "2:32 PM" or "2m ago".
+  expect(time).toMatch(/^\d{2}\D\d{2}$/)
+})
+
+test('a message time never renders as "Invalid Date"', () => {
+  // The transcript fixtures build messages with createdAt: '' — a naive
+  // `new Date('').toString()` would put the literal string on screen.
+  expect(formatTime('')).toBeNull()
+  expect(formatTime('not a date')).toBeNull()
+  expect(formatTime('NaN')).toBeNull()
+  expect(formatFullTime('')).toBeNull()
+  expect(formatFullTime('not a date')).toBeNull()
 })
