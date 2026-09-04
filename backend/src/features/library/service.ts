@@ -204,11 +204,26 @@ export async function syncProjectPlugin(slug: string, projectId: string): Promis
     .from(projectLibraryItems)
     .where(eq(projectLibraryItems.projectId, projectId))
 
+  // Orchestrators are never materialised, however they were assigned. The SDK
+  // offers every agent in the plugin directory as a delegation target, so
+  // copying the lead's own file put `agentoo:orchestrator` in the session's
+  // agent list — a copy of itself to hand work to, with only the spawn-depth
+  // cap between that and a loop. An orchestrator reaches its session as
+  // `systemPrompt`, composed from the library copy in `optionsFor`, so it needs
+  // nothing here in order to run.
+  const orchestratorNames = new Set(
+    (await listAgents()).filter((a) => a.role === 'orchestrator').map((a) => a.name),
+  )
+
   for (const kind of ['agent', 'skill'] as const) {
     const dir = join(projectPlugin(slug), kind === 'agent' ? 'agents' : 'skills')
     await ensureDir(dir)
 
-    const wanted = new Set(rows.filter((r) => r.kind === kind).map((r) => r.name))
+    const wanted = new Set(
+      rows
+        .filter((r) => r.kind === kind && !(kind === 'agent' && orchestratorNames.has(r.name)))
+        .map((r) => r.name),
+    )
     const present = await readdir(dir).catch(() => [] as string[])
 
     for (const entry of present) {

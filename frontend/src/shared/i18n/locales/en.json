@@ -222,7 +222,12 @@
       "you": "You",
       "empty": "Nothing yet. Send a message to start the session.",
       "delegatedPrompt": "Prompt given to {{agent}}",
-      "thinking": "Thinking"
+      "thinking": "Thinking",
+      "command": "Command",
+      "noArguments": "No arguments",
+      "result": "Result",
+      "showMore": "Show more",
+      "showLess": "Show less"
     }
   },
   "notFound": {

@@ -31,7 +31,17 @@ export const METHOD_PATH = join('prompts', 'orchestration-method.md')
 // subagent is overhead. An orchestrator's whole job is routing work to
 // specialists, and a reluctant orchestrator is just a slow single agent. Cost is
 // held by the caps below instead — the lever that does not argue with the role.
-export const DELEGATION_INSTRUCTION = `You are an orchestrator: delegating is your job, not a fallback. Route the execution of the work — investigation, implementation, testing, documentation — to the specialists available to you, and send independent pieces in a single turn so they run in parallel. Spend your own tool calls on reading enough to plan and on verifying what comes back, not on doing a specialist's work for them. A subagent starts with a fresh context and sees nothing of this conversation, so each brief must be self-contained: the goal, the paths, the decisions already made, what "done" means in checkable terms, and what belongs to another agent.`
+//
+// The last two sentences are load-bearing, not colour: a PreToolUse hook (see
+// `delegationHook` in runner-options.ts) forces every delegation to the
+// foreground, because a per-turn process has nowhere to host a fire-and-forget
+// one — the SDK closes the query stream and the CLI process exits the moment
+// the turn ends, SIGKILLing anything still backgrounded. That made "delegate,
+// then end the turn and wait for a notification" both slower (extra turns
+// spent saying "still running") and the actual cause of subagents being killed
+// mid-flight. Telling the model delegation blocks is what stops it reaching
+// for that pattern on its own now that the hook has made the pattern false.
+export const DELEGATION_INSTRUCTION = `You are an orchestrator: delegating is your job, not a fallback. Route the execution of the work — investigation, implementation, testing, documentation — to the specialists available to you, and send independent pieces in a single turn so they run in parallel. Spend your own tool calls on reading enough to plan and on verifying what comes back, not on doing a specialist's work for them. A subagent starts with a fresh context and sees nothing of this conversation, so each brief must be self-contained: the goal, the paths, the decisions already made, what "done" means in checkable terms, and what belongs to another agent. Delegation blocks: a specialist finishes before its tool call returns, however many you sent in parallel, so there is nothing to await across turns — read what comes back and act on it, or send the next round, in the turn you are already in. Never end a turn to "wait" for a specialist or say you will report back once one lands; it has already finished by the time your turn could end.`
 
 // A session here runs headless on a server, frequently with no human watching,
 // so a question is not a pause — it is a hang that burns the session.
@@ -69,7 +79,7 @@ export function rosterInstruction(specialists: Specialist[]): string {
     return `No specialists are assigned to this project, so the roster your delegation instruction refers to is whatever general-purpose agents the harness itself provides. Use those, and say in your final report that this project has no specialists assigned — that is a configuration gap worth fixing, not a reason to stop.`
   }
   const lines = specialists.map((s) => `- ${s.name} — ${s.description}`).join('\n')
-  return `These specialists are assigned to this project, and they are the whole roster. Address one by the exact name shown; a name that is not on this list resolves to nothing, however standard the role sounds.\n\n${lines}\n\nRoles nobody here fills are yours to cover by re-scoping the briefs you do send, and worth naming in your final report. Do not invent an agent to fill the gap.`
+  return `These specialists are assigned to this project, and they are the whole roster. Address one by the exact name shown. Generic agents the harness itself ships (a general-purpose researcher, a planner) do exist and would otherwise resolve, however standard the role sounds — but delegation on this project is restricted to the roster below and enforced at the tool call, not merely asked for: addressing anything else is refused, with the names below given back so you can retry correctly.\n\n${lines}\n\nRoles nobody here fills are yours to cover by re-scoping the briefs you do send, and worth naming in your final report. Do not invent an agent to fill the gap.`
 }
 
 const METHOD_MARKER = '<!-- agentoo:orchestrator:method -->'

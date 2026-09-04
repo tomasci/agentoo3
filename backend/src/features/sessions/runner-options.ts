@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import type { Options } from '@anthropic-ai/claude-agent-sdk'
+import type { HookCallback, HookCallbackMatcher, Options } from '@anthropic-ai/claude-agent-sdk'
 import type { sessions } from '@/db/schema'
 import { syncProjectPlugin } from '@/features/library/service'
 import { keyPathFor } from '@/features/ssh-keys/service'
@@ -18,6 +18,66 @@ import { PLUGIN_NAME } from '@/queue/plugin-manifest'
 /** Deterministic ceiling on delegation, paired with the prompt-level guidance. */
 const MAX_SPAWN_DEPTH = 2
 const MAX_CONCURRENT_SUBAGENTS = 3
+
+/** The delegation tools across SDK versions. Same predicate as titles.ts's `isSpawn`. */
+const isDelegationTool = (name: string) => name === 'Agent' || name === 'Task'
+
+/**
+ * Force delegation into the foreground, and restrict it to this project's
+ * roster — both by a `PreToolUse` hook rather than by asking.
+ *
+ * The Agent tool defaults `run_in_background` to true. A per-turn process has
+ * nowhere to host a task left running that way: the SDK closes the query
+ * stream and the CLI child process exits the moment the orchestrator's turn
+ * ends, SIGKILLing anything still backgrounded — which is what produced the
+ * "another crash" reports this fix responds to, none of which were crashes.
+ * `updatedInput` flips the flag before the tool runs; fan-out is unaffected,
+ * several `Agent` calls in one assistant message still run concurrently, only
+ * the turn now blocks until they are all done. `session-run.worker.ts` carries
+ * a safety net for the case a task somehow still outlives the turn regardless.
+ *
+ * The roster check is the same argument applied to who may be addressed:
+ * `rosterInstruction` tells the model the team, but prompting only steers (see
+ * `delegationEnv` in orchestrator-prompt.ts), so a call naming anything off the
+ * roster is denied here, from the same `specialists` list the prompt was built
+ * from — one list, so the prompt, the plugin directory and this enforcement
+ * cannot disagree. An empty roster (no specialists assigned, or a solo agent)
+ * leaves delegation unrestricted, matching what `rosterInstruction` tells the
+ * model to do in that case: fall back to the harness's own generic agents.
+ */
+export function delegationHook(specialists: Specialist[]): HookCallbackMatcher {
+  const roster = new Set(specialists.map((s) => s.name))
+  const hook: HookCallback = async (input) => {
+    if (input.hook_event_name !== 'PreToolUse' || !isDelegationTool(input.tool_name)) return {}
+
+    const toolInput =
+      input.tool_input && typeof input.tool_input === 'object'
+        ? { ...(input.tool_input as Record<string, unknown>) }
+        : {}
+    const subagentType =
+      typeof toolInput.subagent_type === 'string' ? toolInput.subagent_type : undefined
+
+    if (roster.size > 0 && subagentType && !roster.has(subagentType)) {
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: `"${subagentType}" is not on this project's roster. Address one of: ${[...roster].join(', ')}.`,
+        },
+      }
+    }
+
+    if (toolInput.run_in_background === false) return {}
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        updatedInput: { ...toolInput, run_in_background: false },
+      },
+    }
+  }
+  return { matcher: 'Agent|Task', hooks: [hook] }
+}
 
 /**
  * Build the SDK options for this session.
@@ -83,6 +143,16 @@ export async function optionsFor(
       }))
     : []
 
+  // The cap covers the session, not the turn, so what is already spent has to
+  // come off it — otherwise a $20 ceiling permits $20 per turn indefinitely.
+  // Clamped at zero rather than skipped when overspent: a session past its
+  // budget should stop at the SDK with `error_max_budget_usd`, which the worker
+  // reports, instead of silently running one more turn for free.
+  const budget =
+    session.maxBudgetUsd === null
+      ? undefined
+      : Math.max(session.maxBudgetUsd - session.totalCostUsd, 0)
+
   return {
     cwd,
     abortController,
@@ -98,6 +168,23 @@ export async function optionsFor(
       ),
     }),
     ...(orchestrator?.model && { model: orchestrator.model }),
+    // The rest of the orchestrator's frontmatter, which used to be parsed and
+    // then dropped on the floor: the library UI offered `effort`, `maxTurns`,
+    // `tools` and `disallowedTools`, and none of them reached the SDK, so the
+    // shipped orchestrator ran at default effort with full write access while
+    // its own file said `effort: xhigh` and `disallowedTools: [Edit, Write,
+    // NotebookEdit]`. `tools` is the option that narrows what exists;
+    // `allowedTools` only auto-approves, which under bypassPermissions would
+    // mean nothing.
+    ...(orchestrator?.effort && { effort: orchestrator.effort }),
+    ...(orchestrator?.maxTurns && { maxTurns: orchestrator.maxTurns }),
+    ...(orchestrator?.tools && { tools: orchestrator.tools }),
+    ...(orchestrator?.disallowedTools && { disallowedTools: orchestrator.disallowedTools }),
+    // Enforced rather than asked for: forces delegation into the foreground so
+    // a subagent cannot outlive the turn that spawned it, and refuses agents
+    // outside this project's roster.
+    hooks: { PreToolUse: [delegationHook(specialists)] },
+    ...(budget !== undefined && { maxBudgetUsd: budget }),
     // Full tool access, deliberately: this runs on a single-user box behind a
     // tailnet, and prompting for permission has nobody to ask.
     permissionMode: 'bypassPermissions',
