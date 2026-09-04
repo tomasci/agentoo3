@@ -67,6 +67,25 @@
   margin-bottom: var(--space-2);
 }
 
+// A backgrounded Bash task: not a delegation, so it gets its own block rather
+// than reusing .delegation, which is captioned by the agent it was given to.
+.command {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+
+.commandLabel {
+  display: block;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-2);
+}
+
 // --- tool calls ---------------------------------------------------------------
 
 .tool { display: grid; gap: var(--space-2); }
@@ -76,6 +95,27 @@
   font-size: var(--text-sm);
   line-height: var(--leading-sm);
   color: var(--color-accent);
+}
+
+// A tool that genuinely takes no arguments, e.g. ListAgents — distinct from
+// the JSON dump `ToolInput` falls back to for anything it does not recognise,
+// so an empty call reads as empty by design rather than as broken output.
+.noArgs {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+.result { display: grid; gap: var(--space-1); }
+
+.resultLabel {
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-muted);
 }
 
 .thinking {

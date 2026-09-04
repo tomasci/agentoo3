@@ -12,6 +12,14 @@
   border-radius: var(--radius-sm);
   background: var(--color-bg-app);
   overflow: hidden;
+
+  // A grid/flex item's default intrinsic width is its content's min-content
+  // size; for a `.title` with `white-space: nowrap` and no break
+  // opportunities (one long unbroken token — a raw command, a hash, a URL)
+  // that min-content size is the full length of the string. Without this, a
+  // long enough title widens this row — and the track around it — past the
+  // viewport instead of ever handing off to the title's own ellipsis.
+  min-width: 0;
 }
 
 .trigger {

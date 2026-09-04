@@ -23,7 +23,19 @@ export interface RunnerErrorMessage {
   message: string
 }
 
-export type TranscriptMessage = SDKMessage | RunnerErrorMessage
+/**
+ * Ours as well. Not a failure — the worker's own note that something worth
+ * flagging happened between turns (background work still running when a turn
+ * ended, an auto-continuation being sent). A `RunnerErrorMessage` would render
+ * as "Turn failed", which is wrong for something that is, so far, recovering
+ * on its own.
+ */
+export interface RunnerNoticeMessage {
+  type: 'notice'
+  message: string
+}
+
+export type TranscriptMessage = SDKMessage | RunnerErrorMessage | RunnerNoticeMessage
 
 const MAX = 120
 
@@ -125,6 +137,10 @@ export function titleFor(message: TranscriptMessage, rawWho: string): string | n
 
   if (message.type === 'error') {
     return tidy(`Turn failed: ${message.message || 'unknown error'}`)
+  }
+
+  if (message.type === 'notice') {
+    return tidy(message.message)
   }
 
   if (message.type === 'result') {
