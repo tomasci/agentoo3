@@ -17,6 +17,7 @@ import {
 } from '@/shared/ui'
 import { useSessionStream } from '../hooks/use-session-stream'
 import {
+  type SessionMessage,
   useInterruptSession,
   useSendMessage,
   useSession,
@@ -38,6 +39,11 @@ const STATUS_TONE = {
   failed: 'danger',
 } as const
 
+// A shared empty array rather than a fresh `[]` per render: `Transcript` is
+// memoised on this identity, and a new one each time would defeat it for the
+// whole of the first load.
+const NO_MESSAGES: SessionMessage[] = []
+
 export function SessionPage({ projectId, sessionId }: { projectId: string; sessionId: string }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
@@ -52,7 +58,7 @@ export function SessionPage({ projectId, sessionId }: { projectId: string; sessi
   const scroller = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
 
-  const list = messages.data ?? []
+  const list = messages.data ?? NO_MESSAGES
   const busy = BUSY.includes(session.data?.status ?? '')
 
   // Follow the transcript only while the reader is already at the bottom, so
