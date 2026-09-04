@@ -13,14 +13,29 @@
   overflow-wrap: anywhere;
 }
 
+.promptCaption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
 .promptLabel {
-  display: block;
   font-size: var(--text-2xs);
   line-height: var(--leading-2xs);
   text-transform: uppercase;
   letter-spacing: var(--tracking-caps);
   color: var(--color-text-muted);
-  margin-bottom: var(--space-1);
+}
+
+.promptTime {
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  color: var(--color-text-muted);
+
+  // Digits shouldn't jitter row to row.
+  font-variant-numeric: tabular-nums;
 }
 
 // --- delegated tasks ----------------------------------------------------------
@@ -83,8 +98,19 @@
 // The reply that closes a turn. Full size and always open: everything above it
 // is working, this is the result of it.
 .answer {
+  display: grid;
+  gap: var(--space-1);
   padding: var(--space-3) var(--space-5);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-bg-app);
+}
+
+// Top-right and out of the way: the reply itself is the thing being read.
+.answerTime {
+  justify-self: end;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
 }

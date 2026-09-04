@@ -23,6 +23,9 @@ interface CollapsibleProps {
    */
   badge?: { label: string; tone?: Tone }
   note?: ReactNode
+  /** A trailing slot at the far right of the trigger, after `note`. Generic by
+   * design — the design system stays domain-free, callers decide what goes here. */
+  meta?: ReactNode
   open?: boolean
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
@@ -36,6 +39,7 @@ export function Collapsible({
   title,
   badge,
   note,
+  meta,
   open,
   defaultOpen = false,
   onOpenChange,
@@ -61,6 +65,7 @@ export function Collapsible({
         )}
         <span className={styles.title}>{title}</span>
         {note && <span className={styles.note}>{note}</span>}
+        {meta && <span className={styles.meta}>{meta}</span>}
       </ArkCollapsible.Trigger>
       <ArkCollapsible.Content className={styles.content}>
         <div className={styles.body}>{children}</div>

@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { Alert, Card, Code, Collapsible, DefinitionList, EmptyState, Markdown } from '@/shared/ui'
 import type { SessionMessage } from '../hooks/use-sessions'
+import { formatFullTime, formatTime } from '../lib/format'
 import {
   buildTranscript,
   type TranscriptNode,
@@ -101,13 +102,31 @@ function ToolInput({ input }: { input: unknown }) {
   )
 }
 
+/**
+ * When a message arrived, quiet enough not to compete with it: short `HH:MM`
+ * on the row, the full date on hover. Renders nothing for a message whose
+ * `createdAt` is missing or unparsable rather than showing "Invalid Date".
+ */
+function Timestamp({ createdAt, className }: { createdAt: string; className?: string }) {
+  const time = formatTime(createdAt)
+  if (!time) return null
+  return (
+    <span className={className} title={formatFullTime(createdAt) ?? undefined}>
+      {time}
+    </span>
+  )
+}
+
 function Node({ node }: { node: TranscriptNode }) {
   const { t } = useTranslation()
 
   if (node.kind === 'prompt') {
     return (
       <div className={styles.prompt}>
-        <span className={styles.promptLabel}>{t('sessions.transcript.you')}</span>
+        <span className={styles.promptCaption}>
+          <span className={styles.promptLabel}>{t('sessions.transcript.you')}</span>
+          <Timestamp createdAt={node.createdAt} className={styles.promptTime} />
+        </span>
         {node.text}
       </div>
     )
@@ -117,14 +136,20 @@ function Node({ node }: { node: TranscriptNode }) {
   if (node.kind === 'answer') {
     return (
       <div className={styles.answer}>
+        <Timestamp createdAt={node.createdAt} className={styles.answerTime} />
         <Markdown>{node.text}</Markdown>
       </div>
     )
   }
 
+  // Collapsible only renders its meta slot when this is truthy, so an
+  // unparsable createdAt must produce undefined here, not an element that
+  // renders empty.
+  const meta = formatTime(node.createdAt) && <Timestamp createdAt={node.createdAt} />
+
   if (node.kind === 'event') {
     return (
-      <Collapsible title={node.message.title ?? ''}>
+      <Collapsible title={node.message.title ?? ''} meta={meta}>
         <MessageBody message={node.message} />
       </Collapsible>
     )
@@ -137,6 +162,7 @@ function Node({ node }: { node: TranscriptNode }) {
       // Live progress, but only while it means something: on a finished task the
       // last ping is just whatever it happened to be doing when it stopped.
       note={node.status === 'running' ? node.progress : null}
+      meta={meta}
     >
       {/* The instruction the orchestrator wrote. Shown first and in full: it is
           the only place the delegation is visible. */}
