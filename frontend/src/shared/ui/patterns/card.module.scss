@@ -1,0 +1,32 @@
+.root {
+  border-radius: var(--radius-lg);
+}
+
+// Dark `--shadow-sm` is `none` (elevation there is a lighter surface, not a
+// shadow — design-tokens.md), so solid pairs the shadow with
+// `--color-surface-raised`; relying on the shadow alone would be invisible in
+// dark theme.
+.variantSolid {
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.variantDashed {
+  border: 1px dashed var(--color-border);
+  background: transparent;
+}
+
+// Border and background only — `.toneDanger` composes with either variant
+// (source order after both, so it wins the shared `border-color`/`background`
+// properties) rather than duplicating the shadow or border style each carries.
+// `-border` here, not `-danger`: this is a tinted banner surface, not a form
+// control (component-contract.md's escape-hatch note on the two danger tokens).
+.toneDanger {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-bg);
+}
+
+.paddingNone { padding: var(--space-0); }
+.paddingSm { padding: var(--space-3); }
+.paddingMd { padding: var(--space-5); }

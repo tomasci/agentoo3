@@ -2,7 +2,18 @@ import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { Button } from '@/shared/ui'
+import {
+  Alert,
+  Badge,
+  Button,
+  Checkbox,
+  EmptyState,
+  Inline,
+  PageHeader,
+  Spinner,
+  Stack,
+  toast,
+} from '@/shared/ui'
 import { useAgents, useProjectLibrary, useSetProjectLibrary, useSkills } from '../hooks/use-library'
 import styles from './library.module.scss'
 
@@ -23,7 +34,6 @@ export function ProjectLibraryPage({ projectId }: { projectId: string }) {
   const [selectedAgents, setSelectedAgents] = useState<string[]>([])
   const [selectedSkills, setSelectedSkills] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
 
   useEffect(() => {
     if (!assigned.data) return
@@ -43,93 +53,103 @@ export function ProjectLibraryPage({ projectId }: { projectId: string }) {
 
   const onSave = () => {
     setError(null)
-    setSaved(false)
     save.mutate(
       { path: { id: projectId }, body: { agents: selectedAgents, skills: selectedSkills } },
       {
-        onSuccess: () => {
-          setSaved(true)
-          setTimeout(() => setSaved(false), 2000)
-        },
+        // A toast survives this component unmounting (e.g. the tab closing
+        // right after save), which a local timeout-driven message cannot.
+        onSuccess: () => toast({ title: t('library.assign.saved') }),
         onError: (e) => setError(apiErrorMessage(e, t('library.assign.failed'))),
       },
     )
   }
 
-  const empty = (agents.data ?? []).length === 0 && (skills.data ?? []).length === 0
+  const agentsList = agents.data ?? []
+  const skillsList = skills.data ?? []
+  const isPending = agents.isPending || skills.isPending
+  const isError = agents.isError || skills.isError
+  const empty = agentsList.length === 0 && skillsList.length === 0
 
   return (
-    <div className={styles.page}>
+    <Stack gap={8}>
       <p className={styles.intro}>{t('library.assign.intro')}</p>
 
-      {empty && !agents.isPending && (
-        <p className={styles.empty}>
-          {t('library.assign.emptyLibrary')}{' '}
-          <Link to="/library" className={styles.nameLink}>
-            {t('library.assign.goToLibrary')}
-          </Link>
-        </p>
+      {isError && (
+        <Alert>{apiErrorMessage(agents.error ?? skills.error, t('library.loadFailed'))}</Alert>
       )}
 
-      {(agents.data ?? []).length > 0 && (
-        <section className={styles.section}>
-          <h2 className={styles.title}>{t('library.agents')}</h2>
-          <div className={styles.assignList}>
-            {(agents.data ?? []).map((agent) => (
-              <label key={agent.name} className={styles.assignItem}>
-                <input
-                  type="checkbox"
-                  checked={selectedAgents.includes(agent.name)}
-                  onChange={() => toggle(selectedAgents, setSelectedAgents, agent.name)}
-                />
-                <span className={styles.assignBody}>
-                  <span className={styles.assignName}>
-                    {agent.name}{' '}
-                    <span
-                      className={`${styles.role} ${agent.role === 'orchestrator' ? styles.orchestrator : ''}`}
-                    >
-                      {t(`library.role.${agent.role}`)}
-                    </span>
-                  </span>
-                  <span className={styles.assignDesc}>{agent.description}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-        </section>
+      {!isError && isPending && <Spinner label={t('common.loading')} block />}
+
+      {!isError && !isPending && empty && (
+        <EmptyState
+          title={t('library.assign.emptyLibrary')}
+          action={
+            <Link to="/library">
+              <Button type="button">{t('library.assign.goToLibrary')}</Button>
+            </Link>
+          }
+        />
       )}
 
-      {(skills.data ?? []).length > 0 && (
-        <section className={styles.section}>
-          <h2 className={styles.title}>{t('library.skills')}</h2>
-          <div className={styles.assignList}>
-            {(skills.data ?? []).map((skill) => (
-              <label key={skill.name} className={styles.assignItem}>
-                <input
-                  type="checkbox"
-                  checked={selectedSkills.includes(skill.name)}
-                  onChange={() => toggle(selectedSkills, setSelectedSkills, skill.name)}
-                />
-                <span className={styles.assignBody}>
-                  <span className={styles.assignName}>{skill.name}</span>
-                  <span className={styles.assignDesc}>{skill.description}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-        </section>
-      )}
+      {!isError && !isPending && !empty && (
+        <>
+          {agentsList.length > 0 && (
+            <Stack gap={3}>
+              <PageHeader level={2} title={t('library.agents')} />
+              <Stack gap={2}>
+                {agentsList.map((agent) => (
+                  <div key={agent.name} className={styles.assignItem}>
+                    <Checkbox
+                      label={
+                        <Inline gap={2}>
+                          <span>{agent.name}</span>
+                          <Badge
+                            tone={agent.role === 'orchestrator' ? 'accent' : 'neutral'}
+                            variant="outline"
+                          >
+                            {t(`library.role.${agent.role}`)}
+                          </Badge>
+                        </Inline>
+                      }
+                      description={agent.description}
+                      checked={selectedAgents.includes(agent.name)}
+                      onCheckedChange={() => toggle(selectedAgents, setSelectedAgents, agent.name)}
+                    />
+                  </div>
+                ))}
+              </Stack>
+            </Stack>
+          )}
 
-      {!empty && (
-        <div className={styles.controls}>
-          <Button type="button" disabled={!dirty || save.isPending} onClick={onSave}>
-            {save.isPending ? t('common.working') : t('common.save')}
-          </Button>
-          {saved && <span className={styles.hint}>{t('library.assign.saved')}</span>}
-          {error && <span className={styles.error}>{error}</span>}
-          <span className={styles.hint}>{t('library.assign.hint')}</span>
-        </div>
+          {skillsList.length > 0 && (
+            <Stack gap={3}>
+              <PageHeader level={2} title={t('library.skills')} />
+              <Stack gap={2}>
+                {skillsList.map((skill) => (
+                  <div key={skill.name} className={styles.assignItem}>
+                    <Checkbox
+                      label={skill.name}
+                      description={skill.description}
+                      checked={selectedSkills.includes(skill.name)}
+                      onCheckedChange={() => toggle(selectedSkills, setSelectedSkills, skill.name)}
+                    />
+                  </div>
+                ))}
+              </Stack>
+            </Stack>
+          )}
+
+          <Stack gap={3}>
+            {error && <Alert>{error}</Alert>}
+            <Inline gap={3}>
+              <Button type="button" disabled={!dirty || save.isPending} onClick={onSave}>
+                {save.isPending ? t('common.working') : t('common.save')}
+              </Button>
+              <span className={styles.hint}>{t('library.assign.hint')}</span>
+            </Inline>
+          </Stack>
+        </>
       )}
-    </div>
+    </Stack>
   )
 }

@@ -1,219 +1,90 @@
-@use '@/styles/variables' as v;
-
-.transcript { display: grid; gap: v.$space-sm; align-content: start; }
-
-.empty {
-  padding: v.$space-xl;
-  text-align: center;
-  color: var(--muted-fg);
-  border: 1px dashed var(--border);
-  border-radius: v.$radius;
-}
+.transcript { display: grid; gap: var(--space-2); align-content: start; }
 
 // --- the human's own messages -------------------------------------------------
 
 .prompt {
   justify-self: end;
   max-width: min(46rem, 100%);
-  padding: v.$space-md v.$space-lg;
-  border-radius: v.$radius;
-  background: var(--accent-soft, var(--surface));
-  border: 1px solid var(--border);
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-lg);
+  background: var(--color-accent-subtle-bg);
+  border: 1px solid var(--color-border);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.promptPending {
-  opacity: 0.65;
-  border-style: dashed;
-}
-
 .promptLabel {
   display: block;
-  font-size: 0.6875rem;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted-fg);
-  margin-bottom: 0.25rem;
+  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-1);
 }
-
-// --- collapsible activity rows ------------------------------------------------
-
-.row {
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--bg);
-  overflow: hidden;
-}
-
-.summary {
-  display: flex;
-  align-items: center;
-  gap: v.$space-sm;
-  width: 100%;
-  padding: 0.5rem v.$space-md;
-  background: none;
-  border: 0;
-  font: inherit;
-  font-size: 0.8125rem;
-  text-align: left;
-  color: var(--fg);
-  cursor: pointer;
-}
-
-.summary:hover { background: var(--surface); }
-
-.chevron {
-  flex: none;
-  width: 0.75rem;
-  color: var(--muted-fg);
-  transition: transform 120ms ease;
-}
-
-.chevronOpen { transform: rotate(90deg); }
-
-.title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.note {
-  flex: none;
-  max-width: 40%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.75rem;
-  color: var(--muted-fg);
-}
-
-.body {
-  padding: v.$space-md;
-  border-top: 1px solid var(--border);
-  display: grid;
-  gap: v.$space-md;
-}
-
-.text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; }
 
 // --- delegated tasks ----------------------------------------------------------
 
-.task { border-color: var(--accent); }
-
-.agent {
-  flex: none;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  padding: 0.1rem 0.4rem;
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--muted-fg);
-  border: 1px solid var(--border);
-}
-
-.agentRunning { border-color: var(--accent); color: var(--accent); }
-.agentFailed { border-color: var(--danger, #c0392b); color: var(--danger, #c0392b); }
-
 .children {
   display: grid;
-  gap: v.$space-sm;
-  padding-left: v.$space-md;
-  border-left: 2px solid var(--border);
-  margin-left: v.$space-sm;
+  gap: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--color-border);
+  margin-left: var(--space-2);
 }
 
 // The prompt the orchestrator wrote for a subagent. Called out, because seeing
 // it is the whole reason the tree is nested.
 .delegation {
-  padding: v.$space-md;
-  border-radius: v.$radius-sm;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
 }
 
 .delegationLabel {
   display: block;
-  font-size: 0.6875rem;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted-fg);
-  margin-bottom: 0.35rem;
+  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-2);
 }
-
-
 
 // --- tool calls ---------------------------------------------------------------
 
-.tool { display: grid; gap: 0.35rem; }
+.tool { display: grid; gap: var(--space-2); }
 
 .toolName {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8125rem;
-  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-accent);
 }
-
-.code {
-  margin: 0;
-  padding: v.$space-sm;
-  border-radius: v.$radius-sm;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.75rem;
-  line-height: 1.5;
-  overflow-x: auto;
-  max-height: 20rem;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-// Tool arguments as a labelled list. A JSON dump buries the one line that
-// matters — the command, the file path — in punctuation and escaping.
-.args { margin: 0; display: grid; gap: v.$space-sm; }
-.arg { display: grid; gap: 0.2rem; }
-
-.argKey {
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted-fg);
-}
-
-.argValue { margin: 0; min-width: 0; }
 
 .thinking {
-  padding-left: v.$space-md;
-  border-left: 2px solid var(--border);
-  color: var(--muted-fg);
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--color-border);
+  color: var(--color-text-secondary);
   font-style: italic;
 }
 
 .thinkingLabel {
   display: block;
   font-style: normal;
-  font-size: 0.6875rem;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 0.35rem;
-}
-
-.errorText {
-  margin: 0;
-  color: var(--danger, #c0392b);
-  font-size: 0.8125rem;
-  overflow-wrap: anywhere;
+  letter-spacing: var(--tracking-caps);
+  margin-bottom: var(--space-2);
 }
 
 // The reply that closes a turn. Full size and always open: everything above it
 // is working, this is the result of it.
 .answer {
-  padding: v.$space-md v.$space-lg;
-  border: 1px solid var(--border);
-  border-radius: v.$radius;
-  background: var(--bg);
+  padding: var(--space-3) var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-app);
 }

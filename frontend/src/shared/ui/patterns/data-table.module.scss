@@ -1,0 +1,66 @@
+@use '@/shared/ui/mixins' as ui;
+
+.root {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+}
+
+.th {
+  text-align: left;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  white-space: nowrap;
+}
+
+.td {
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.row {
+  &:last-child .td { border-bottom: 0; }
+  &:hover { background: var(--color-surface); }
+
+  // The row itself is not a link target — only the elements inside it are
+  // (a name cell rendered as a button/anchor, the actions-menu trigger). This
+  // is the one place `focus-ring-inset` is declared generically rather than
+  // per call site, so a table built from arbitrary column defs never forgets
+  // it.
+  a,
+  button {
+    @include ui.focus-ring-inset;
+  }
+}
+
+// A column that shrinks to its content and pins to the trailing edge — the
+// actions-menu column by default, or any column id passed in
+// `compactColumns`.
+.compact {
+  width: 1%;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.empty {
+  padding: var(--space-8) var(--space-5);
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+}

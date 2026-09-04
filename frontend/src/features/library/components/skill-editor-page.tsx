@@ -2,7 +2,20 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { Button, ConfirmDialog } from '@/shared/ui'
+import {
+  Alert,
+  Button,
+  Card,
+  Code,
+  ConfirmDialog,
+  Field,
+  Inline,
+  Input,
+  PageHeader,
+  Spinner,
+  Stack,
+  Textarea,
+} from '@/shared/ui'
 import { useCreateSkill, useDeleteSkill, useSkill, useUpdateSkill } from '../hooks/use-library'
 import styles from './library.module.scss'
 
@@ -41,88 +54,77 @@ export function SkillEditorPage({ name }: { name?: string }) {
   }
 
   const busy = create.isPending || update.isPending
-  if (!isNew && isPending) return <p>{t('common.loading')}</p>
+  if (!isNew && isPending) return <Spinner label={t('common.loading')} block />
 
   return (
-    <div className={styles.editor}>
+    <Stack gap={5}>
       <Link to="/library" className={styles.back}>
         ← {t('library.backToLibrary')}
       </Link>
 
-      <section className={styles.card}>
-        <div className={styles.grid}>
-          <div className={styles.field}>
-            <label className={styles.label} htmlFor="skill-name">
-              {t('library.skill.name')}
-            </label>
-            <input
-              id="skill-name"
-              className={styles.input}
-              value={draft.name}
-              onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-              placeholder="testing"
+      <PageHeader title={isNew ? t('library.newSkill') : draft.name || name} />
+
+      <Card>
+        <Stack gap={3}>
+          <div className={styles.grid}>
+            <Field
+              label={t('library.skill.name')}
+              hint={isNew ? t('library.skill.nameHint') : t('library.skill.renameHint')}
+            >
+              <Input
+                value={draft.name}
+                onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+                placeholder="testing"
+              />
+            </Field>
+          </div>
+
+          <Field label={t('library.skill.description')} hint={t('library.skill.descriptionHint')}>
+            <Input
+              value={draft.description}
+              onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+              placeholder={t('library.skill.descriptionPlaceholder')}
             />
-            <span className={styles.hint}>
-              {isNew ? t('library.skill.nameHint') : t('library.skill.renameHint')}
-            </span>
-          </div>
-        </div>
+          </Field>
 
-        <div className={styles.field} style={{ marginTop: '0.75rem' }}>
-          <label className={styles.label} htmlFor="skill-desc">
-            {t('library.skill.description')}
-          </label>
-          <input
-            id="skill-desc"
-            className={styles.input}
-            value={draft.description}
-            onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
-            placeholder={t('library.skill.descriptionPlaceholder')}
-          />
-          <span className={styles.hint}>{t('library.skill.descriptionHint')}</span>
-        </div>
+          {skill && skill.extraFiles.length > 0 && (
+            <Stack gap={1}>
+              <span className={styles.hint}>{t('library.skill.bundled')}</span>
+              <Code block wrap>
+                {skill.extraFiles.join('\n')}
+              </Code>
+            </Stack>
+          )}
+        </Stack>
+      </Card>
 
-        {skill && skill.extraFiles.length > 0 && (
-          <div style={{ marginTop: '0.75rem' }}>
-            <span className={styles.hint}>{t('library.skill.bundled')}</span>
-            <ul className={styles.files}>
-              {skill.extraFiles.map((f) => (
-                <li key={f}>{f}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </section>
-
-      <section className={styles.field}>
-        <label className={styles.label} htmlFor="skill-body">
-          {t('library.skill.body')}
-        </label>
-        <textarea
-          id="skill-body"
-          className={styles.prompt}
+      <Field label={t('library.skill.body')} hint={t('library.skill.bodyHint')}>
+        <Textarea
+          mono
+          rows={20}
           value={draft.body}
           onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
           spellCheck={false}
         />
-        <span className={styles.hint}>{t('library.skill.bodyHint')}</span>
-      </section>
+      </Field>
 
-      <div className={styles.controls}>
-        <Button
-          type="button"
-          disabled={busy || !draft.name || !draft.description || !draft.body}
-          onClick={save}
-        >
-          {busy ? t('common.working') : t('common.save')}
-        </Button>
-        {!isNew && (
-          <Button type="button" onClick={() => setConfirmDelete(true)}>
-            {t('common.delete')}
+      <Stack gap={3}>
+        {error && <Alert>{error}</Alert>}
+        <Inline gap={2}>
+          <Button
+            type="button"
+            disabled={busy || !draft.name || !draft.description || !draft.body}
+            onClick={save}
+          >
+            {busy ? t('common.working') : t('common.save')}
           </Button>
-        )}
-        {error && <span className={styles.error}>{error}</span>}
-      </div>
+          {!isNew && (
+            <Button type="button" onClick={() => setConfirmDelete(true)}>
+              {t('common.delete')}
+            </Button>
+          )}
+        </Inline>
+      </Stack>
 
       <ConfirmDialog
         open={confirmDelete}
@@ -144,6 +146,6 @@ export function SkillEditorPage({ name }: { name?: string }) {
           remove.mutate({ path: { name } }, { onSuccess: () => void navigate({ to: '/library' }) })
         }
       />
-    </div>
+    </Stack>
   )
 }

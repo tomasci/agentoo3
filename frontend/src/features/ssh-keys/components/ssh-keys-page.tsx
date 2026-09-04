@@ -1,10 +1,20 @@
-import { Field } from '@ark-ui/react'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { Button } from '@/shared/ui'
+import {
+  Alert,
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Inline,
+  Input,
+  PageHeader,
+  Spinner,
+  Stack,
+} from '@/shared/ui'
 import { useCreateSshKey, useSshKeys } from '../hooks/use-ssh-keys'
 import { type SshKeyFormValues, sshKeyFormSchema } from '../model/ssh-key-form.schema'
 import { SshKeyCard } from './ssh-key-card'
@@ -27,6 +37,11 @@ export function SshKeysPage() {
     defaultValues: { name: '', comment: '' },
   })
 
+  // Zod's messages are translation keys, not display text; `Field` derives
+  // `invalid` from `error != null`, so this keeps the two in step without a
+  // separate `invalid={Boolean(...)}` expression to drift out of sync by hand.
+  const fieldError = (message?: string) => (message ? t(message) : undefined)
+
   const onSubmit = (values: SshKeyFormValues) => {
     setServerError(null)
     create.mutate(
@@ -39,64 +54,56 @@ export function SshKeysPage() {
   }
 
   return (
-    <div className={styles.page}>
-      <p className={styles.intro}>{t('sshKeys.intro')}</p>
+    <Stack gap={8}>
+      <PageHeader title={t('sshKeys.heading')} description={t('sshKeys.intro')} />
 
-      <section className={styles.formCard}>
-        <h2 className={styles.heading}>{t('sshKeys.form.heading')}</h2>
-        <form className={styles.form} onSubmit={handleSubmit(onSubmit)} noValidate>
-          <Field.Root invalid={Boolean(errors.name)}>
-            <Field.Label className={styles.label}>{t('sshKeys.form.name')}</Field.Label>
-            <Field.Input className={styles.input} placeholder="github" {...register('name')} />
-            <span className={styles.hint}>{t('sshKeys.form.nameHint')}</span>
-            {errors.name?.message && (
-              <Field.ErrorText className={styles.error}>{t(errors.name.message)}</Field.ErrorText>
-            )}
-          </Field.Root>
+      <Card variant="dashed">
+        <Stack gap={3}>
+          <h2 className={styles.heading}>{t('sshKeys.form.heading')}</h2>
 
-          <Field.Root>
-            <Field.Label className={styles.label}>{t('sshKeys.form.comment')}</Field.Label>
-            <Field.Input
-              className={styles.input}
-              placeholder="you@example.com"
-              {...register('comment')}
-            />
-            <span className={styles.hint}>{t('sshKeys.form.commentHint')}</span>
-          </Field.Root>
+          <form onSubmit={handleSubmit(onSubmit)} noValidate>
+            <Stack gap={3}>
+              <Field
+                label={t('sshKeys.form.name')}
+                hint={t('sshKeys.form.nameHint')}
+                error={fieldError(errors.name?.message)}
+              >
+                <Input placeholder="github" {...register('name')} />
+              </Field>
 
-          <div className={styles.actions}>
-            <Button type="submit" disabled={create.isPending}>
-              {create.isPending ? t('sshKeys.form.generating') : t('sshKeys.form.submit')}
-            </Button>
-            {serverError && <span className={styles.error}>{serverError}</span>}
-          </div>
-        </form>
+              <Field label={t('sshKeys.form.comment')} hint={t('sshKeys.form.commentHint')}>
+                <Input placeholder="you@example.com" {...register('comment')} />
+              </Field>
 
-        <ol className={styles.steps}>
-          <li>{t('sshKeys.steps.generate')}</li>
-          <li>{t('sshKeys.steps.copy')}</li>
-          <li>{t('sshKeys.steps.test')}</li>
-          <li>{t('sshKeys.steps.use')}</li>
-        </ol>
-      </section>
+              <Inline gap={3}>
+                <Button type="submit" disabled={create.isPending}>
+                  {create.isPending ? t('sshKeys.form.generating') : t('sshKeys.form.submit')}
+                </Button>
+              </Inline>
 
-      <div>
-        <h2 className={styles.heading}>{t('sshKeys.heading')}</h2>
-        {isError && (
-          <p className={styles.error}>{apiErrorMessage(error, t('sshKeys.loadFailed'))}</p>
-        )}
-        {isPending && <p className={styles.empty}>{t('common.loading')}</p>}
-        {!isPending && !isError && keys.length === 0 && (
-          <p className={styles.empty}>{t('sshKeys.empty')}</p>
-        )}
-        {keys.length > 0 && (
-          <div className={styles.list}>
-            {keys.map((k) => (
-              <SshKeyCard key={k.id} sshKey={k} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
+              {serverError && <Alert>{serverError}</Alert>}
+            </Stack>
+          </form>
+
+          <ol className={styles.steps}>
+            <li>{t('sshKeys.steps.generate')}</li>
+            <li>{t('sshKeys.steps.copy')}</li>
+            <li>{t('sshKeys.steps.test')}</li>
+            <li>{t('sshKeys.steps.use')}</li>
+          </ol>
+        </Stack>
+      </Card>
+
+      {isError && <Alert>{apiErrorMessage(error, t('sshKeys.loadFailed'))}</Alert>}
+      {isPending && <Spinner label={t('common.loading')} block />}
+      {!isPending && !isError && keys.length === 0 && <EmptyState title={t('sshKeys.empty')} />}
+      {keys.length > 0 && (
+        <div className={styles.list}>
+          {keys.map((k) => (
+            <SshKeyCard key={k.id} sshKey={k} />
+          ))}
+        </div>
+      )}
+    </Stack>
   )
 }

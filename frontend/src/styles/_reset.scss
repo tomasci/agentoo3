@@ -1,0 +1,25 @@
+// Global element styles, retokenized. Kept as a plain reset — no
+// class-based utility layer — because the app is composed entirely from
+// CSS modules that own their own selectors.
+* {
+  box-sizing: border-box;
+}
+
+// The shell is a full-viewport grid; without this the document collapses to
+// content height and the status bar floats mid-page.
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: var(--color-bg-app);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+  -webkit-font-smoothing: antialiased;
+}

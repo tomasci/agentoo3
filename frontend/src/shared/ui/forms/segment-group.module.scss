@@ -1,0 +1,97 @@
+@use '@/shared/ui/mixins' as ui;
+
+.root {
+  position: relative;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  width: fit-content;
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-primary);
+}
+
+// Announced by screen readers, invisible on screen — same technique as
+// field.module.scss's `.srOnly`. `display: none` would drop it from the
+// accessibility tree, which defeats the point of `labelHidden`.
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+
+  // 1x1px box shrunk to nothing by a matching negative margin — the standard
+  // sr-only clip technique, not a spacing value, so it stays a literal px.
+  // stylelint-disable-next-line declaration-property-unit-allowed-list
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+
+  @include ui.disabled;
+  @include ui.invalid;
+
+  &:hover:not([data-disabled]) { background: var(--color-surface-hover); }
+
+  &[data-state='checked'] {
+    background: var(--color-accent);
+    color: var(--color-text-on-accent);
+  }
+
+  // The real focusable element is the nested radio ItemHiddenInput, not this
+  // label — :has() lets the ring live on the drawn item while only firing
+  // for genuine keyboard focus, the same technique as Checkbox/Switch. Can't
+  // `@include ui.focus-ring-inset` here: that mixin keys off `&:focus-visible`,
+  // which this label itself never matches.
+  &:has(input:focus-visible) {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+
+    // Same inverted-offset expression _mixins.scss's focus-ring-inset uses;
+    // the allow-list only permits a bare `var(--focus-ring-*)` reference
+    // because it expects consumers to reach the calc() through that mixin,
+    // which isn't an option on this selector (see comment above).
+    // stylelint-disable-next-line declaration-property-value-allowed-list
+    outline-offset: calc(var(--focus-ring-offset) * -1);
+  }
+}
+
+// Decorative per Ark (aria-hidden, no content passed) — selection is read
+// off `.item[data-state]` instead, so this part carries no visual weight.
+.itemControl {
+  display: none;
+}
+
+// Ark's sliding highlight is exactly the iOS pill-in-a-groove look the
+// design direction forbids (see segment-group.tsx); it stays in the tree for
+// the anatomy but never paints — `.item[data-state='checked']`'s flat fill
+// carries the selected state instead.
+.indicator {
+  display: none;
+}
+
+.sizeSm .item { min-height: var(--control-height-sm); }
+.sizeMd .item { min-height: var(--control-height-md); }

@@ -2,7 +2,18 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { ActionsMenu, ConfirmDialog } from '@/shared/ui'
+import {
+  ActionsMenu,
+  Alert,
+  Badge,
+  Card,
+  Code,
+  ConfirmDialog,
+  type DefinitionItem,
+  DefinitionList,
+  Inline,
+  Stack,
+} from '@/shared/ui'
 import { type Session, useDeleteSession } from '../hooks/use-sessions'
 import styles from './sessions.module.scss'
 
@@ -12,10 +23,36 @@ export function SessionCard({ session, projectId }: { session: Session; projectI
   const remove = useDeleteSession(projectId)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
+  const metaItems: DefinitionItem[] = [
+    {
+      id: 'workingDir',
+      term: t('sessions.meta.workingDir'),
+      description: <Code wrap>{session.workingDir}</Code>,
+    },
+    ...(session.branch
+      ? [
+          {
+            id: 'branch',
+            term: t('sessions.meta.branch'),
+            description: <Code wrap>{session.branch}</Code>,
+          },
+        ]
+      : []),
+    ...(session.orchestrator
+      ? [
+          {
+            id: 'orchestrator',
+            term: t('sessions.meta.orchestrator'),
+            description: <Code wrap>{session.orchestrator}</Code>,
+          },
+        ]
+      : []),
+  ]
+
   return (
-    <article className={styles.session}>
-      <div className={styles.sessionHead}>
-        <div>
+    <Card as="article">
+      <Stack gap={3}>
+        <Inline justify="between" align="start" gap={3} wrap={false}>
           <h4 className={styles.sessionTitle}>
             <Link
               to="/projects/$projectId/sessions/$sessionId"
@@ -25,60 +62,44 @@ export function SessionCard({ session, projectId }: { session: Session; projectI
               {session.title ?? t('sessions.untitled', { id: session.id.slice(0, 8) })}
             </Link>
           </h4>
-          <dl className={styles.meta}>
-            <div className={styles.metaRow}>
-              <dt>{t('sessions.meta.workingDir')}</dt>
-              <dd>{session.workingDir}</dd>
-            </div>
-            {session.branch && (
-              <div className={styles.metaRow}>
-                <dt>{t('sessions.meta.branch')}</dt>
-                <dd>{session.branch}</dd>
-              </div>
-            )}
-            {session.orchestrator && (
-              <div className={styles.metaRow}>
-                <dt>{t('sessions.meta.orchestrator')}</dt>
-                <dd>{session.orchestrator}</dd>
-              </div>
-            )}
-          </dl>
-        </div>
 
-        <div className={styles.badges}>
-          <span className={styles.badge}>{t(`sessions.status.${session.status}`)}</span>
-          {/* Worth surfacing: a shared checkout means two sessions on this
-              project would fight over the working tree. */}
-          <span className={`${styles.badge} ${session.isolated ? '' : styles.shared}`}>
-            {session.isolated ? t('sessions.isolated') : t('sessions.shared')}
-          </span>
-          <ActionsMenu
-            label={t('sessions.actionsFor', { name: session.title ?? session.id.slice(0, 8) })}
-            actions={[
-              {
-                id: 'open',
-                label: t('sessions.open'),
-                onSelect: () =>
-                  void navigate({
-                    to: '/projects/$projectId/sessions/$sessionId',
-                    params: { projectId, sessionId: session.id },
-                  }),
-              },
-              {
-                id: 'delete',
-                label: t('common.delete'),
-                destructive: true,
-                onSelect: () => setConfirmDelete(true),
-              },
-            ]}
-          />
-        </div>
-      </div>
+          <Inline gap={2} wrap={false}>
+            <Badge variant="outline">{t(`sessions.status.${session.status}`)}</Badge>
+            {/* Worth surfacing: a shared checkout means two sessions on this
+                project would fight over the working tree. */}
+            <Badge variant="outline" tone={session.isolated ? 'neutral' : 'warning'}>
+              {session.isolated ? t('sessions.isolated') : t('sessions.shared')}
+            </Badge>
+            <ActionsMenu
+              label={t('sessions.actionsFor', { name: session.title ?? session.id.slice(0, 8) })}
+              actions={[
+                {
+                  id: 'open',
+                  label: t('sessions.open'),
+                  onSelect: () =>
+                    void navigate({
+                      to: '/projects/$projectId/sessions/$sessionId',
+                      params: { projectId, sessionId: session.id },
+                    }),
+                },
+                {
+                  id: 'delete',
+                  label: t('common.delete'),
+                  destructive: true,
+                  onSelect: () => setConfirmDelete(true),
+                },
+              ]}
+            />
+          </Inline>
+        </Inline>
 
-      {remove.isError && (
-        <p className={styles.error}>{apiErrorMessage(remove.error, t('sessions.deleteFailed'))}</p>
-      )}
-      {session.lastError && <p className={styles.error}>{session.lastError}</p>}
+        <DefinitionList items={metaItems} />
+
+        {remove.isError && (
+          <Alert tone="danger">{apiErrorMessage(remove.error, t('sessions.deleteFailed'))}</Alert>
+        )}
+        {session.lastError && <Alert tone="danger">{session.lastError}</Alert>}
+      </Stack>
 
       <ConfirmDialog
         open={confirmDelete}
@@ -90,6 +111,6 @@ export function SessionCard({ session, projectId }: { session: Session; projectI
           remove.mutate({ path: { id: session.id } }, { onSettled: () => setConfirmDelete(false) })
         }
       />
-    </article>
+    </Card>
   )
 }

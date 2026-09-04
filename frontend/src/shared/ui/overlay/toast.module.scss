@@ -1,0 +1,50 @@
+@use '@/shared/ui/mixins' as ui;
+
+@keyframes toast-in { from { opacity: 0; transform: translateY(var(--space-2)); } to { opacity: 1; transform: translateY(0); } }
+
+@keyframes toast-out { from { opacity: 1; } to { opacity: 0; } }
+
+// The viewport. @zag-js/toast sets an inline `zIndex: 2147483647` here that
+// createToaster cannot configure — --z-toast is declared for completeness
+// only; it never actually wins against the inline style.
+.root {
+  z-index: var(--z-toast);
+}
+
+.toast {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 20rem;
+  max-width: calc(100vw - var(--space-8));
+  padding: var(--space-3) var(--space-6) var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-overlay);
+  box-shadow: var(--shadow-md);
+
+  &[data-state='open'] { animation: toast-in var(--dur-base) var(--ease-out); }
+  &[data-state='closed'] { animation: toast-out var(--dur-fast) var(--ease-out); }
+}
+
+.title { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--color-text-primary); }
+
+.description { font-size: var(--text-xs); color: var(--color-text-secondary); }
+
+.closeTrigger {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+
+  @include ui.focus-ring;
+}
+
+.toneSuccess { border-color: var(--color-success-border); background: var(--color-success-bg); }
+.toneDanger { border-color: var(--color-danger-border); background: var(--color-danger-bg); }
+.toneAccent { border-color: var(--color-accent-subtle-border); background: var(--color-accent-subtle-bg); }

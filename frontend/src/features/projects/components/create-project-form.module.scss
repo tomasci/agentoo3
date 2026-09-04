@@ -1,121 +1,28 @@
-@use '@/styles/variables' as v;
-
-.card {
-  padding: v.$space-lg;
-  border: 1px dashed var(--border);
-  border-radius: v.$radius;
-}
-
 .heading {
-  margin: 0 0 v.$space-md;
-  font-size: 1rem;
-  font-weight: 600;
-}
-
-.form {
-  display: grid;
-  gap: v.$space-md;
-}
-
-.field {
-  display: grid;
-  gap: 0.35rem;
-}
-
-.label {
-  font-size: 0.8125rem;
-  color: var(--muted-fg);
-}
-
-.input {
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-
-  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-}
-
-.hint {
-  font-size: 0.75rem;
-  color: var(--muted-fg);
-}
-
-.error {
-  color: var(--warn);
-  font-size: 0.8125rem;
-}
-
-.tabs {
-  display: flex;
-  gap: 0.25rem;
-  // A fieldset for the semantics; the browser default chrome is not wanted.
   margin: 0;
-  padding: 0.2rem;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  width: fit-content;
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: var(--weight-semibold);
 }
 
-// Announced by screen readers, invisible on screen. `display: none` would
-// remove it from the accessibility tree, which defeats the point.
-.srOnly {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
-}
-
-.tab {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--muted-fg);
-  font: inherit;
-  font-size: 0.8125rem;
-  padding: 0.3rem 0.7rem;
-  border-radius: calc(v.$radius-sm - 2px);
-  cursor: pointer;
-
-  &[aria-pressed='true'] {
-    background: var(--accent);
-    color: var(--accent-fg);
-  }
-}
-
-.submitRow {
-  display: flex;
-  align-items: center;
-  gap: v.$space-md;
+// Orphan hint text with no field of its own — the "empty project" branch has
+// no input to attach `Field`'s hint slot to.
+.hint {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-text-muted);
 }
 
 .tip {
-  margin-top: v.$space-sm;
-  padding: v.$space-sm;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--surface);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
 }
 
 .tipText {
-  margin: 0 0 0.4rem;
-  font-size: 0.75rem;
-  color: var(--muted-fg);
-  line-height: 1.55;
-}
-
-.tipRow { display: flex; align-items: center; gap: v.$space-sm; flex-wrap: wrap; }
-
-.tipPath {
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 0.75rem;
-  overflow-wrap: anywhere;
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-text-muted);
 }

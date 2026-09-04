@@ -1,9 +1,19 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { Button, ConfirmDialog, CopyButton } from '@/shared/ui'
+import {
+  Alert,
+  Button,
+  Card,
+  Code,
+  ConfirmDialog,
+  CopyButton,
+  Inline,
+  Input,
+  Stack,
+} from '@/shared/ui'
 import { type SshKey, useDeleteSshKey, useTestSshKey } from '../hooks/use-ssh-keys'
-import styles from './ssh-keys-page.module.scss'
+import styles from './ssh-key-card.module.scss'
 
 export function SshKeyCard({ sshKey }: { sshKey: SshKey }) {
   const { t } = useTranslation()
@@ -24,48 +34,59 @@ export function SshKeyCard({ sshKey }: { sshKey: SshKey }) {
         })
 
   return (
-    <article className={styles.card}>
-      <div className={styles.head}>
-        <div>
-          <h3 className={styles.name}>{sshKey.name}</h3>
-          <p className={styles.fingerprint}>{sshKey.fingerprint}</p>
-          {sshKey.comment && <p className={styles.fingerprint}>{sshKey.comment}</p>}
-        </div>
-        <Button type="button" disabled={remove.isPending} onClick={() => setConfirmDelete(true)}>
-          {t('common.delete')}
-        </Button>
-      </div>
+    <Card as="article">
+      <Stack gap={3}>
+        <Inline justify="between" align="start" gap={3} wrap={false}>
+          {/* `Stack`'s flex column turns these two `<code>` siblings (inline
+              elements) into stacked block-level flex items, so no wrapper div
+              or local class is needed just to put the fingerprint on its own
+              line under the name. */}
+          <Stack gap={1}>
+            <h3 className={styles.name}>{sshKey.name}</h3>
+            <Code>{sshKey.fingerprint}</Code>
+            {sshKey.comment && <Code>{sshKey.comment}</Code>}
+          </Stack>
+          <Button type="button" disabled={remove.isPending} onClick={() => setConfirmDelete(true)}>
+            {t('common.delete')}
+          </Button>
+        </Inline>
 
-      <pre className={styles.pubkey}>{sshKey.publicKey}</pre>
+        <Code block wrap>
+          {sshKey.publicKey}
+        </Code>
 
-      <div className={styles.actions}>
-        <CopyButton value={sshKey.publicKey} label={t('sshKeys.copyPublic')} />
-        <input
-          className={styles.hostInput}
-          value={host}
-          onChange={(e) => setHost(e.target.value)}
-          aria-label={t('sshKeys.host')}
-        />
-        <Button
-          type="button"
-          disabled={test.isPending}
-          onClick={() => {
-            setError(null)
-            test.mutate(
-              { path: { id: sshKey.id }, body: { host } },
-              { onError: (e) => setError(apiErrorMessage(e, t('sshKeys.testFailed'))) },
-            )
-          }}
-        >
-          {test.isPending ? t('sshKeys.testing') : t('sshKeys.test')}
-        </Button>
-        {result && (
-          <span className={`${styles.testResult} ${result.ok ? styles.ok : styles.bad}`}>
-            {result.message}
-          </span>
-        )}
-        {error && <span className={styles.error}>{error}</span>}
-      </div>
+        <Inline gap={2}>
+          <CopyButton value={sshKey.publicKey} label={t('sshKeys.copyPublic')} />
+          <div className={styles.hostField}>
+            <Input
+              value={host}
+              onChange={(e) => setHost(e.target.value)}
+              aria-label={t('sshKeys.host')}
+            />
+          </div>
+          <Button
+            type="button"
+            disabled={test.isPending}
+            onClick={() => {
+              setError(null)
+              test.mutate(
+                { path: { id: sshKey.id }, body: { host } },
+                { onError: (e) => setError(apiErrorMessage(e, t('sshKeys.testFailed'))) },
+              )
+            }}
+          >
+            {test.isPending ? t('sshKeys.testing') : t('sshKeys.test')}
+          </Button>
+        </Inline>
+
+        {/* No explicit "never tested" state: a key that has never been tested
+            simply shows no result line, the same way an absent comment above
+            renders nothing rather than "No comment". A tri-state message here
+            would need new copy, and the locale files it would live in
+            (src/shared/i18n) are outside the three files this migration owns. */}
+        {result && <Alert tone={result.ok ? 'success' : 'danger'}>{result.message}</Alert>}
+        {error && <Alert tone="danger">{error}</Alert>}
+      </Stack>
 
       <ConfirmDialog
         open={confirmDelete}
@@ -77,6 +98,6 @@ export function SshKeyCard({ sshKey }: { sshKey: SshKey }) {
           remove.mutate({ path: { id: sshKey.id } }, { onSettled: () => setConfirmDelete(false) })
         }
       />
-    </article>
+    </Card>
   )
 }

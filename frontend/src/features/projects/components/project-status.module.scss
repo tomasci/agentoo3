@@ -1,34 +1,5 @@
-@use '@/styles/variables' as v;
-
-.status {
+.content {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
-  font-size: 0.75rem;
-  padding: 0.15rem 0.5rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  white-space: nowrap;
-}
-
-.dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  flex: none;
-
-  &.ready { background: var(--ok); }
-  &.pending,
-  &.cloning { background: var(--accent); }
-  &.needs_manual { background: var(--warn); }
-  &.failed { background: var(--danger); }
-}
-
-.spin {
-  animation: pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+  gap: var(--space-1);
 }

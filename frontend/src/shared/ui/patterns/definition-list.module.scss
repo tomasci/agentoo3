@@ -1,0 +1,40 @@
+.root {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.item {
+  display: flex;
+  gap: var(--space-3);
+}
+
+.term {
+  margin: 0;
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-text-secondary);
+}
+
+.description {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-text-primary);
+}
+
+// Term and description sit on one row, term at a fixed width — for short
+// label/value pairs like a metadata panel.
+.layoutInline {
+  .item { align-items: baseline; }
+  .term { width: 8rem; }
+}
+
+// Term above description, both full width — for a longer description that
+// needs the space a fixed-width term column would take away.
+.layoutStacked {
+  .item { flex-direction: column; gap: var(--space-1); }
+  .term { font-weight: var(--weight-medium); }
+}

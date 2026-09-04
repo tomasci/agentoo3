@@ -1,0 +1,88 @@
+{
+  "extends": ["stylelint-config-standard-scss"],
+  "rules": {
+    "selector-class-pattern": null,
+    "custom-property-pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+    "no-descending-specificity": null,
+    "declaration-block-single-line-max-declarations": null,
+    "scss/comment-no-empty": null,
+    "value-keyword-case": [
+      "lower",
+      {
+        "ignoreProperties": ["/^--font/", "/^font$/", "/^font-family$/"]
+      }
+    ],
+    "declaration-block-no-redundant-longhand-properties": [
+      true,
+      {
+        "ignoreShorthands": ["grid-template"]
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["src/**/*.module.scss"],
+      "rules": {
+        "color-no-hex": true,
+        "color-named": "never",
+        "function-disallowed-list": [
+          "rgb",
+          "rgba",
+          "hsl",
+          "hsla",
+          "hwb",
+          "lab",
+          "lch",
+          "oklab",
+          "oklch",
+          "color-mix"
+        ],
+        "declaration-property-value-disallowed-list": {
+          "/.*/": ["/var\\(--(indigo|neutral|green|amber|red)-/", "/^#[0-9a-fA-F]{3,8}$/"],
+          "/^transition/": [
+            "/(?<![a-zA-Z-])\\d+(\\.\\d+)?m?s\\b/",
+            "/(?<![\\w-])(ease-in-out|ease-in|ease-out|ease|linear|step-start|step-end)(?![\\w-])/"
+          ],
+          "/^animation/": [
+            "/(?<![a-zA-Z-])\\d+(\\.\\d+)?m?s\\b/",
+            "/(?<![\\w-])(ease-in-out|ease-in|ease-out|ease|linear|step-start|step-end)(?![\\w-])/"
+          ]
+        },
+        "declaration-property-value-allowed-list": {
+          "border-width": ["0", "1px", "2px", "-1px", "-2px", "/^var\\(--focus-ring-.*\\)$/"],
+          "outline-width": ["0", "1px", "2px", "-1px", "-2px", "/^var\\(--focus-ring-.*\\)$/"],
+          "outline-offset": ["0", "1px", "2px", "-1px", "-2px", "/^var\\(--focus-ring-.*\\)$/"],
+          "font-family": ["/^var\\(--[a-z0-9-]+\\)$/", "inherit", "none", "auto", "0"],
+          "font-weight": ["/^var\\(--[a-z0-9-]+\\)$/", "inherit", "none", "auto", "0"],
+          "box-shadow": ["/^var\\(--[a-z0-9-]+\\)$/", "inherit", "none", "auto", "0"],
+          "z-index": ["/^var\\(--[a-z0-9-]+\\)$/", "inherit", "none", "auto", "0"]
+        },
+        "declaration-property-unit-allowed-list": {
+          "/^padding/": ["rem", "%"],
+          "/^margin/": ["rem", "%"],
+          "gap": ["rem", "%"],
+          "row-gap": ["rem", "%"],
+          "column-gap": ["rem", "%"],
+          "font-size": ["rem", "%"],
+          "/^border-radius/": ["rem", "%"],
+          "/^inset/": ["rem", "%"]
+        }
+      }
+    },
+    {
+      "files": ["src/shared/ui/core/markdown.module.scss"],
+      "rules": {
+        "declaration-property-unit-allowed-list": {
+          "/^padding/": ["rem", "%", "em"],
+          "/^margin/": ["rem", "%", "em"],
+          "gap": ["rem", "%"],
+          "row-gap": ["rem", "%"],
+          "column-gap": ["rem", "%"],
+          "font-size": ["rem", "%"],
+          "/^border-radius/": ["rem", "%"],
+          "/^inset/": ["rem", "%"]
+        }
+      }
+    }
+  ]
+}

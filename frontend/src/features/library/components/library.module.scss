@@ -1,169 +1,81 @@
-@use '@/styles/variables' as v;
-
-.page { display: grid; gap: v.$space-xl; }
-
-.section { display: grid; gap: v.$space-md; }
-
-.sectionHead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: v.$space-md;
-}
-
-.title { margin: 0; font-size: 1.0625rem; font-weight: 600; }
-
 .intro {
   margin: 0;
-  font-size: 0.8125rem;
-  color: var(--muted-fg);
-  line-height: 1.6;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-text-secondary);
 }
-
-.wrapper { border: 1px solid var(--border); border-radius: v.$radius; overflow-x: auto; }
-.table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-
-.th {
-  text-align: left;
-  font-weight: 600;
-  font-size: 0.75rem;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--muted-fg);
-  padding: 0.6rem v.$space-md;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  white-space: nowrap;
-}
-
-.td { padding: 0.65rem v.$space-md; border-bottom: 1px solid var(--border); vertical-align: middle; }
-.row:last-child .td { border-bottom: 0; }
-.row:hover { background: var(--surface); }
 
 .nameLink {
-  color: var(--fg);
+  color: var(--color-text-primary);
   text-decoration: none;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   &:hover { text-decoration: underline; }
-  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+  &:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+    border-radius: var(--radius-sm);
+  }
 }
 
-.role {
-  font-size: 0.6875rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0.1rem 0.5rem;
-  white-space: nowrap;
-}
-.orchestrator { border-color: var(--accent); color: var(--accent); }
-
-.muted { color: var(--muted-fg); font-size: 0.8125rem; }
-.mono { font-family: ui-monospace, Menlo, monospace; font-size: 0.75rem; color: var(--muted-fg); }
-.actionsCell { width: 1%; text-align: right; white-space: nowrap; }
-
-.empty {
-  padding: v.$space-xl v.$space-lg;
-  text-align: center;
-  color: var(--muted-fg);
-  font-size: 0.9375rem;
-}
+.muted { color: var(--color-text-muted); font-size: var(--text-sm); line-height: var(--leading-sm); }
 
 // --- editor ---
 
-.editor { display: grid; gap: v.$space-lg; }
-
-.card {
-  padding: v.$space-lg;
-  border: 1px solid var(--border);
-  border-radius: v.$radius;
-  background: var(--surface);
-}
-
+// The responsive field grid inside an editor card — no shared component owns
+// this layout, since it is specific to how many short fields sit side by side
+// here.
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
-  gap: v.$space-md;
-}
-
-.field { display: grid; gap: 0.35rem; }
-.label { font-size: 0.8125rem; color: var(--muted-fg); }
-
-.input,
-.select {
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--bg);
-  color: var(--fg);
-  font: inherit;
-
-  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  &:disabled { opacity: 0.6; }
-}
-
-.prompt {
-  width: 100%;
-  min-height: 26rem;
-  padding: v.$space-md;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.8125rem;
-  line-height: 1.65;
-  resize: vertical;
-  tab-size: 2;
-
-  &:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  gap: var(--space-3);
 }
 
 .tools {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
-  gap: 0.35rem v.$space-md;
+  gap: var(--space-2) var(--space-3);
 }
 
-.tool {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.8125rem;
-  cursor: pointer;
-}
+// One stray note that belongs to no `Field` (it sits beside the save button,
+// or above the skill's bundled-files list) — everything else that used this
+// style now gets it from `Field`'s own helper text.
+.hint { font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--color-text-muted); }
 
-.hint { font-size: 0.75rem; color: var(--muted-fg); line-height: 1.55; }
-.error { color: var(--warn); font-size: 0.8125rem; }
-// Named for what it is. It was `.row`, which collided with the table-row
-// class above and turned every <tr> into a flex container.
-.controls { display: flex; gap: v.$space-sm; align-items: center; flex-wrap: wrap; }
-.back { font-size: 0.8125rem; color: var(--accent); text-decoration: none; justify-self: start; }
+.back {
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-accent);
+  text-decoration: none;
 
-.files {
-  margin: 0.35rem 0 0;
-  padding-left: 1.1rem;
-  font-family: ui-monospace, Menlo, monospace;
-  font-size: 0.75rem;
-  color: var(--muted-fg);
+  // The parent is now a flex column (`Stack`, `align="stretch"` by default);
+  // `justify-self` was the grid-only equivalent and had stopped doing
+  // anything once `.editor`'s `display: grid` was replaced.
+  align-self: flex-start;
+
+  &:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
 }
 
 // --- per-project assignment ---
 
-.assignList { display: grid; gap: 0.35rem; }
-
 .assignItem {
   display: flex;
-  align-items: flex-start;
-  gap: 0.5rem;
-  padding: 0.5rem 0.6rem;
-  border: 1px solid var(--border);
-  border-radius: v.$radius-sm;
-  cursor: pointer;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
 
-  &:hover { background: var(--bg); }
+  &:hover { background: var(--color-bg-app); }
+
+  &:focus-within {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+
+  // `Checkbox` sits at its natural (inline-flex) width; stretching its one
+  // child across the row is what makes the whole card clickable/hoverable
+  // rather than just the text.
+  > label { flex: 1; min-width: 0; }
 }
-
-.assignBody { display: grid; gap: 0.1rem; }
-.assignName { font-size: 0.875rem; font-weight: 500; }
-.assignDesc { font-size: 0.75rem; color: var(--muted-fg); line-height: 1.5; }

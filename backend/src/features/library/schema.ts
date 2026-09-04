@@ -51,7 +51,7 @@ export const createAgentSchema = z.object({
     .string()
     .min(1)
     .max(64)
-    .openapi({ description: 'Becomes the filename', example: 'reviewer' }),
+    .openapi({ description: 'Becomes the filename', example: 'tester' }),
   ...agentBody,
 })
 export type CreateAgentInput = z.infer<typeof createAgentSchema>

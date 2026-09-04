@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next'
+import { Alert, Card, EmptyState, PageHeader, Spinner, Stack } from '@/shared/ui'
 import { useProjects } from '../hooks/use-projects'
 import { apiErrorMessage } from '../lib/api-error'
 import { CreateProjectForm } from './create-project-form'
@@ -20,36 +21,32 @@ export function ProjectPicker({ onPick }: { onPick: (projectId: string) => void 
 
   return (
     <div className={styles.page}>
-      <header className={styles.intro}>
-        <h2 className={styles.title}>{t('picker.heading')}</h2>
-        <p className={styles.lead}>{t('picker.lead')}</p>
-      </header>
+      <Stack gap={8}>
+        <PageHeader title={t('picker.heading')} description={t('picker.lead')} />
 
-      <section>
-        <h3 className={styles.sectionTitle}>{t('picker.existing')}</h3>
+        <Card>
+          <Stack gap={3}>
+            <PageHeader level={2} title={t('picker.existing')} />
 
-        {isError && (
-          <p className={styles.problem}>
-            {t('projects.loadFailed')} — {apiErrorMessage(error, t('projects.loadFailed'))}
-          </p>
-        )}
+            {isError && <Alert>{apiErrorMessage(error, t('projects.loadFailed'))}</Alert>}
+            {!isError && isPending && <Spinner label={t('common.loading')} block />}
+            {!isError && !isPending && projects.length === 0 && (
+              <EmptyState title={t('picker.none')} />
+            )}
+            {projects.length > 0 && <ProjectsTable projects={projects} onOpen={onPick} />}
+          </Stack>
+        </Card>
 
-        {isPending && <p className={styles.empty}>{t('common.loading')}</p>}
-
-        {!isPending && !isError && projects.length === 0 && (
-          <p className={styles.empty}>{t('picker.none')}</p>
-        )}
-
-        {projects.length > 0 && <ProjectsTable projects={projects} onOpen={onPick} />}
-      </section>
-
-      <section>
-        <h3 className={styles.sectionTitle}>{t('picker.create')}</h3>
-        {/* Creating opens the project in this tab straight away: a clone shows
-            its progress on the overview, which is the page you would go looking
-            for it on anyway. */}
-        <CreateProjectForm onCreated={onPick} />
-      </section>
+        <Card>
+          <Stack gap={3}>
+            <PageHeader level={2} title={t('picker.create')} />
+            {/* Creating opens the project in this tab straight away: a clone shows
+                its progress on the overview, which is the page you would go looking
+                for it on anyway. */}
+            <CreateProjectForm onCreated={onPick} />
+          </Stack>
+        </Card>
+      </Stack>
     </div>
   )
 }

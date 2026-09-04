@@ -68,7 +68,7 @@ An orchestrator's markdown body *is* a custom system prompt, so none of Claude
 Code's built-in scaffolding applies to it — whatever it says is the entire
 prompt. Asking every operator to rewrite the craft of running a team of agents
 from scratch just produces the same doctrine badly, several times over. So it is
-written once and every `role: orchestrator` prompt is composed from three parts,
+written once and every `role: orchestrator` prompt is composed from four parts,
 idempotently:
 
 | part | home | position |
@@ -76,6 +76,7 @@ idempotently:
 | the orchestration method | `LIBRARY_DIR/prompts/orchestration-method.md` | before |
 | the agent's own markdown | `LIBRARY_DIR/agents/<name>.md` | middle |
 | delegation + autonomy | `src/library/orchestrator-prompt.ts` | after |
+| the project's roster | the project's own plugin directory | after |
 
 **The method is a file, not a constant.** It is a prompt, and prompts belong in
 the library where a commit changes them — hardcoding it would mean a deploy to
@@ -87,11 +88,34 @@ orchestrators simply lose the method; they still get the two guarantees.
 The method covers grounding a plan in the code, splitting by context rather than
 by task list, briefing a subagent that starts blank, verifying instead of
 believing a report, and owning the integration. An agent file is then free to say
-only what is true of its project — the seeded
-`library.example/agents/orchestrator.md` is written that way on purpose.
+only what is true of that *agent* — its role and its standards.
+
+**Agent files say nothing about any one project.** The library is global and an
+agent is assigned to many projects, so a prompt naming this repository's stack,
+commands or teammates is wrong everywhere else it is used, and silently. Project
+facts reach a session by the two routes that are already per-project: the repo's
+own `CLAUDE.md` (loaded through `settingSources: ['project']`) and the skills
+assigned to it. The seeded agents are written that way on purpose — they carry
+craft, and they read the project when they get there.
+
+**The roster is composed in, not written down.** An orchestrator is told to
+delegate, so it has to know to whom; but the team is a per-project selection, and
+any list baked into a prompt is wrong for the next project that selects a
+different set. So the roster is read at session start from the project's plugin
+directory — the very copy the SDK is about to load, freshly synced — and rendered
+into a `<team>` block naming each subagent as it must actually be addressed
+(`agentoo:tester`, plugin-qualified, because a brief sent to a bare `tester`
+finds nothing). Only `role: subagent` entries are listed: offering the lead a
+copy of itself is a loop the spawn-depth cap would have to catch. An empty
+selection is a real configuration and gets a sentence saying so, rather than
+silence that leaves the delegation instruction pointing at nobody.
+
+Claude Code does list loaded agents in its Agent tool description, so this is not
+the only channel — but that arrives as tool metadata, after the plan has been
+shaped, whereas the roster in the system prompt is there for the first turn.
 
 An orchestrator that works alone sets `team: false` in its frontmatter and is
-composed differently: no method, no delegation instruction. For a solo agent
+composed differently: no method, no delegation instruction, no roster. For a solo agent
 those are not merely unnecessary, they are wrong — they tell it to hand off the
 work it exists to do. Autonomy still applies, because it describes how a
 headless session behaves rather than how many agents are in it. The seeded

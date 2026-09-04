@@ -1,5 +1,6 @@
 import { Menu, Portal } from '@ark-ui/react'
 import { useTranslation } from 'react-i18next'
+import { cx } from '../lib/cx'
 import styles from './actions-menu.module.scss'
 
 export interface MenuAction {
@@ -14,6 +15,10 @@ export interface MenuAction {
 export function ActionsMenu({ actions, label }: { actions: MenuAction[]; label?: string }) {
   const { t } = useTranslation()
 
+  // A trigger with nothing behind it is a dead end, not an empty state worth
+  // rendering — the row it sits on just has no actions.
+  if (actions.length === 0) return null
+
   return (
     <Menu.Root
       onSelect={(details) => {
@@ -27,14 +32,14 @@ export function ActionsMenu({ actions, label }: { actions: MenuAction[]; label?:
         ⋯
       </Menu.Trigger>
       <Portal>
-        <Menu.Positioner className={styles.positioner}>
+        <Menu.Positioner>
           <Menu.Content className={styles.content}>
             {actions.map((action) => (
               <Menu.Item
                 key={action.id}
                 value={action.id}
                 disabled={action.disabled}
-                className={`${styles.item} ${action.destructive ? styles.destructive : ''}`}
+                className={cx(styles.item, action.destructive && styles.itemDestructive)}
               >
                 {action.label}
               </Menu.Item>

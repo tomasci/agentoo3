@@ -129,10 +129,27 @@ Agents and skills are markdown in `LIBRARY_DIR`, marked `role: orchestrator` or
 `role: subagent` so you can see which drive a session and which are only reached
 by delegation. Every orchestrator is composed against the shared method in
 `prompts/orchestration-method.md` — how to plan, split, brief and verify — so an
-agent file only has to say what is true of its project. Two guarantees get the
+agent file only has to say what is true of that agent. Two guarantees get the
 last word: delegate the work rather than do it, and run to completion without
 stopping to ask. Claude Code's own delegation safeguard never applies to a
 custom system prompt, so without this an orchestrator has no policy at all.
+
+The seeded library is a working roster rather than a demo: `orchestrator` leads
+the team and `global` works alone, with `architect` deciding the shape of a
+structural change, `planner` turning an agreed goal into ordered tracks,
+`backend-dev` and `frontend-dev` implementing either side of the API, and
+`tester` establishing by execution whether the result holds. Only the
+implementers can write; the two planning roles are read-only, and `tester` owns
+test files but never the code under test — so the agent that wrote a change is
+never the one who certifies it.
+
+None of them mentions a stack, a command or a teammate. The library is global
+and an agent is reused across projects, so anything project-specific in a prompt
+would be wrong everywhere else; the project speaks for itself through its
+`CLAUDE.md` and its assigned skills. The one list an orchestrator cannot read
+off the repository — who is on its team — is composed into the prompt at session
+start from that project's own selection, so a roster is never stale and never
+names an agent the project did not assign.
 
 Projects live one-per-directory under `PROJECTS_DIR`, each session on its own git
 worktree and branch. Details and the private-repo recovery flow:

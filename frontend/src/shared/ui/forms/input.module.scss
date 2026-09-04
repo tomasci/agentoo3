@@ -1,0 +1,11 @@
+@use '@/shared/ui/mixins' as ui;
+
+.root {
+  @include ui.control-surface;
+}
+
+.mono { font-family: var(--font-mono); }
+
+.sizeSm { min-height: var(--control-height-sm); padding: 0 var(--space-2); font-size: var(--text-sm); }
+.sizeMd { min-height: var(--control-height-md); padding: 0 var(--space-3); font-size: var(--text-base); }
+.sizeLg { min-height: var(--control-height-lg); padding: 0 var(--space-4); font-size: var(--text-md); }
