@@ -1,5 +1,6 @@
 import { and, count, desc, eq, gt, inArray, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
+import { sanitizeForDb } from '@/db/sanitize'
 import { messages, projects, sessions } from '@/db/schema'
 import { badRequest, conflict, notFound } from '@/lib/errors'
 import { publishControl, publishSessionEvent } from '@/lib/events'
@@ -194,7 +195,11 @@ export async function createSession(
       logger.warn(`Could not create a worktree for session ${row.id}: ${result.stderr}`)
       await db
         .update(sessions)
-        .set({ lastError: `Worktree unavailable: ${result.stderr}`, updatedAt: new Date() })
+        .set({
+          // result.stderr is raw process output.
+          lastError: sanitizeForDb(`Worktree unavailable: ${result.stderr}`),
+          updatedAt: new Date(),
+        })
         .where(eq(sessions.id, row.id))
     }
   } else {
@@ -286,7 +291,7 @@ export async function sendMessage(sessionId: string, text: string): Promise<Sess
       type: 'prompt',
       pending: true,
       title: null,
-      payload: { text },
+      payload: sanitizeForDb({ text }),
     })
     .returning()
   if (!row) throw new Error('Insert returned no row')

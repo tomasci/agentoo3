@@ -2,6 +2,7 @@ import { symlink } from 'node:fs/promises'
 import { Worker } from 'bullmq'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
+import { sanitizeForDb } from '@/db/sanitize'
 import { projects } from '@/db/schema'
 import { keyPathFor } from '@/features/ssh-keys/service'
 import { resolveSource } from '@/lib/adopt-path'
@@ -28,7 +29,8 @@ async function fail(projectId: string, error: string, recovery?: string[]) {
     .update(projects)
     .set({
       status: recovery ? 'needs_manual' : 'failed',
-      lastError: error,
+      // Captured command output.
+      lastError: sanitizeForDb(error),
       recoveryCommands: recovery ?? null,
       updatedAt: new Date(),
     })
