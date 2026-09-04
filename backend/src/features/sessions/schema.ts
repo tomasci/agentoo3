@@ -87,3 +87,40 @@ export const sendMessageSchema = z.object({
   text: z.string().min(1).max(100_000),
 })
 export type SendMessageInput = z.infer<typeof sendMessageSchema>
+
+// No zod schema for these: the export is assembled from already-parsed
+// SessionDto/SessionMessageDto values, so a validation pass here would just be
+// checking our own output. Types only.
+export type SessionExportMessage = {
+  seq: number
+  type: string
+  parentToolUseId: string | null
+  title: string | null
+  pending: boolean
+  createdAt: string
+  payload: unknown
+}
+
+export type SessionExport = {
+  kind: 'agentoo.session-export'
+  formatVersion: 1
+  exportedAt: string
+  generator: { app: 'agentoo'; version: string }
+  session: {
+    id: string
+    projectId: string
+    projectName: string
+    title: string | null
+    status: SessionDto['status']
+    orchestrator: string | null
+    branch: string | null
+    isolated: boolean
+    maxBudgetUsd: number | null
+    totalCostUsd: number
+    lastError: string | null
+    messageCount: number
+    createdAt: string
+    updatedAt: string
+  }
+  messages: SessionExportMessage[]
+}

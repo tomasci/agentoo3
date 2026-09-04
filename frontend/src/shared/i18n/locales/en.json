@@ -206,6 +206,7 @@
     "live": "Live",
     "reconnecting": "Reconnecting…",
     "stop": "Stop",
+    "export": "Export JSON",
     "send": "Send",
     "sending": "Sending…",
     "backToList": "All sessions",

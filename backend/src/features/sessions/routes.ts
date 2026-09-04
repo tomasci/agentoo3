@@ -1,5 +1,6 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import { errorSchema } from '@/features/projects/schema'
+import { badRequest } from '@/lib/errors'
 import { subscribeSession } from '@/lib/events'
 import {
   createSessionSchema,
@@ -11,11 +12,13 @@ import {
 import {
   createSession,
   deleteSession,
+  exportSession,
   getSession,
   interruptSession,
   listMessages,
   listSessions,
   sendMessage,
+  sessionExportFileName,
   updateSession,
 } from './service'
 
@@ -191,6 +194,37 @@ sessionsRouter.openapi(
   }),
   async (c) => c.json(await interruptSession(c.req.valid('param').id), 200),
 )
+
+/**
+ * Download the full transcript as a JSON file.
+ *
+ * Registered outside the OpenAPI router, like /events: this is a download, not
+ * a data fetch — the browser navigates to it and the server names the file. A
+ * generated react-query hook would be dead code that pulls a multi-megabyte
+ * transcript into a cache nobody invalidates, and the generated axios client
+ * neither preserves nor exposes Content-Disposition, so the spec would
+ * describe the payload while hiding the part that makes it a file.
+ *
+ * No query parameters: export means the whole transcript. The id is validated
+ * here (the openapi router normally does that) so a malformed id 400s before
+ * any body bytes go out, same as an unknown id 404s via getSession.
+ *
+ * Excluding worktreePath does not make this file safe to hand out freely —
+ * payloads are verbatim and contain absolute paths, bash commands and file
+ * contents the agent read. Redacting that would be lossy and unverifiable,
+ * and defeats the point of exporting a complete transcript.
+ */
+sessionsRouter.get('/sessions/:id/export', async (c) => {
+  const parsed = z.string().uuid().safeParse(c.req.param('id'))
+  if (!parsed.success) throw badRequest('Invalid session id')
+
+  const doc = await exportSession(parsed.data)
+  return c.body(JSON.stringify(doc, null, 2), 200, {
+    'Content-Type': 'application/json; charset=UTF-8',
+    'Content-Disposition': `attachment; filename="${sessionExportFileName(doc.session)}"`,
+    'Cache-Control': 'no-store',
+  })
+})
 
 /**
  * Live transcript.
