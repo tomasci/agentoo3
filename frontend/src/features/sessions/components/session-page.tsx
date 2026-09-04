@@ -81,14 +81,23 @@ export function SessionPage({ projectId, sessionId }: { projectId: string; sessi
     const value = text.trim()
     if (!value) return
     setError(null)
+    // Cleared now, not in `onSuccess`. Enter sends and people carry straight on
+    // typing the next prompt, but the clear used to wait for the round-trip to
+    // come back — so the box still held the sent text, the next few keystrokes
+    // appended to it, and the late `setText('')` then wiped them. Consistently
+    // the first two or three characters of every message after the first.
+    setText('')
+    pinned.current = true
     send.mutate(
       { path: { id: sessionId }, body: { text: value } },
       {
-        onSuccess: () => {
-          setText('')
-          pinned.current = true
+        onError: (e) => {
+          // Hand the text back rather than losing it, but only into a box still
+          // empty: by now the next prompt may already be part-typed, and
+          // restoring over that would repeat the bug this replaced.
+          setText((current) => (current === '' ? value : current))
+          setError(apiErrorMessage(e, t('sessions.sendFailed')))
         },
-        onError: (e) => setError(apiErrorMessage(e, t('sessions.sendFailed'))),
       },
     )
   }
