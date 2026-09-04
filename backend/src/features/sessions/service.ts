@@ -14,10 +14,12 @@ import {
 } from '@/lib/git'
 import { logger } from '@/lib/logger'
 import { projectRepo, projectRoot, projectWorktree } from '@/lib/paths'
+import { VERSION } from '@/lib/version'
 import { enqueueSessionRun } from '@/queue'
 import type {
   CreateSessionInput,
   SessionDto,
+  SessionExport,
   SessionMessageDto,
   UpdateSessionInput,
 } from './schema'
@@ -335,4 +337,86 @@ export async function listMessages(sessionId: string, after = -1): Promise<Sessi
     .orderBy(messages.seq)
 
   return rows.map(toMessageDto)
+}
+
+// --- export ---------------------------------------------------------------
+
+/**
+ * Assemble the full transcript as a self-contained document.
+ *
+ * sdkSessionId, worktreePath and workingDir are left out on purpose: the first
+ * is an Agent SDK resume handle that means nothing off the host that produced
+ * it and points at on-disk state the recipient does not have, and the other
+ * two are absolute server paths that would leak PROJECTS_DIR and the project
+ * slug into a file people paste into issues. branch stays — it is a git ref
+ * the UI already shows. Per-message id/sessionId are dropped the same way:
+ * the row uuid identifies nothing outside this database, sessionId only
+ * repeats session.id, and seq is already the stable identity within the
+ * export. Built field-by-field rather than by spreading the DTOs, because a
+ * spread would silently let any of this back in the next time a field is
+ * added upstream.
+ */
+export async function exportSession(id: string): Promise<SessionExport> {
+  const session = await getSession(id)
+  const project = await requireProject(session.projectId)
+  const transcript = await listMessages(id)
+
+  return {
+    kind: 'agentoo.session-export',
+    formatVersion: 1,
+    exportedAt: new Date().toISOString(),
+    generator: { app: 'agentoo', version: VERSION },
+    session: {
+      id: session.id,
+      projectId: session.projectId,
+      projectName: project.name,
+      title: session.title,
+      status: session.status,
+      orchestrator: session.orchestrator,
+      branch: session.branch,
+      isolated: session.isolated,
+      maxBudgetUsd: session.maxBudgetUsd,
+      totalCostUsd: session.totalCostUsd,
+      lastError: session.lastError,
+      messageCount: session.messageCount,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+    },
+    messages: transcript.map((m) => ({
+      seq: m.seq,
+      type: m.type,
+      parentToolUseId: m.parentToolUseId,
+      title: m.title,
+      pending: m.pending,
+      createdAt: m.createdAt,
+      // Verbatim: extended thinking, tool_use/tool_result blocks and the
+      // result message's cost/usage all live inside this payload rather than
+      // as columns, so this is the only thing that satisfies "all prompts,
+      // thinking, answers and tool activity". Do not reshape it.
+      payload: m.payload,
+    })),
+  }
+}
+
+/**
+ * `agentoo-session-<slug>-<id8>.json`, always matching /^[a-z0-9-]+\.json$/ so
+ * the Content-Disposition header needs no quoting escape and no RFC 5987
+ * filename*.
+ *
+ * Deliberately not `toSlug` from `@/lib/paths`: its `slug || 'project'`
+ * fallback is right for a directory name but wrong here. A Cyrillic title (the
+ * app ships an `ru` locale, so this happens) strips to empty under NFKD and
+ * would produce `agentoo-session-project-<id8>.json`, naming the wrong noun —
+ * so an empty stem here just drops out of the filename instead.
+ */
+export function sessionExportFileName(session: { id: string; title: string | null }): string {
+  const stem = (session.title ?? '')
+    .normalize('NFKD')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60)
+    .replace(/-+$/, '')
+  const id8 = session.id.slice(0, 8).toLowerCase()
+  return stem ? `agentoo-session-${stem}-${id8}.json` : `agentoo-session-${id8}.json`
 }

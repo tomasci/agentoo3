@@ -128,6 +128,14 @@ export function SessionPage({ projectId, sessionId }: { projectId: string; sessi
                     {t('sessions.stop')}
                   </Button>
                 )}
+                {/* Plain anchor, not a fetch/blob download: no object-URL lifecycle to
+                    leak, no Content-Disposition filename to parse client-side, and it
+                    works even while the transcript query is still pending. */}
+                <Button asChild>
+                  <a href={`/api/sessions/${sessionId}/export`} download>
+                    {t('sessions.export')}
+                  </a>
+                </Button>
                 <Button
                   type="button"
                   onClick={() =>

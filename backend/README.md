@@ -271,6 +271,18 @@ pub/sub connections are **not** BullMQ's: BullMQ needs
 setting means a publish to a Redis that is down never rejects — it waits, inside
 the turn that called it. These use a bounded retry instead.
 
+### Exporting a transcript
+
+`GET /sessions/{id}/export` returns the whole transcript as a downloadable JSON
+file: `Content-Type: application/json; charset=UTF-8`,
+`Content-Disposition: attachment; filename="agentoo-session-<slug>-<id8>.json"`
+(no title, or one that strips to nothing under NFKD, drops the slug and just
+uses `agentoo-session-<id8>.json`), and `Cache-Control: no-store` since a
+running session's transcript changes under the same URL. Like `/events`, it is
+registered outside the OpenAPI router and absent from `backend/openapi.json`:
+it's a download the browser navigates to, not a JSON fetch a generated client
+should wrap.
+
 ### Git over ssh inside a session
 
 The app injects `GIT_SSH_COMMAND` into the git commands it spawns itself, which

@@ -76,11 +76,17 @@ const backlog = [
   { id: 'm1', sessionId: 's1', seq: 0, type: 'prompt', title: null, payload: { text: 'hi' } },
   { id: 'm2', sessionId: 's1', seq: 1, type: 'assistant', title: 'orchestrator: on it', payload: {} },
 ]
+// A fixed replacement object has to cover *every* export routes.ts imports:
+// bun swaps the whole module namespace, so an export the router names but this
+// object omits fails the import with "Export named 'x' not found" and the file
+// dies while loading, before any test runs. Adding a service export used by the
+// router means adding a stub here too — even one this file never calls.
 mock.module(`${B}/features/sessions/service.ts`, () => ({
   listMessages: async (_id: string, after: number) => backlog.filter((m) => m.seq > after),
   listSessions: async () => [], getSession: async () => ({}), createSession: async () => ({}),
   updateSession: async () => ({}), deleteSession: async () => {},
   sendMessage: async () => ({}), interruptSession: async () => ({}),
+  exportSession: async () => ({}), sessionExportFileName: () => 'agentoo-session-00000000.json',
 }))
 
 const { sessionsRouter } = await import(`${B}/features/sessions/routes.ts`)
