@@ -11,6 +11,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import { Worker } from 'bullmq'
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
+import { sanitizeForDb } from '@/db/sanitize'
 import { messages, projects, sessions } from '@/db/schema'
 import { env, hasClaudeCredential } from '@/env'
 import { optionsFor } from '@/features/sessions/runner-options'
@@ -49,14 +50,19 @@ export async function appendMessage(
 
   const [row] = await db
     .insert(messages)
-    .values({
-      sessionId,
-      seq,
-      type: message.type,
-      parentToolUseId,
-      title: titleFor(message, who),
-      payload: message as unknown as Record<string, unknown>,
-    })
+    .values(
+      // The SDK message is raw tool output: a NUL character anywhere inside it
+      // makes Postgres reject the row, which would lose the message and, since
+      // the publish below never runs, hide that loss from every client.
+      sanitizeForDb({
+        sessionId,
+        seq,
+        type: message.type,
+        parentToolUseId,
+        title: titleFor(message, who),
+        payload: message as unknown as Record<string, unknown>,
+      }),
+    )
     .returning()
 
   await publishSessionEvent({ kind: 'message', sessionId, seq, message: row })
@@ -67,7 +73,8 @@ async function setStatus(sessionId: string, status: string, lastError?: string |
     .update(sessions)
     .set({
       status: status as 'idle' | 'queued' | 'running' | 'interrupted' | 'completed' | 'failed',
-      ...(lastError !== undefined && { lastError }),
+      // Usually a process's stderr, verbatim.
+      ...(lastError !== undefined && { lastError: sanitizeForDb(lastError) }),
       updatedAt: new Date(),
     })
     .where(eq(sessions.id, sessionId))
@@ -188,7 +195,7 @@ async function enqueueContinuation(sessionId: string, text: string): Promise<voi
       seq: seqRow.seq - 1,
       type: 'prompt',
       pending: true,
-      payload: { text, auto: true },
+      payload: sanitizeForDb({ text, auto: true }),
     })
     .returning()
 }

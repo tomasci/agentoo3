@@ -1,3 +1,5 @@
+@use '@/styles/breakpoints' as bp;
+
 // A strip of tabs above everything, the way a file manager or a browser stacks
 // them: the row scrolls sideways rather than shrinking tabs to illegibility, so
 // the twentieth project is still readable.
@@ -7,6 +9,19 @@
   align-items: stretch;
   gap: var(--space-1);
   padding: var(--space-1) var(--space-2) 0;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+// The phone alternative to `.bar`: a single control-height row holding
+// `TabSwitcher`'s picker. Hidden by default; below(sm) swaps the two (see
+// tab-bar.tsx's docblock for why this is a second nav rather than one shared
+// wrapper whose children swap).
+.barPhone {
+  grid-area: tabs;
+  display: none;
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-surface);
 }
@@ -132,4 +147,9 @@
     outline: var(--focus-ring-width) solid var(--color-focus-ring);
     outline-offset: var(--focus-ring-offset);
   }
+}
+
+@include bp.below(sm) {
+  .bar { display: none; }
+  .barPhone { display: flex; }
 }

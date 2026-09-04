@@ -1,0 +1,17 @@
+// Sizing only: Menu owns every look of its own trigger and content, and
+// nothing here may reach in and style its parts (component-contract.md).
+.root {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+// The trigger is a flex row (Menu's `field` variant), so this needs its own
+// `min-width: 0` to actually shrink and truncate rather than pushing the
+// button wider than the bar — the same rule `.status` needs for the same
+// reason, in layout.module.scss.
+.triggerLabel {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

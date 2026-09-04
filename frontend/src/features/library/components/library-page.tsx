@@ -46,6 +46,7 @@ export function LibraryPage() {
     () => [
       agentColumn.accessor('name', {
         header: () => t('library.table.name'),
+        meta: { role: 'primary' },
         cell: (info) => (
           <Link
             to="/library/agents/$name"
@@ -58,6 +59,7 @@ export function LibraryPage() {
       }),
       agentColumn.accessor('role', {
         header: () => t('library.table.role'),
+        meta: { role: 'meta', label: t('library.table.role') },
         cell: (info) => (
           <Badge tone={info.getValue() === 'orchestrator' ? 'accent' : 'neutral'} variant="outline">
             {t(`library.role.${info.getValue()}`)}
@@ -66,14 +68,17 @@ export function LibraryPage() {
       }),
       agentColumn.accessor('description', {
         header: () => t('library.table.description'),
+        meta: { role: 'secondary', label: t('library.table.description') },
         cell: (info) => <span className={styles.muted}>{info.getValue()}</span>,
       }),
       agentColumn.accessor('model', {
         header: () => t('library.table.model'),
+        meta: { role: 'meta', label: t('library.table.model') },
         cell: (info) => <Code>{info.getValue() ?? '—'}</Code>,
       }),
       agentColumn.accessor('usedByProjects', {
         header: () => t('library.table.usedBy'),
+        meta: { role: 'meta', label: t('library.table.usedBy') },
         cell: (info) => (
           <span className={styles.muted}>
             {t('library.usedByCount', { count: info.getValue() })}
@@ -83,6 +88,7 @@ export function LibraryPage() {
       agentColumn.display({
         id: 'actions',
         header: () => '',
+        meta: { role: 'actions' },
         cell: (info) => {
           const agent = info.row.original
           const actions: MenuAction[] = [
@@ -112,6 +118,7 @@ export function LibraryPage() {
     () => [
       skillColumn.accessor('name', {
         header: () => t('library.table.name'),
+        meta: { role: 'primary' },
         cell: (info) => (
           <Link
             to="/library/skills/$name"
@@ -124,10 +131,12 @@ export function LibraryPage() {
       }),
       skillColumn.accessor('description', {
         header: () => t('library.table.description'),
+        meta: { role: 'secondary', label: t('library.table.description') },
         cell: (info) => <span className={styles.muted}>{info.getValue()}</span>,
       }),
       skillColumn.accessor('extraFiles', {
         header: () => t('library.table.files'),
+        meta: { role: 'meta', label: t('library.table.files') },
         cell: (info) => (
           <Code>
             {info.getValue().length > 0
@@ -138,6 +147,7 @@ export function LibraryPage() {
       }),
       skillColumn.accessor('usedByProjects', {
         header: () => t('library.table.usedBy'),
+        meta: { role: 'meta', label: t('library.table.usedBy') },
         cell: (info) => (
           <span className={styles.muted}>
             {t('library.usedByCount', { count: info.getValue() })}
@@ -147,6 +157,7 @@ export function LibraryPage() {
       skillColumn.display({
         id: 'actions',
         header: () => '',
+        meta: { role: 'actions' },
         cell: (info) => {
           const skill = info.row.original
           const actions: MenuAction[] = [

@@ -1,6 +1,8 @@
 // Primitive non-colour tokens: type, spacing, radii, motion, z-index and the
 // handful of fixed layout dimensions. Same two-tier rule as _palette.scss —
 // these are theme-independent so they live on bare :root, not per-theme.
+@use 'breakpoints' as bp;
+
 :root {
   // Type. Inter leads for x-height and l/I/1 disambiguation; -apple-system
   // sits near the end of the stack deliberately, a fallback rather than the
@@ -101,4 +103,21 @@
   --layout-sidebar-width: 13.5rem;
   --layout-content-width: 42rem;
   --layout-statusbar-height: 1.75rem;
+
+  // Page padding/gap, responsive: below `sm` a phone gets the next scale
+  // step down rather than the desktop figure, which is comfortable at arm's
+  // length but wastes a phone's width. One block, compiled once — this file
+  // is `@use`-d a single time from global.scss, unlike a `*.module.scss`,
+  // which pays for a media query on every module that writes one.
+  --layout-page-padding-x: var(--space-5);
+  --layout-page-padding-y: var(--space-8);
+  --layout-page-gap: var(--space-5);
+}
+
+@include bp.below(sm) {
+  :root {
+    --layout-page-padding-x: var(--space-3);
+    --layout-page-padding-y: var(--space-4);
+    --layout-page-gap: var(--space-3);
+  }
 }

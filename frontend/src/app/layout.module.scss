@@ -20,8 +20,20 @@
     'tabs    tabs'
     'sidebar body'
     'status  status';
-  height: 100dvh;
+
+  // `--shell-height` is a runtime measurement (see use-visual-viewport.ts),
+  // not a token — it is only ever set from JS, in px, while an on-screen
+  // keyboard is open. The `100dvh` fallback is what every other browser and
+  // every render before that effect runs gets, so it has to hold on its own.
+  height: var(--shell-height, 100dvh);
   overflow: hidden;
+
+  // A notch or a home-indicator eats into the viewport on the sides and top;
+  // the bottom inset goes on `.status` instead (see its own comment) so the
+  // status bar's surface still reaches the physical edge.
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  padding-top: env(safe-area-inset-top);
 }
 
 // An empty tab has no sidebar to show, so the picker takes the full width
@@ -121,7 +133,15 @@
 .body {
   grid-area: body;
   overflow-y: auto;
-  padding: var(--space-8) var(--space-5);
+  padding: var(--layout-page-padding-y) var(--layout-page-padding-x);
+}
+
+// A route that owns its whole region (today: a session's own live page) draws
+// its own scrolling and its own edge-to-edge chrome — the body's padding and
+// scrollbar would just be a second, competing one.
+.bodyBleed {
+  padding: 0;
+  overflow: hidden;
 }
 
 .status {
@@ -130,18 +150,43 @@
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-1) var(--space-3);
+
+  // The bottom inset is the one exception to "insets live on `.shell`": if it
+  // sat there instead, the status bar's own surface would stop short of the
+  // physical edge, leaving a grey strip below it on a home-indicator phone.
+  // `--layout-statusbar-height` is a min-height, so growing past it here is
+  // fine.
+  padding-bottom: calc(var(--space-1) + env(safe-area-inset-bottom));
   border-top: 1px solid var(--color-border);
   background: var(--color-surface);
   font-size: var(--text-xs);
   line-height: var(--leading-xs);
   color: var(--color-text-secondary);
   min-height: var(--layout-statusbar-height);
-  overflow-x: auto;
-  white-space: nowrap;
+
+  // A grid item's intrinsic min-width is `auto`, not `0` — without this, the
+  // row below refuses to shrink past its longest child's natural width, and
+  // nothing inside ever gets the chance to truncate.
+  min-width: 0;
+  overflow: hidden;
 }
 
 .statusItem { display: inline-flex; align-items: center; gap: var(--space-2); }
 .statusSpacer { margin-left: auto; }
+
+// The health item is the one that must always fit: `min-width: 0` lets it
+// shrink below its own content instead of forcing `.status` wider than the
+// shell, and the label inside does the actual truncating.
+.statusHealth {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.statusHealthLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .statusLink {
   color: var(--color-accent);
@@ -180,12 +225,40 @@
     overflow-x: auto;
   }
 
+  // A flex item's intrinsic min-width is its content width, same trap as
+  // `.statusHealth` above: without this, `.brand` can never shrink past the
+  // logo's natural width, so the ellipsis below never gets a box narrow
+  // enough to actually clip against.
+  .brand {
+    min-width: 0;
+  }
+
+  // `overflow-wrap: anywhere` is right for the vertical sidebar above, where
+  // width is fixed and height is free to grow — wrong here, where it's the
+  // opposite. A long project name wrapping onto 2-3 lines used to triple
+  // this strip's height, and that stolen height came straight out of the
+  // transcript below it. One line, truncated, instead.
+  .logo {
+    overflow-wrap: normal;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .tagline { display: none; }
-  .nav { flex-direction: row; }
+
+  // Fixed to its own natural width rather than sharing the shrink with
+  // `.brand`: the nav stays fully readable and it's the strip that scrolls
+  // horizontally (see `.sidebar`'s `overflow-x` above) instead of the links
+  // getting squeezed illegibly thin.
+  .nav {
+    flex-direction: row;
+    flex: none;
+  }
+
   .sectionLabel { display: none; }
   .navItem { border-left: 0; border-bottom: 2px solid transparent; }
   .navItem[aria-current='page'] { border-left: 0; border-bottom-color: var(--color-accent); }
-  .body { padding: var(--space-5) var(--space-3); }
 }
 
 // Host load in the status bar. Tabular figures so a changing percentage does
@@ -197,3 +270,18 @@
 }
 
 .metricHigh { color: var(--color-danger); }
+
+// Phone: "N keys" is navigation the system sidebar already covers (and the
+// widest optional item), so it steps aside; the CPU/RAM/Disk trio — each its
+// own Tooltip, useless on touch anyway — collapses into one untooltipped chip
+// naming whichever of the three is worst. `display: contents` keeps the
+// trio's three spans acting as direct flex children of `.status`, exactly as
+// they do today, until the whole wrapper is hidden below.
+.statusMetrics { display: contents; }
+.statusSummary { display: none; }
+
+@include bp.below(sm) {
+  .statusLink { display: none; }
+  .statusMetrics { display: none; }
+  .statusSummary { display: inline-flex; }
+}

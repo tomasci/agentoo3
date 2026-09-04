@@ -210,8 +210,6 @@
     "export": "Export JSON",
     "send": "Send",
     "sending": "Sending…",
-    "backToList": "All sessions",
-    "sendHint": "Enter to send, Shift+Enter for a new line",
     "willQueue": "A turn is running — this will be sent as soon as it finishes",
     "composerPlaceholder": "Tell the orchestrator what to do…",
     "needsOrchestrator": "This session has no orchestrator, so it cannot run. Set one from the sessions list.",
@@ -240,6 +238,7 @@
     "cpu": "CPU {{percent}}%",
     "cpuTitle": "{{cores}} cores, load {{load}}",
     "mem": "RAM {{used}} ({{percent}}%)",
+    "memPercent": "RAM {{percent}}%",
     "memTitle": "{{used}} of {{total}} in use",
     "disk": "Disk {{percent}}%",
     "diskTitle": "{{free}} free on {{path}}"

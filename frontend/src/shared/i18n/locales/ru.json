@@ -210,8 +210,6 @@
     "export": "Экспорт JSON",
     "send": "Отправить",
     "sending": "Отправка…",
-    "backToList": "Все сессии",
-    "sendHint": "Enter — отправить, Shift+Enter — новая строка",
     "willQueue": "Ход выполняется — сообщение отправится сразу после его завершения",
     "composerPlaceholder": "Что нужно сделать оркестратору…",
     "needsOrchestrator": "У сессии нет оркестратора, запустить её нельзя. Выберите его в списке сессий.",
@@ -242,6 +240,7 @@
     "cpu": "CPU {{percent}}%",
     "cpuTitle": "Ядер: {{cores}}, load {{load}}",
     "mem": "RAM {{used}} ({{percent}}%)",
+    "memPercent": "RAM {{percent}}%",
     "memTitle": "Занято {{used}} из {{total}}",
     "disk": "Диск {{percent}}%",
     "diskTitle": "Свободно {{free}} на {{path}}"

@@ -30,6 +30,7 @@ export function ProjectsTable({
     () => [
       columnHelper.accessor('name', {
         header: () => t('projects.table.name'),
+        meta: { role: 'primary' },
         cell: (info) => {
           const project = info.row.original
           // Only a ready project has a checkout to open.
@@ -44,15 +45,18 @@ export function ProjectsTable({
       }),
       columnHelper.accessor('status', {
         header: () => t('projects.table.status'),
+        meta: { role: 'meta', label: t('projects.table.status') },
         cell: (info) => <ProjectStatusBadge project={info.row.original} />,
       }),
       columnHelper.accessor('path', {
         header: () => t('projects.table.path'),
+        meta: { role: 'secondary', label: t('projects.table.path') },
         cell: (info) => <Code wrap>{info.getValue()}</Code>,
       }),
       columnHelper.display({
         id: 'actions',
         header: () => '',
+        meta: { role: 'actions' },
         cell: (info) => {
           const project = info.row.original
           const actions: MenuAction[] = [

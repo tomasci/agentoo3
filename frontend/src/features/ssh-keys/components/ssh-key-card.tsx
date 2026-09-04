@@ -43,8 +43,8 @@ export function SshKeyCard({ sshKey }: { sshKey: SshKey }) {
               line under the name. */}
           <Stack gap={1}>
             <h3 className={styles.name}>{sshKey.name}</h3>
-            <Code>{sshKey.fingerprint}</Code>
-            {sshKey.comment && <Code>{sshKey.comment}</Code>}
+            <Code wrap>{sshKey.fingerprint}</Code>
+            {sshKey.comment && <Code wrap>{sshKey.comment}</Code>}
           </Stack>
           <Button type="button" disabled={remove.isPending} onClick={() => setConfirmDelete(true)}>
             {t('common.delete')}

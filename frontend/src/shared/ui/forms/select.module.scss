@@ -6,6 +6,12 @@
 
 .control {
   display: flex;
+
+  // A flex item's automatic minimum size is its content width, not 0 — the
+  // control could otherwise never shrink below its trigger's rendered
+  // width, which is exactly what forces it (and every ancestor) wider than
+  // the viewport for a long selected value.
+  min-width: 0;
 }
 
 .trigger {
@@ -17,6 +23,12 @@
   gap: var(--space-2);
   cursor: pointer;
   text-align: left;
+
+  // Same trap one level down: `.trigger` is the flex item here and
+  // `.valueText` is the flex item inside it. `.valueText` already opts out
+  // of the automatic-minimum-size rule via its own `overflow: hidden`, but
+  // that only helps once `.trigger` itself is willing to shrink.
+  min-width: 0;
 }
 
 .valueText {

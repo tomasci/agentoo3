@@ -39,7 +39,11 @@ export function ProjectSessions({ projectId }: { projectId: string }) {
   // to pick their way back to no orchestrator, not just start there.
   const orchestratorOptions: SelectOption[] = [
     { value: '', label: t('sessions.form.orchestratorNone') },
-    ...orchestrators.map((a) => ({ value: a.name, label: `${a.name} — ${a.description}` })),
+    // Just the name in the trigger's own label: the select trigger has no
+    // min-width:0 defence against a long unbroken string (that fix belongs to
+    // Select, not this call site — see the report), so the description is
+    // demoted to SelectOption.description, shown only inside the open list.
+    ...orchestrators.map((a) => ({ value: a.name, label: a.name, description: a.description })),
   ]
 
   const onCreate = () => {
