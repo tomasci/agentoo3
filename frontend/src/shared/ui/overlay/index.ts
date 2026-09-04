@@ -1,5 +1,6 @@
 export { ActionsMenu, type MenuAction } from './actions-menu'
 export { ConfirmDialog } from './confirm-dialog'
 export { Dialog } from './dialog'
+export { Menu } from './menu'
 export { Toaster, toast, toaster } from './toast'
 export { Tooltip } from './tooltip'

@@ -1,3 +1,5 @@
+@use '@/styles/breakpoints' as bp;
+
 // The transcript scrolls; the header and composer stay put. Without this the
 // composer walks off the bottom of a long session.
 //
@@ -6,12 +8,25 @@
 // auto-place into the first N of them — so with no banner the `1fr` landed on
 // the composer, which then inflated to fill whatever the transcript did not use.
 // Here the element that flexes says so itself, whatever else is present.
+//
+// The session route is full-bleed (root-layout.tsx's `.bodyBleed` strips
+// `.body`'s own padding for it), so this page — not the shell — owns the
+// horizontal inset; `--layout-page-padding-x` is the same token the ordinary
+// page padding uses, so it still tightens on a phone. No vertical padding: the
+// header sits flush under the tab bar and the composer flush above the status
+// bar — a docked bar reads as docked, not floated with a margin round it.
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+
+  // Tighter than Stack's own default (3): the header and composer already
+  // carry their own border, which does the work of separating them from the
+  // transcript — this gap is only the residual breathing room, not the
+  // primary divider, so it can afford to be the smaller step.
+  gap: var(--space-2);
   height: 100%;
   min-height: 0;
+  padding: 0 var(--layout-page-padding-x);
 
   // Header, banner and composer keep their natural height; only .scroll below
   // grows to take whatever they don't use.
@@ -25,26 +40,122 @@
   // scrollbar never appears.
   min-height: 0;
   overflow-y: auto;
-  padding-right: var(--space-2);
+
+  // Scrollbar clearance, not page padding — the page's own horizontal inset
+  // above already keeps the transcript off the screen edge; this is the extra
+  // sliver so a message bubble never sits flush against the scrollbar itself.
+  // A fixed value at every size, not a below() block: only the padding
+  // changes here, and the spacing rule reserves below() for a layout mode
+  // change.
+  padding-right: var(--space-1);
+}
+
+// --- header -------------------------------------------------------------------
+//
+// One row on a desktop-width screen: status, title, meta, live, actions. Below
+// `md` the meta group drops to its own second line and the orchestrator steps
+// aside, rather than wrapping item-by-item wherever it happens to run out of
+// room.
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.title {
+  // The one item that yields: everything else on the row keeps its natural
+  // size. Basis 0, not auto — `auto` sizes the wrap-decision itself off the
+  // full unwrapped title (badge + full title + actions was overflowing the
+  // line on a real title, forcing Stop/⋯ onto their own line before shrinking
+  // ever got a chance to run); basis 0 makes the title free space's taker
+  // instead of a competitor for line-fit, and min-width: 0 is what actually
+  // lets it shrink and ellipsize from there instead of forcing the row wider.
+  flex: 1 1 0%;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: var(--weight-semibold);
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-text-secondary);
 }
 
 .live {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+@include bp.below(md) {
+  // Set-once configuration, not live status — not worth the row space once
+  // the row has to hold two lines instead of one.
+  .orchestrator { display: none; }
+
+  .meta {
+    // Forces the whole group onto its own line below the title row, rather
+    // than wrapping branch/cost/live independently wherever they run out of
+    // width — a layout-mode change, so it earns the below() block on its own.
+    order: 1;
+    flex-basis: 100%;
+    gap: var(--space-2);
+    overflow: hidden;
+    font-size: var(--text-2xs);
+    line-height: var(--leading-2xs);
+    white-space: nowrap;
+  }
+
+  // First on the narrow line: whether the stream is live is worth more than
+  // the branch name or the running cost at a glance.
+  .live { order: -1; }
+}
+
+// --- composer -------------------------------------------------------------------
+
+.composer {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.queueStatus {
   font-size: var(--text-xs);
   line-height: var(--leading-xs);
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
 }
 
-.meta {
+// Send sits to the right of the textarea, chat-client style. `Inline` has no
+// grow-one-child concept, so this is the feature's own wrapper.
+.composerRow {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-  font-size: var(--text-sm);
-  line-height: var(--leading-sm);
-  color: var(--color-text-secondary);
+
+  // Not center: as the textarea grows with autoresize, the button should stay
+  // level with the last line rather than drifting to the vertical middle.
+  align-items: flex-end;
+  gap: var(--space-2);
 }
 
-.hint { font-size: var(--text-xs); line-height: var(--leading-xs); color: var(--color-text-muted); }
+.textareaWrap {
+  flex: 1;
+  min-width: 0;
+}

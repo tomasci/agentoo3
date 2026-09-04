@@ -1,9 +1,17 @@
 @use '@/shared/ui/mixins' as ui;
+@use '@/styles/breakpoints' as bp;
 
 .root {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   overflow-x: auto;
+
+  // A stacked card (below) lays each row out with `flex-wrap`, so nothing
+  // inside it is ever wider than the row — a wide cell scrolling this
+  // container is exactly the trap stacking exists to remove.
+  @include bp.below(md) {
+    overflow-x: visible;
+  }
 }
 
 .table {
@@ -11,6 +19,10 @@
   border-collapse: collapse;
   font-size: var(--text-base);
   line-height: var(--leading-base);
+
+  @include bp.below(md) {
+    display: block;
+  }
 }
 
 .th {
@@ -27,10 +39,25 @@
   white-space: nowrap;
 }
 
+thead {
+  // The stacked card carries its own labels (`.cellLabel`); the header row
+  // has nothing left to say.
+  @include bp.below(md) {
+    display: none;
+  }
+}
+
 .td {
   padding: var(--space-3);
   border-bottom: 1px solid var(--color-border);
   vertical-align: middle;
+
+  // The card (`.row` below) owns the padding and the divider once a row is
+  // no longer a table row.
+  @include bp.below(md) {
+    padding: 0;
+    border-bottom: 0;
+  }
 }
 
 .row {
@@ -46,15 +73,86 @@
   button {
     @include ui.focus-ring-inset;
   }
+
+  // The stacked card. Each cell folds in according to its column's
+  // `meta.role` (data-table.tsx) — see the `.role*` classes below.
+  @include bp.below(md) {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-3);
+    border-bottom: 1px solid var(--color-border);
+
+    &:last-child { border-bottom: 0; }
+  }
 }
 
-// A column that shrinks to its content and pins to the trailing edge — the
-// actions-menu column by default, or any column id passed in
-// `compactColumns`.
-.compact {
+// The stacked-mode label, e.g. "DESCRIPTION" above a description cell. A
+// real element rather than `td::before { content: attr(data-label) }`:
+// `attr()` needs a string `header` (a render template) can't supply, and
+// generated content is unreliably exposed to assistive tech. Hidden above
+// `md`, where the header row already carries this text.
+.cellLabel {
+  display: none;
+
+  @include bp.below(md) {
+    display: block;
+    margin-bottom: var(--space-1);
+    font-size: var(--text-2xs);
+    line-height: var(--leading-2xs);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+}
+
+// One column per table: the card's title line.
+.rolePrimary {
+  @include bp.below(md) {
+    flex: 1 0 100%;
+    font-size: var(--text-base);
+    line-height: var(--leading-base);
+    font-weight: var(--weight-medium);
+  }
+}
+
+// A labelled, full-width block in the card body — this is what gives a long
+// description its own line instead of a few words squeezed beside a badge.
+.roleSecondary {
+  @include bp.below(md) {
+    flex: 1 0 100%;
+  }
+}
+
+// A short, labelled fact (a badge, a count) — packs into a wrapped row at
+// the card's foot instead of claiming a full line each.
+.roleMeta {
+  @include bp.below(md) {
+    flex: 0 0 auto;
+  }
+}
+
+// The actions-menu column (or any column given `meta.role: 'actions'`):
+// shrinks to its content and pins to the trailing edge at every width above
+// `md`, replacing the per-table `compact` id list this table used to take
+// as a prop.
+.roleActions {
   width: 1%;
   text-align: right;
   white-space: nowrap;
+
+  @include bp.below(md) {
+    width: auto;
+    text-align: left;
+    flex: 0 0 auto;
+
+    // No label, so it never needs a full-width line of its own; `order`
+    // moves it before the title block instead of after the last full-width
+    // line, and the auto margin then pins it to the right within that first
+    // line — read together, "the top-right of the title line".
+    order: -1;
+    margin-left: auto;
+  }
 }
 
 .empty {

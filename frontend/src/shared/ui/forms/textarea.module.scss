@@ -1,4 +1,5 @@
 @use '@/shared/ui/mixins' as ui;
+@use '@/styles/breakpoints' as bp;
 
 .root {
   @include ui.control-surface;
@@ -28,3 +29,19 @@
 
 .resizeNone { resize: none; }
 .resizeVertical { resize: vertical; }
+
+// A phone ceiling, not a new prop — the caller (the session composer passes
+// `maxRows={8}`) has no way to express "cap tighter once the keyboard eats
+// the viewport", and the inline `--textarea-max-rows` custom property can't
+// be overridden from a class. Same formula as `.root`'s own max-height,
+// wrapped in `min()` against a viewport-relative ceiling: with the keyboard
+// open and a tall textarea, the transcript above can get very short — that
+// is intended, and is what every chat client does.
+@include bp.below(sm) {
+  .root {
+    max-height: min(
+      calc((var(--textarea-max-rows) * var(--leading-base)) + (var(--space-2) * 2) + 2px),
+      40dvh
+    );
+  }
+}

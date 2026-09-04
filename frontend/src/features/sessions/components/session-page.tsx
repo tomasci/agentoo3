@@ -1,15 +1,12 @@
-import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import {
+  ActionsMenu,
   Alert,
   Badge,
   Button,
-  Card,
   Code,
-  Inline,
-  PageHeader,
   Spinner,
   Stack,
   StatusDot,
@@ -38,9 +35,8 @@ const STATUS_TONE = {
   failed: 'danger',
 } as const
 
-export function SessionPage({ projectId, sessionId }: { projectId: string; sessionId: string }) {
+export function SessionPage({ sessionId }: { projectId: string; sessionId: string }) {
   const { t } = useTranslation()
-  const navigate = useNavigate()
   const session = useSession(sessionId)
   const messages = useSessionMessages(sessionId)
   const send = useSendMessage(sessionId)
@@ -93,61 +89,66 @@ export function SessionPage({ projectId, sessionId }: { projectId: string; sessi
   }
 
   const data = session.data
+  const title = data.title ?? t('sessions.untitled', { id: data.id.slice(0, 8) })
+
+  // Queue state that matters when you are about to type, not when you glance
+  // at the title (that's why it moved out of the header): whether sending now
+  // would just join a queue, and how many prompts are already waiting in it.
+  const queueLine = [
+    busy && t('sessions.willQueue'),
+    data.pendingPrompts > 0 && t('sessions.pendingPrompts', { count: data.pendingPrompts }),
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <div className={styles.page}>
-      <header>
-        <Card padding="md">
-          <PageHeader
-            title={data.title ?? t('sessions.untitled', { id: data.id.slice(0, 8) })}
-            description={
-              // Phrasing content only (Badge is a span, Code an inline <code>):
-              // PageHeader renders `description` inside a <p>, and a <div> in
-              // there would auto-close it.
-              <span className={styles.meta}>
-                <Badge tone={STATUS_TONE[data.status]}>{t(`sessions.status.${data.status}`)}</Badge>
-                {data.orchestrator && <span>{data.orchestrator}</span>}
-                {data.branch && <Code>{data.branch}</Code>}
-                {data.totalCostUsd > 0 && <span>${data.totalCostUsd.toFixed(4)}</span>}
-                {data.pendingPrompts > 0 && (
-                  <span>{t('sessions.pendingPrompts', { count: data.pendingPrompts })}</span>
-                )}
-              </span>
-            }
-            actions={
-              <>
-                <span className={styles.live}>
-                  <StatusDot tone={connected ? 'accent' : 'neutral'} />
-                  {connected ? t('sessions.live') : t('sessions.reconnecting')}
-                </span>
-                {busy && (
-                  <Button
-                    type="button"
-                    onClick={() => interrupt.mutate({ path: { id: sessionId } })}
-                  >
-                    {t('sessions.stop')}
-                  </Button>
-                )}
-                {/* Plain anchor, not a fetch/blob download: no object-URL lifecycle to
-                    leak, no Content-Disposition filename to parse client-side, and it
-                    works even while the transcript query is still pending. */}
-                <Button asChild>
-                  <a href={`/api/sessions/${sessionId}/export`} download>
-                    {t('sessions.export')}
-                  </a>
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() =>
-                    void navigate({ to: '/projects/$projectId/sessions', params: { projectId } })
-                  }
-                >
-                  {t('sessions.backToList')}
-                </Button>
-              </>
-            }
+      <header className={styles.header}>
+        <Badge tone={STATUS_TONE[data.status]}>{t(`sessions.status.${data.status}`)}</Badge>
+        <h1 className={styles.title}>{title}</h1>
+        <div className={styles.meta}>
+          {/* Set-once configuration, not live status — it steps aside below
+              `md` so the row has room for what actually changes. */}
+          {data.orchestrator && <span className={styles.orchestrator}>{data.orchestrator}</span>}
+          {data.branch && <Code>{data.branch}</Code>}
+          {data.totalCostUsd > 0 && <span>${data.totalCostUsd.toFixed(4)}</span>}
+          <span className={styles.live}>
+            <StatusDot tone={connected ? 'accent' : 'neutral'} />
+            {connected ? t('sessions.live') : t('sessions.reconnecting')}
+          </span>
+        </div>
+        <div className={styles.actions}>
+          {/* Visible at every size while busy: the only way to halt a running
+              agent does not belong behind a menu. */}
+          {busy && (
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => interrupt.mutate({ path: { id: sessionId } })}
+            >
+              {t('sessions.stop')}
+            </Button>
+          )}
+          <ActionsMenu
+            label={t('sessions.actionsFor', { name: title })}
+            actions={[
+              {
+                id: 'export',
+                label: t('sessions.export'),
+                onSelect: () => {
+                  // A programmatic anchor click, not a fetch/blob: no
+                  // object-URL lifecycle to leak, and `download` keeps this a
+                  // save rather than a navigation regardless of whether the
+                  // response sets Content-Disposition.
+                  const a = document.createElement('a')
+                  a.href = `/api/sessions/${sessionId}/export`
+                  a.download = ''
+                  a.click()
+                },
+              },
+            ]}
           />
-        </Card>
+        </div>
       </header>
 
       {data.lastError && <Alert tone="danger">{data.lastError}</Alert>}
@@ -160,35 +161,37 @@ export function SessionPage({ projectId, sessionId }: { projectId: string; sessi
         )}
       </div>
 
-      <Card padding="md">
+      <footer className={styles.composer}>
         <Stack gap={2}>
-          <Textarea
-            value={text}
-            rows={3}
-            maxRows={11}
-            onChange={(e) => setText(e.target.value)}
-            placeholder={t('sessions.composerPlaceholder')}
-            onKeyDown={(e) => {
-              // Enter sends; Shift+Enter is a newline. A prompt is usually one
-              // line, and reaching for the mouse for every send is worse.
-              if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault()
-                submit()
-              }
-            }}
-          />
-          <Inline justify="between" gap={3}>
-            <span className={styles.hint}>
-              {busy ? t('sessions.willQueue') : t('sessions.sendHint')}
-            </span>
+          {queueLine && <span className={styles.queueStatus}>{queueLine}</span>}
+          <div className={styles.composerRow}>
+            <div className={styles.textareaWrap}>
+              <Textarea
+                value={text}
+                autoresize
+                rows={2}
+                maxRows={8}
+                resize="none"
+                onChange={(e) => setText(e.target.value)}
+                placeholder={t('sessions.composerPlaceholder')}
+                onKeyDown={(e) => {
+                  // Enter sends; Shift+Enter is a newline. A prompt is usually one
+                  // line, and reaching for the mouse for every send is worse.
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault()
+                    submit()
+                  }
+                }}
+              />
+            </div>
             <Button type="button" onClick={submit} disabled={send.isPending || !text.trim()}>
               {send.isPending ? t('sessions.sending') : t('sessions.send')}
             </Button>
-          </Inline>
+          </div>
           {!data.orchestrator && <Alert tone="warning">{t('sessions.needsOrchestrator')}</Alert>}
           {error && <Alert tone="danger">{error}</Alert>}
         </Stack>
-      </Card>
+      </footer>
     </div>
   )
 }

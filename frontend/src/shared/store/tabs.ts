@@ -97,6 +97,18 @@ export function projectIdForPath(pathname: string): string | null {
 }
 
 /**
+ * Routes that own their whole region: no body padding, no body scroll.
+ *
+ * A session's own live page draws its own scrolling transcript and composer
+ * edge to edge; the shell's usual page padding would just be a second frame
+ * around a page that already has one. Matches the session *detail* route only
+ * — `/projects/:id/sessions` (the list) still wants the ordinary page body.
+ */
+export function isFullBleedPath(pathname: string): boolean {
+  return /^\/projects\/[^/]+\/sessions\/[^/]+$/.test(pathname)
+}
+
+/**
  * Repairs whatever came out of storage.
  *
  * localStorage outlives any one build of the app, so the list has to be treated

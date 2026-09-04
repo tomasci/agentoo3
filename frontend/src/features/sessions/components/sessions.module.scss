@@ -11,7 +11,7 @@
 .list {
   display: grid;
   gap: var(--space-3);
-  grid-template-columns: repeat(auto-fill, minmax(26rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(26rem, 100%), 1fr));
 }
 
 .sessionTitle { margin: 0; font-size: var(--text-base); line-height: var(--leading-base); font-weight: var(--weight-semibold); }

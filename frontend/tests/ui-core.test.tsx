@@ -260,12 +260,31 @@ test('DataTable renders rows and their cells when data is present', () => {
   expect(out).not.toContain('No rows to show')
 })
 
-test('DataTable right-aligns and shrinks compactColumns (defaulting to "actions")', () => {
-  const out = renderToStaticMarkup(<TestTable data={[{ id: '1', name: 'agentoo' }]} />)
-  // The header cell for the "actions" column carries the compact class; the
+test('DataTable right-aligns and shrinks a column given `meta.role: "actions"`', () => {
+  const roleColumns = [
+    columnHelper.accessor('name', { header: () => 'Name', meta: { role: 'primary' } }),
+    columnHelper.display({
+      id: 'actions',
+      header: () => '',
+      meta: { role: 'actions' },
+      cell: () => <button type="button">Open</button>,
+    }),
+  ]
+
+  function RoleTable() {
+    const table = useReactTable({
+      data: [{ id: '1', name: 'agentoo' }],
+      columns: roleColumns,
+      getCoreRowModel: getCoreRowModel(),
+    })
+    return <DataTable table={table} />
+  }
+
+  const out = renderToStaticMarkup(<RoleTable />)
+  // The header cell for the "actions" column carries the role's class; the
   // "name" column's header does not.
   const headerCells = out.match(/<th[^>]*>.*?<\/th>/g) ?? []
   expect(headerCells.length).toBe(2)
-  expect(headerCells[1]).toContain('compact')
-  expect(headerCells[0]).not.toContain('compact')
+  expect(headerCells[1]).toContain('roleActions')
+  expect(headerCells[0]).not.toContain('roleActions')
 })
