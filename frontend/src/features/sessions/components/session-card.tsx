@@ -38,6 +38,26 @@ export function SessionCard({ session, projectId }: { session: Session; projectI
           },
         ]
       : []),
+    ...(session.baseBranch
+      ? [
+          {
+            id: 'baseBranch',
+            term: t('sessions.meta.baseBranch'),
+            description: <Code wrap>{session.baseBranch}</Code>,
+          },
+        ]
+      : []),
+    ...(session.baseSha
+      ? [
+          {
+            id: 'baseSha',
+            // Convention, not this session's choice: 7 characters is what git
+            // itself abbreviates a sha to.
+            term: t('sessions.meta.baseSha'),
+            description: <Code>{session.baseSha.slice(0, 7)}</Code>,
+          },
+        ]
+      : []),
     ...(session.orchestrator
       ? [
           {
@@ -94,6 +114,10 @@ export function SessionCard({ session, projectId }: { session: Session; projectI
         </Inline>
 
         <DefinitionList items={metaItems} />
+
+        {/* The one case this field exists for: the worktree could not be
+            refreshed before the session started, so it may be behind. */}
+        {session.baseNote && <Alert tone="warning">{session.baseNote}</Alert>}
 
         {remove.isError && (
           <Alert tone="danger">{apiErrorMessage(remove.error, t('sessions.deleteFailed'))}</Alert>

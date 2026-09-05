@@ -113,12 +113,15 @@ export async function createProject(input: CreateProjectInput): Promise<ProjectD
 }
 
 /**
- * Change a project's remote or ssh key after the fact.
+ * Change a project's remote, ssh key or default branch after the fact.
  *
- * Both are things you discover you got wrong only when a clone fails: the repo
- * needed a key, or the key was the wrong one, or the remote should have been
- * https. Requiring the project to be deleted and recreated to fix that would be
- * hostile.
+ * The first two are things you discover you got wrong only when a clone
+ * fails: the repo needed a key, or the key was the wrong one, or the remote
+ * should have been https. Requiring the project to be deleted and recreated
+ * to fix that would be hostile. defaultBranch is here because it was set
+ * automatically at setup time from whatever the checkout happened to be on —
+ * right for most projects, but a project that develops on a branch other
+ * than the one it was cloned on needs a way to say so explicitly.
  */
 export async function updateProject(id: string, input: UpdateProjectInput): Promise<ProjectDto> {
   const [row] = await db.select().from(projects).where(eq(projects.id, id)).limit(1)
@@ -132,12 +135,18 @@ export async function updateProject(id: string, input: UpdateProjectInput): Prom
     }
   }
 
+  // Syntax only, deliberately: a branch may not exist on disk yet (an empty
+  // project with nothing committed, or a name reserved for later), and this
+  // is a settings save, not a network call. Whether it actually resolves is
+  // checked where it has to actually work — at session creation.
+
   const [updated] = await db
     .update(projects)
     .set({
       ...(input.name !== undefined && { name: input.name }),
       ...(input.remoteUrl !== undefined && { remoteUrl: input.remoteUrl }),
       ...(input.sshKeyId !== undefined && { sshKeyId: input.sshKeyId }),
+      ...(input.defaultBranch !== undefined && { defaultBranch: input.defaultBranch }),
       updatedAt: new Date(),
     })
     .where(eq(projects.id, id))

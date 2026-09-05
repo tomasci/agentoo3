@@ -61,10 +61,17 @@ sessionsRouter.openapi(
       'Each session gets a worktree on branch agentoo/s-<id>, so two sessions can ' +
       'run against the same project without fighting over the working tree. A ' +
       'project that is not a git repository, or has no commits yet, cannot have ' +
-      'worktrees — those sessions share the checkout and report isolated=false.',
+      'worktrees — those sessions share the checkout and report isolated=false. ' +
+      'The worktree is cut from baseBranch, or the project default branch, or ' +
+      "the checkout's current branch, in that order; whichever one is used is " +
+      'fetched from the remote first. If that branch does not exist locally or ' +
+      'on the remote at all, the request 400s before a session is created — a ' +
+      'network hiccup while updating it is not fatal and just gets noted on the ' +
+      'session (baseNote), but a branch that resolves to nothing is.',
     request: { params: idParam, body: json(createSessionSchema, 'Session to create') },
     responses: {
       201: json(sessionSchema, 'Created'),
+      400: json(errorSchema, 'baseBranch does not exist locally or on the remote'),
       404: json(errorSchema, 'Not found'),
       409: json(errorSchema, 'Project is not ready'),
     },

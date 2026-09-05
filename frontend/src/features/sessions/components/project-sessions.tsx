@@ -30,6 +30,7 @@ export function ProjectSessions({ projectId }: { projectId: string }) {
   const [title, setTitle] = useState('')
   const [orchestrator, setOrchestrator] = useState('')
   const [budget, setBudget] = useState('')
+  const [baseBranch, setBaseBranch] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
 
   const project = (projects ?? []).find((p) => p.id === projectId)
@@ -46,6 +47,17 @@ export function ProjectSessions({ projectId }: { projectId: string }) {
     ...orchestrators.map((a) => ({ value: a.name, label: a.name, description: a.description })),
   ]
 
+  const trimmedBaseBranch = baseBranch.trim()
+  // The placeholder and the hint say the same thing two ways: an empty
+  // field always means "the project's default, or the checkout's current
+  // branch if there isn't one" — never a value this form invents itself.
+  const baseBranchPlaceholder = project?.defaultBranch ?? t('sessions.form.baseBranchCurrent')
+  const baseBranchHint = trimmedBaseBranch
+    ? t('sessions.form.baseBranchWillUseOverride', { branch: trimmedBaseBranch })
+    : project?.defaultBranch
+      ? t('sessions.form.baseBranchWillUseDefault', { branch: project.defaultBranch })
+      : t('sessions.form.baseBranchWillUseAuto')
+
   const onCreate = () => {
     setFormError(null)
     create.mutate(
@@ -55,12 +67,14 @@ export function ProjectSessions({ projectId }: { projectId: string }) {
           ...(title.trim() ? { title: title.trim() } : {}),
           ...(orchestrator ? { orchestrator } : {}),
           ...(budget ? { maxBudgetUsd: Number(budget) } : {}),
+          ...(trimmedBaseBranch ? { baseBranch: trimmedBaseBranch } : {}),
         },
       },
       {
         onSuccess: () => {
           setTitle('')
           setBudget('')
+          setBaseBranch('')
         },
         onError: (e) => setFormError(apiErrorMessage(e, t('sessions.createFailed'))),
       },
@@ -79,6 +93,15 @@ export function ProjectSessions({ projectId }: { projectId: string }) {
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder={t('sessions.form.titlePlaceholder')}
+              />
+            </Field>
+
+            <Field label={t('sessions.form.baseBranch')} hint={baseBranchHint}>
+              <Input
+                mono
+                value={baseBranch}
+                onChange={(e) => setBaseBranch(e.target.value)}
+                placeholder={baseBranchPlaceholder}
               />
             </Field>
 

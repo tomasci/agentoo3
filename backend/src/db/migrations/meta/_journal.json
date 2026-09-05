@@ -29,6 +29,13 @@
       "when": 1788294736942,
       "tag": "0003_stiff_wonder_man",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788562597851,
+      "tag": "0004_useful_hannibal_king",
+      "breakpoints": true
     }
   ]
 }

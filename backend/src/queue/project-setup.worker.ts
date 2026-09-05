@@ -7,8 +7,8 @@ import { projects } from '@/db/schema'
 import { keyPathFor } from '@/features/ssh-keys/service'
 import { resolveSource } from '@/lib/adopt-path'
 import {
+  checkedOutBranch,
   configureRepoSsh,
-  currentBranch,
   dirExists,
   ensureDir,
   git,
@@ -179,7 +179,12 @@ export async function runProjectSetup(job: ProjectSetupJob): Promise<void> {
         logger.info(`${project.slug} will use ${keyPath} for git over ssh`)
       }
     }
-    const branch = isRepo ? await currentBranch(repo) : undefined
+    // checkedOutBranch, not currentBranch: a project adopted mid-detached-
+    // checkout (a human had a tag or a commit checked out by hand) would
+    // otherwise get "HEAD" persisted as its default branch — a literal string
+    // that is not a ref, and that every future session would then fail to
+    // resolve against.
+    const branch = isRepo ? await checkedOutBranch(repo) : undefined
     const remote = isRepo ? await remoteUrl(repo) : undefined
 
     await db
@@ -194,7 +199,9 @@ export async function runProjectSetup(job: ProjectSetupJob): Promise<void> {
       })
       .where(eq(projects.id, project.id))
 
-    logger.success(`Project ${project.slug} ready${isRepo ? ` on ${branch}` : ' (not a git repo)'}`)
+    logger.success(
+      `Project ${project.slug} ready${isRepo ? ` on ${branch ?? '(detached HEAD)'}` : ' (not a git repo)'}`,
+    )
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     await fail(project.id, message)
