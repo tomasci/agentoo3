@@ -160,11 +160,11 @@ if ! has_systemd; then
 fi
 
 write_unit() {
-  local name="$1" description="$2" exec_cmd="$3"
+  local name="$1" description="$2" exec_cmd="$3" extra="${4:-}"
   local unit="/etc/systemd/system/${name}.service"
   local tmp; tmp="$(mktemp)"
   cat >"$tmp" <<UNIT
-# Managed by ${APP_NAME}'s installer (scripts/70-setup-backend.sh).
+# Managed by ${APP_NAME}'s installer (scripts/68-setup-backend.sh).
 [Unit]
 Description=${description}
 After=network-online.target postgresql.service redis-server.service
@@ -181,6 +181,20 @@ ExecStart=${exec_cmd}
 Restart=always
 RestartSec=3
 
+# A process this service *started* is not this service's health.
+#
+# systemd's OOMPolicy defaults to 'stop', which means: if the kernel OOM-kills
+# anything anywhere in this unit's cgroup, terminate the entire unit. For the
+# worker that cgroup contains every agent, every 'claude' process and every
+# command an agent runs — so a test suite that exhausted the machine took down
+# the worker, the agent driving it and the session with them. What the operator
+# saw was "Claude Code process exited with code 143" (143 is SIGTERM, from
+# systemd) four times in an hour, on four sessions that had done nothing wrong.
+#
+# 'continue' leaves the kill where it belongs: one failed command, which the
+# agent sees as a non-zero exit and can work around.
+OOMPolicy=continue
+${extra}
 NoNewPrivileges=true
 PrivateTmp=true
 
@@ -200,10 +214,31 @@ bun_bin="$(command -v bun)"
 
 write_unit "${APP_NAME}-api" "${APP_NAME} API (Hono)" "$bun_bin src/index.ts"
 
+# Optional, and off unless the operator asks: a soft ceiling on everything the
+# worker's cgroup uses, agents and their commands included. MemoryHigh does not
+# kill — over it the kernel throttles the cgroup and reclaims from it — so on a
+# box with swap the agent slows down instead of the OOM killer choosing a victim
+# elsewhere on the machine. postgres is a plausible victim, and losing it costs
+# far more than a slow test run.
+#
+# Validated here rather than left to systemd. An unparseable value is not an
+# error to systemd: it logs "Invalid memory limit, ignoring" into the journal
+# and starts the unit with no cap at all, so an operator who wrote `3 GB` would
+# be told by this installer that a cap was applied and have none.
+worker_extra=""
+if [[ -n "$WORKER_MEMORY_HIGH" ]]; then
+  if [[ "$WORKER_MEMORY_HIGH" =~ ^([0-9]+(\.[0-9]+)?[KMGTPE]?|[0-9]+(\.[0-9]+)?%|infinity)$ ]]; then
+    worker_extra="MemoryHigh=${WORKER_MEMORY_HIGH}"
+    log_info "Worker memory soft cap: MemoryHigh=${WORKER_MEMORY_HIGH}"
+  else
+    log_warn "WORKER_MEMORY_HIGH='$WORKER_MEMORY_HIGH' is not a systemd size (e.g. 3G, 80%, infinity); ignoring."
+  fi
+fi
+
 # The worker runs agents, which need a Claude credential and a writable home for
 # ~/.claude. ProtectHome would break both, so it is deliberately not set here.
 write_unit "${APP_NAME}-worker" "${APP_NAME} worker (Claude sessions, project setup)" \
-  "$bun_bin src/worker.ts"
+  "$bun_bin src/worker.ts" "$worker_extra"
 
 as_root systemctl daemon-reload
 svc_enable_now "${APP_NAME}-api"
