@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { checkBranchName } from '@/lib/branch-name'
 
 export const sessionStatusSchema = z.enum([
   'idle',
@@ -19,6 +20,20 @@ export const sessionSchema = z.object({
   // project directory instead, and the UI says so.
   worktreePath: z.string().nullable(),
   branch: z.string().nullable(),
+  baseBranch: z
+    .string()
+    .nullable()
+    .openapi({ description: "Branch this session's worktree was cut from, or null without one" }),
+  baseSha: z.string().nullable().openapi({ description: 'Commit the worktree started from' }),
+  baseNote: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        'Set when the base branch could not be brought up to date before this session started ' +
+        '(no remote, network down, rejected key, missing branch on the remote, ...); the session ' +
+        'still started, from whatever the local branch already had',
+    }),
   // Where an agent would actually run, worktree or shared checkout.
   workingDir: z.string(),
   isolated: z.boolean().openapi({ description: 'False when sessions share the project directory' }),
@@ -51,6 +66,25 @@ export const createSessionSchema = z.object({
     .max(1000)
     .optional()
     .openapi({ description: 'Hard spend cap for this session, passed to the SDK' }),
+  baseBranch: z
+    .string()
+    .optional()
+    .refine((v) => v === undefined || checkBranchName(v).ok, {
+      // `error` rather than the static `message` used elsewhere in this
+      // file: it is only invoked once the refine above has already failed,
+      // so recomputing checkBranchName here is what surfaces the specific
+      // reason ("may not start with -", "is too long", ...) to the client
+      // instead of a generic "Invalid input".
+      error: (issue) => {
+        const check = checkBranchName(String(issue.input))
+        return check.ok ? undefined : check.reason
+      },
+    })
+    .openapi({
+      description:
+        "Cut this session's worktree from this branch instead of the project default, for " +
+        'this session only. Never written back to the project.',
+    }),
 })
 export type CreateSessionInput = z.infer<typeof createSessionSchema>
 

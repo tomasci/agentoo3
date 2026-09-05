@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { checkBranchName } from '@/lib/branch-name'
 
 export const projectStatusSchema = z.enum(['pending', 'cloning', 'ready', 'needs_manual', 'failed'])
 
@@ -53,12 +54,33 @@ export const errorSchema = z.object({
 
 // Everything here is optional: a PATCH that only swaps the ssh key should not
 // have to restate the name. `sshKeyId: null` clears it back to ssh defaults,
-// which is why it is nullable rather than merely optional.
+// and `defaultBranch: null` clears it back to auto-detect (the repo's current
+// branch at the time each session starts), which is why both are nullable
+// rather than merely optional.
 export const updateProjectSchema = z
   .object({
     name: z.string().min(1).max(120).optional(),
     remoteUrl: z.string().min(1).optional(),
     sshKeyId: z.string().uuid().nullable().optional(),
+    defaultBranch: z
+      .string()
+      .nullable()
+      .optional()
+      .refine((v) => v === undefined || v === null || checkBranchName(v).ok, {
+        // See createSessionSchema.baseBranch for why this is a function
+        // rather than the static messages the other fields here use.
+        error: (issue) => {
+          if (issue.input === null) return undefined
+          const check = checkBranchName(String(issue.input))
+          return check.ok ? undefined : check.reason
+        },
+      })
+      .openapi({
+        description:
+          'Branch new session worktrees are cut from by default, brought up to date from the ' +
+          'remote immediately before each one is cut. Not checked for existence here — a branch ' +
+          'may legitimately not exist locally yet — only when a session actually starts.',
+      }),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update' })
 

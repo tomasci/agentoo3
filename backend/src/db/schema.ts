@@ -137,6 +137,19 @@ export const sessions = pgTable(
     worktreePath: text('worktree_path'),
     branch: text('branch'),
 
+    // What the worktree above was actually cut from. All three stay null on
+    // the shared-checkout path (worktree creation failed, or the project is
+    // not a git repo at all) — a base branch on a session that never got its
+    // own worktree would describe code it is not actually running.
+    baseBranch: text('base_branch'),
+    baseSha: text('base_sha'),
+    // Why the base may be stale: no remote, the network being down, a
+    // rejected key, or the branch missing from the remote. Its own column
+    // rather than lastError, because session-run.worker.ts clears lastError
+    // to null at the start of every turn — this note would last one turn and
+    // then silently vanish.
+    baseNote: text('base_note'),
+
     // The Agent SDK's own session id, needed to resume after a worker restart.
     sdkSessionId: text('sdk_session_id'),
 

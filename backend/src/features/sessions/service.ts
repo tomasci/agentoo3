@@ -2,21 +2,25 @@ import { and, count, desc, eq, gt, inArray, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { sanitizeForDb } from '@/db/sanitize'
 import { messages, projects, sessions } from '@/db/schema'
+import { keyPathFor } from '@/features/ssh-keys/service'
 import { badRequest, conflict, notFound } from '@/lib/errors'
 import { publishControl, publishSessionEvent } from '@/lib/events'
 import {
   addWorktree,
-  currentBranch,
   dirExists,
   ensureDir,
   isGitRepo,
   removeWorktree,
+  revParse,
   trackUpstream,
 } from '@/lib/git'
 import { logger } from '@/lib/logger'
 import { projectRepo, projectRoot, projectWorktree } from '@/lib/paths'
+import { gitSshCommand } from '@/lib/ssh'
 import { VERSION } from '@/lib/version'
 import { enqueueSessionRun } from '@/queue'
+import type { BaseBranchPlan } from './base-branch'
+import { planBaseBranch } from './base-branch'
 import type {
   CreateSessionInput,
   SessionDto,
@@ -57,6 +61,9 @@ function toDto(
     orchestrator: row.orchestrator,
     worktreePath: row.worktreePath,
     branch: row.branch,
+    baseBranch: row.baseBranch,
+    baseSha: row.baseSha,
+    baseNote: row.baseNote,
     // A session without a worktree still has to run somewhere.
     workingDir: row.worktreePath ?? repoPath,
     isolated: row.worktreePath !== null,
@@ -134,6 +141,10 @@ const branchFor = (sessionId: string) => `agentoo/s-${sessionId.slice(0, 8)}`
  * for no reason. Older git does fail that case, which is why the result is
  * checked rather than assumed — the fallback is to share the checkout, reported
  * as isolated=false because it changes whether concurrent sessions are safe.
+ *
+ * Which branch that worktree is cut from is resolved by planBaseBranch before
+ * any of this runs, and has to be: a branch that resolves to nothing at all is
+ * a 400, and that has to happen before the session row exists, not after.
  */
 export async function createSession(
   projectId: string,
@@ -147,6 +158,26 @@ export async function createSession(
   const repo = projectRepo(project.slug)
   if (!(await dirExists(repo))) throw badRequest(`${repo} is missing`)
 
+  const isRepo = await isGitRepo(repo)
+  if (input.baseBranch && !isRepo) {
+    throw badRequest('This project is not a git repository; there is no branch to start from')
+  }
+
+  let plan: BaseBranchPlan = { ok: true, branch: null, startPoint: null }
+  if (isRepo) {
+    // Resolved the same way queue/project-setup.worker.ts resolves it for
+    // configureRepoSsh: without this, fetchBranch authenticates with no key
+    // at all, which fails every time for a private repo with a project key
+    // and reads as a permanently degraded feature rather than an occasional one.
+    const keyPath = await keyPathFor(project.sshKeyId)
+    plan = await planBaseBranch(
+      repo,
+      { override: input.baseBranch, projectDefault: project.defaultBranch },
+      { sshCommand: keyPath ? gitSshCommand(keyPath) : undefined },
+    )
+    if (!plan.ok) throw badRequest(plan.reason)
+  }
+
   const [row] = await db
     .insert(sessions)
     .values({
@@ -159,25 +190,21 @@ export async function createSession(
     .returning()
   if (!row) throw new Error('Insert returned no row')
 
-  let worktreePath: string | null = null
-  let branch: string | null = null
-
-  if (await isGitRepo(repo)) {
+  if (isRepo) {
     const path = projectWorktree(project.slug, row.id)
     const name = branchFor(row.id)
     await ensureDir(`${projectRoot(project.slug)}/worktrees`)
 
-    const result = await addWorktree(repo, path, name)
+    const result = await addWorktree(repo, path, name, plan.startPoint ?? undefined)
     if (result.ok) {
-      worktreePath = path
-      branch = name
-
       // Point the new branch at whatever it was cut from, so `git pull` inside
       // the session has a tracking ref instead of stopping with "no tracking
-      // information for the current branch".
-      const base = await currentBranch(repo)
-      if (base) {
-        const tracked = await trackUpstream(path, 'origin', base)
+      // information for the current branch". Cutting from a remote-tracking
+      // start point already sets this via git's own autoSetupMerge, but a
+      // local-ref or bare-HEAD start point does not, so this always runs
+      // rather than only on the paths that need it.
+      if (plan.branch) {
+        const tracked = await trackUpstream(path, 'origin', plan.branch)
         if (!tracked.ok) {
           // Normal for a project with no remote, or before the first fetch.
           logger.debug(`No upstream for ${name}: ${tracked.stderr}`)
@@ -185,13 +212,22 @@ export async function createSession(
       }
       await db
         .update(sessions)
-        .set({ worktreePath, branch, updatedAt: new Date() })
+        .set({
+          worktreePath: path,
+          branch: name,
+          baseBranch: plan.branch,
+          baseSha: (await revParse(path, 'HEAD')) ?? null,
+          baseNote: plan.note ?? null,
+          updatedAt: new Date(),
+        })
         .where(eq(sessions.id, row.id))
       logger.info(`Session ${row.id} on worktree ${path} (${name})`)
     } else {
       // Do not fail the session over it: sharing the checkout still works. On
       // older git this is the unborn-HEAD case; otherwise it is usually a stale
-      // worktree registration.
+      // worktree registration. The base-branch columns stay null: a baseBranch
+      // on a session that ended up sharing the checkout would claim a worktree
+      // that does not exist actually runs from it.
       logger.warn(`Could not create a worktree for session ${row.id}: ${result.stderr}`)
       await db
         .update(sessions)
@@ -354,7 +390,11 @@ export async function listMessages(sessionId: string, after = -1): Promise<Sessi
  * it and points at on-disk state the recipient does not have, and the other
  * two are absolute server paths that would leak PROJECTS_DIR and the project
  * slug into a file people paste into issues. branch stays — it is a git ref
- * the UI already shows. Per-message id/sessionId are dropped the same way:
+ * the UI already shows. baseBranch, baseSha and baseNote are left out: the
+ * session block here is an exact, tested field set (see
+ * session-export.test.ts's "carries exactly the documented fields"), so
+ * widening it is a decision made deliberately per field, not a side effect of
+ * adding a column. Per-message id/sessionId are dropped the same way:
  * the row uuid identifies nothing outside this database, sessionId only
  * repeats session.id, and seq is already the stable identity within the
  * export. Built field-by-field rather than by spreading the DTOs, because a

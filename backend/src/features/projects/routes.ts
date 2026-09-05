@@ -71,11 +71,13 @@ projectsRouter.openapi(
     method: 'patch',
     path: '/projects/{id}',
     tags: ['projects'],
-    summary: "Change a project's remote or SSH key",
+    summary: "Change a project's remote, SSH key or default branch",
     description:
       'For fixing what a failed clone revealed: the repo needed a key, the key ' +
-      'was the wrong one, or the remote should have been https. Does not re-run ' +
-      'setup; call retry afterwards.',
+      'was the wrong one, or the remote should have been https. Also sets the ' +
+      'branch new session worktrees are cut from; that branch is only checked for ' +
+      'existence when a session actually starts, not here. Does not re-run setup; ' +
+      'call retry afterwards.',
     request: { params: idParam, body: json(updateProjectSchema, 'Fields to change') },
     responses: {
       200: json(projectSchema, 'Updated'),

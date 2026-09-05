@@ -10,6 +10,7 @@ import {
   type DefinitionItem,
   DefinitionList,
   Inline,
+  Input,
   PageHeader,
   Select,
   type SelectOption,
@@ -53,11 +54,19 @@ export function ProjectOverview({
   const [keyError, setKeyError] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
+  const [branchInput, setBranchInput] = useState(project.defaultBranch ?? '')
+  const [branchError, setBranchError] = useState<string | null>(null)
+  const updateBranch = useUpdateProject()
+
   // Keep the select honest if the project changes under us — a poll, or the
   // recovery panel swapping the key.
   useEffect(() => {
     setKeyId(project.sshKeyId ?? '')
   }, [project.sshKeyId])
+
+  useEffect(() => {
+    setBranchInput(project.defaultBranch ?? '')
+  }, [project.defaultBranch])
 
   const changeKey = (next: string) => {
     setKeyId(next)
@@ -67,6 +76,21 @@ export function ProjectOverview({
       {
         onSuccess: () => toast({ title: t('projects.keySaved') }),
         onError: (error) => setKeyError(apiErrorMessage(error, t('projects.keyChangeFailed'))),
+      },
+    )
+  }
+
+  const saveDefaultBranch = () => {
+    setBranchError(null)
+    const trimmed = branchInput.trim()
+    updateBranch.mutate(
+      // Empty clears it back to auto-detect — sending "" would ask the
+      // server to set the branch to the empty string, not unset it.
+      { path: { id: project.id }, body: { defaultBranch: trimmed || null } },
+      {
+        onSuccess: () => toast({ title: t('projects.branchSaved') }),
+        onError: (error) =>
+          setBranchError(apiErrorMessage(error, t('projects.branchChangeFailed'))),
       },
     )
   }
@@ -95,15 +119,42 @@ export function ProjectOverview({
           },
         ]
       : []),
-    ...(project.defaultBranch
-      ? [
-          {
-            id: 'branch',
-            term: t('projects.meta.branch'),
-            description: <Code wrap>{project.defaultBranch}</Code>,
-          },
-        ]
-      : []),
+    {
+      id: 'branch',
+      term: t('projects.meta.branch'),
+      // No default is exactly the project whose owner needs this control, so
+      // it stays in the list — never omitted — when the value is null.
+      description: (
+        <Stack gap={2} align="start">
+          <Inline gap={2}>
+            <Input
+              mono
+              aria-label={t('projects.meta.branch')}
+              value={branchInput}
+              onChange={(e) => {
+                setBranchInput(e.target.value)
+                setBranchError(null)
+              }}
+              placeholder={t('projects.branchPlaceholder')}
+            />
+            <Button
+              type="button"
+              size="sm"
+              loading={updateBranch.isPending}
+              loadingLabel={t('common.working')}
+              onClick={saveDefaultBranch}
+            >
+              {t('common.save')}
+            </Button>
+          </Inline>
+          {branchError ? (
+            <Alert tone="danger">{branchError}</Alert>
+          ) : (
+            <p className={styles.hint}>{t('projects.branchHint')}</p>
+          )}
+        </Stack>
+      ),
+    },
   ]
 
   return (
