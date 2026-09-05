@@ -100,6 +100,44 @@ const activeTab = () => {
   }
   return current[0] ? label(current[0]) : null
 }
+/**
+ * A printable stand-in for an element: unique per node, stable for the run, and
+ * `null`/`undefined` passed straight through so an absence assertion still
+ * claims exactly what it claimed before.
+ *
+ * Wrapped around every element that would otherwise be the operand of a matcher
+ * that *prints its operands* — `toBe`, `toEqual`, `toBeNull`, `toBeUndefined`.
+ * A happy-dom element serialises its symbol-keyed internals plus its whole
+ * ancestor chain, so on failure those print the document. Measured on a
+ * nine-element fixture: a failed `toBeNull` on an element emits 12 MB, a failed
+ * `toBe` between two elements 25 MB, and `toEqual([])` against an array of them
+ * aborts the process outright. Against a mounted workspace that is an OOM kill
+ * — exit 137, no message, and the rest of `bun test tests/` goes with it, which
+ * is exactly what a failing assertion in tests/transcript-row.test.tsx did.
+ *
+ * `toHaveLength` is deliberately *not* wrapped anywhere: it prints the two
+ * lengths and nothing else, so it is already safe on a live `children` or
+ * `NodeList`. Converting those would be churn.
+ *
+ * The `#n` is what keeps this an identity comparison rather than a comparison
+ * of names: two distinct buttons labelled the same still differ.
+ */
+const tokens = new WeakMap<Node, string>()
+let tokenCount = 0
+function ref(node: Node): string
+function ref(node: Node | null): string | null
+function ref(node: Node | null | undefined): string | null | undefined
+function ref(node: Node | null | undefined): string | null | undefined {
+  if (node === null || node === undefined) return node
+  const seen = tokens.get(node)
+  if (seen) return seen
+  const el = node as Element
+  const named = el.getAttribute?.('aria-label') ?? el.textContent?.trim().slice(0, 30) ?? ''
+  const token = `<${node.nodeName.toLowerCase()} #${++tokenCount}${named ? ` ${JSON.stringify(named)}` : ''}>`
+  tokens.set(node, token)
+  return token
+}
+
 const closeButtons = () =>
   [...(tabBar()?.querySelectorAll('ul button[aria-label^="Close "]') ?? [])] as HTMLElement[]
 const closeButtonFor = (name: string) =>
@@ -150,7 +188,7 @@ test('[+] opens an empty tab that asks for a project, and has no sidebar', async
   expect(tabs()).toEqual(['System', 'New tab'])
   expect(activeTab()).toBe('New tab')
   expect(at()).toBe('/tab/new-1')
-  expect(sidebar()).toBeNull()
+  expect(ref(sidebar())).toBeNull()
   expect(container.textContent).toContain('Choose a project for this tab')
   // All three ways in, on the one page.
   expect(container.textContent).toContain('Clone a repository')
@@ -267,7 +305,7 @@ test('every tab and every close button is reachable with the keyboard', async ()
     expect(el.hasAttribute('disabled')).toBe(false)
     expect(el.getAttribute('tabindex')).toBeNull()
     el.focus()
-    expect(document.activeElement).toBe(el)
+    expect(ref(document.activeElement)).toBe(ref(el))
   }
 
   // A focused tab still switches when it is activated, which is what Enter or
@@ -275,7 +313,7 @@ test('every tab and every close button is reachable with the keyboard', async ()
   // a real browser fires for those keys, so the activation itself is clicked.)
   const system = tabNamed('System') as HTMLElement
   system.focus()
-  expect(document.activeElement).toBe(system)
+  expect(ref(document.activeElement)).toBe(ref(system))
   await click(system, 'tab System')
   expect(activeTab()).toBe('System')
   expect(at()).toBe('/library')
@@ -283,7 +321,7 @@ test('every tab and every close button is reachable with the keyboard', async ()
   // And closing from the keyboard reaches the same close button.
   const close = closeButtonFor('Beta')
   close?.focus()
-  expect(document.activeElement).toBe(close)
+  expect(ref(document.activeElement)).toBe(ref(close))
   await click(close, 'close Beta')
   expect(tabs()).toEqual(['System', 'Alpha'])
   expect(activeTab()).toBe('System')
@@ -328,8 +366,8 @@ test('the tab row is a named nav, not a tablist that promises panels it has none
 
 test('the system tab has no close button, and every other close button is named', async () => {
   await mount('/library')
-  expect(closeButtonFor('System')).toBeNull()
-  expect(closeButtons()).toEqual([])
+  expect(ref(closeButtonFor('System'))).toBeNull()
+  expect(closeButtons().map(ref)).toEqual([])
 
   await click(newTabButton(), 'new-tab button')
   await click(byText('button', 'Alpha'), 'project Alpha')
@@ -337,7 +375,7 @@ test('the system tab has no close button, and every other close button is named'
   // One close button, and it says out loud which tab it closes — an unnamed
   // ✕ is what a screen reader reads as "button".
   expect(closeButtons().map((el) => el.getAttribute('aria-label'))).toEqual(['Close Alpha'])
-  expect(closeButtonFor('System')).toBeNull()
+  expect(ref(closeButtonFor('System'))).toBeNull()
 })
 
 test('a project already open is focused, not opened twice', async () => {
@@ -408,7 +446,7 @@ test('a project still cloning cannot be picked', async () => {
 
   const name = byText('button', 'Cloning')
   // Listed with its progress, but not an offer: there is no checkout yet.
-  expect(name).toBeUndefined()
+  expect(ref(name)).toBeUndefined()
   expect(container.textContent).toContain('Cloning')
   expect(tabs()).toEqual(['System', 'New tab'])
 })
@@ -421,8 +459,8 @@ test('configuration holds the language and the theme, and only the system tab ha
   // The old shell kept these as a select and an icon button in every sidebar.
   document.body.innerHTML = ''
   await mount('/projects/p1')
-  expect(sidebar()?.querySelector('select')).toBeNull()
-  expect(container.querySelector('[aria-label="Toggle theme"]')).toBeNull()
+  expect(ref(sidebar()?.querySelector('select') ?? null)).toBeNull()
+  expect(ref(container.querySelector('[aria-label="Toggle theme"]'))).toBeNull()
   expect(problems).toEqual([])
 })
 

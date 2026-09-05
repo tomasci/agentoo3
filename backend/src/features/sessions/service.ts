@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gt, inArray, sql } from 'drizzle-orm'
+import { and, count, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { sanitizeForDb } from '@/db/sanitize'
 import { messages, projects, sessions } from '@/db/schema'
@@ -26,6 +26,7 @@ import type {
   SessionDto,
   SessionExport,
   SessionMessageDto,
+  SessionMessagePageDto,
   UpdateSessionInput,
 } from './schema'
 
@@ -378,6 +379,81 @@ export async function listMessages(sessionId: string, after = -1): Promise<Sessi
     .orderBy(messages.seq)
 
   return rows.map(toMessageDto)
+}
+
+/** Backward page size when a bounded mode is given without an explicit `limit`. */
+const DEFAULT_PAGE_SIZE = 100
+
+/**
+ * A page of a session's transcript, always ascending by seq — a client never
+ * has to re-sort depending on which cursor it asked with.
+ *
+ * Three modes, chosen by which of `after`/`before`/`limit` showed up:
+ *
+ * - `after` (or neither cursor and no `limit`): unbounded, exactly what
+ *   listMessages itself returns. A client that already holds a prefix asks
+ *   for what follows it; `limit` does not apply — "after" already means
+ *   "unbounded" — so it is ignored rather than silently truncating a
+ *   reconnecting client's catch-up.
+ * - `before`: the backward page a scrollback UI wants once it already has a
+ *   seq to anchor on — the newest slice below one it has not seen yet.
+ * - `limit` alone, with neither cursor: the newest `limit` messages. This is
+ *   the initial-load case: opening a session has no seq to anchor on yet, only
+ *   how many messages it wants, so it cannot use `before` — and unbounded
+ *   `after` would defeat the entire point of paginating. Without this mode
+ *   `limit` would be a parameter callers can set that this function silently
+ *   ignores, which is worse than not having it.
+ *
+ * Both bounded modes share one query, `ORDER BY seq DESC LIMIT limit + 1`
+ * (index-friendly off messages_session_seq_key, the same index `after` uses),
+ * differing only in whether a `seq < before` condition is present, and both
+ * reverse before returning so the wire format is ascending regardless of which
+ * cursor asked for it. The extra row is how hasOlder is known from the one
+ * query that already ran, rather than a second COUNT(*) racing against it.
+ *
+ * `after` and `before` point in opposite directions on one cursor; there is no
+ * coherent meaning for both at once, so combining them is refused up front,
+ * before the session lookup even runs.
+ */
+export async function listMessagePage(
+  sessionId: string,
+  opts: { after?: number; before?: number; limit?: number },
+): Promise<SessionMessagePageDto> {
+  if (opts.after !== undefined && opts.before !== undefined) {
+    throw badRequest('after and before are opposite directions; send only one')
+  }
+
+  const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1)
+  if (!session) throw notFound('Session')
+
+  const bounded =
+    opts.before !== undefined || (opts.after === undefined && opts.limit !== undefined)
+  if (bounded) {
+    const limit = opts.limit ?? DEFAULT_PAGE_SIZE
+    const rows = await db
+      .select()
+      .from(messages)
+      .where(
+        opts.before !== undefined
+          ? and(eq(messages.sessionId, sessionId), lt(messages.seq, opts.before))
+          : eq(messages.sessionId, sessionId),
+      )
+      .orderBy(desc(messages.seq))
+      .limit(limit + 1)
+
+    const hasOlder = rows.length > limit
+    const page = rows.slice(0, limit).reverse()
+    return { messages: page.map(toMessageDto), hasOlder }
+  }
+
+  // Unbounded: `after` mode itself, or neither cursor and no `limit` at all —
+  // the original whole-transcript contract, preserved exactly.
+  const rows = await db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.sessionId, sessionId), gt(messages.seq, opts.after ?? -1)))
+    .orderBy(messages.seq)
+  return { messages: rows.map(toMessageDto), hasOlder: false }
 }
 
 // --- export ---------------------------------------------------------------

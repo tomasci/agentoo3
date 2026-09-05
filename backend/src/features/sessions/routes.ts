@@ -4,6 +4,7 @@ import { badRequest } from '@/lib/errors'
 import { subscribeSession } from '@/lib/events'
 import {
   createSessionSchema,
+  messagePageSchema,
   sendMessageSchema,
   sessionMessageSchema,
   sessionSchema,
@@ -15,6 +16,7 @@ import {
   exportSession,
   getSession,
   interruptSession,
+  listMessagePage,
   listMessages,
   listSessions,
   sendMessage,
@@ -134,10 +136,32 @@ sessionsRouter.openapi(
     method: 'get',
     path: '/sessions/{id}/messages',
     tags: ['sessions'],
-    summary: 'Read a session transcript',
+    summary: 'Read a session transcript, a page at a time',
     description:
-      'Ordered by seq. Pass `after` to fetch only what followed a message you ' +
-      'already have, which is how a reconnecting stream catches up.',
+      'Always ascending by seq, in every mode, so a client never has to re-sort ' +
+      'what it gets back regardless of which cursor it used. Three modes, chosen ' +
+      'by which of `after`/`before`/`limit` are present:\n\n' +
+      '`after` (or neither cursor and no `limit`): forward and unbounded — ' +
+      'everything with seq > after. This is unchanged from before pagination ' +
+      'existed, and is how a reconnecting client catches up on what it already ' +
+      'has a prefix of. `limit` does not apply to it; omitting both cursors and ' +
+      '`limit` returns the whole transcript, exactly as this endpoint always ' +
+      'has.\n\n' +
+      '`before`: a backward page anchored on a seq you already have — the ' +
+      '`limit` messages immediately older than it (seq < before), for a ' +
+      'scrollback UI paging up through history it has partly loaded.\n\n' +
+      '`limit` alone, with neither cursor: the newest `limit` messages. This is ' +
+      'the initial-load case — opening a session has no seq to anchor on yet, ' +
+      'only how many messages it wants, so it cannot use `before`, and ' +
+      'unbounded `after` would defeat the point of paginating at all.\n\n' +
+      '`before` defaults `limit` to 100, and so does `limit` alone — both are ' +
+      'the bounded modes. `after` and `before` point in opposite directions on ' +
+      'one cursor, so sending both is a 400 rather than a guess at which one ' +
+      'wins. `hasOlder` says whether messages older than this page still exist ' +
+      '— computed honestly for both bounded modes by asking for one extra row ' +
+      'past `limit` rather than a separate, and separately racy, COUNT(*) — and ' +
+      'always false for the unbounded `after` response, since nothing was held ' +
+      'back there for it to report on.',
     request: {
       params: idParam,
       query: z.object({
@@ -146,17 +170,46 @@ sessionsRouter.openapi(
           .int()
           .min(-1)
           .optional()
-          .openapi({ param: { name: 'after', in: 'query' } }),
+          .openapi({
+            param: { name: 'after', in: 'query' },
+            description:
+              'Exclusive; forward, ascending and unbounded. Cannot be combined with before.',
+          }),
+        before: z.coerce
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .openapi({
+            param: { name: 'before', in: 'query' },
+            description:
+              'Exclusive; backward page of up to `limit` messages, still returned ascending. ' +
+              'Cannot be combined with after.',
+          }),
+        limit: z.coerce
+          .number()
+          .int()
+          .min(1)
+          .max(500)
+          .optional()
+          .openapi({
+            param: { name: 'limit', in: 'query' },
+            description:
+              'Page size for a bounded backward page. With before, defaults to 100. Alone, with ' +
+              'neither cursor, it means the newest `limit` messages — the initial-load case, when ' +
+              'there is no seq yet to pass as before. Ignored when after is set.',
+          }),
       }),
     },
     responses: {
-      200: json(z.array(sessionMessageSchema), 'Messages'),
+      200: json(messagePageSchema, 'A page of messages, always ascending by seq'),
+      400: json(errorSchema, 'after and before were both set'),
       404: json(errorSchema, 'Not found'),
     },
   }),
   async (c) => {
-    const { after } = c.req.valid('query')
-    return c.json(await listMessages(c.req.valid('param').id, after ?? -1), 200)
+    const { after, before, limit } = c.req.valid('query')
+    return c.json(await listMessagePage(c.req.valid('param').id, { after, before, limit }), 200)
   },
 )
 

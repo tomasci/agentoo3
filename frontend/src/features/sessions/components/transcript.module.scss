@@ -1,9 +1,27 @@
 .transcript { display: grid; gap: var(--space-2); align-content: start; }
 
+// One `.row` per top-level node — never per nested one, those are already
+// gated by Collapsible's own unmount-on-exit. `content-visibility: auto`
+// skips layout, style, paint and hit-testing for a row while it is off
+// screen, which is what turns the composer's forced layout (Ark's
+// `autoresize` reads `scrollHeight` on every keystroke, and `.page` gives it
+// no containment boundary from the transcript below) from O(every message in
+// the session) into O(rows actually on screen). `contain-intrinsic-size`
+// gives a skipped row a placeholder size so the scrollbar doesn't jump as
+// rows are discovered; the `auto` keyword remembers a row's real rendered
+// size the next time it goes off screen, so the `6rem` fallback only matters
+// before a row has ever been on screen once.
+.row { content-visibility: auto; contain-intrinsic-size: auto 6rem; }
+
 // --- the human's own messages -------------------------------------------------
 
 .prompt {
-  justify-self: end;
+  // Used to be `justify-self: end` as a direct child of the `.transcript`
+  // grid above. Now nested one level inside `.row` — the containment
+  // boundary needs to wrap every row uniformly, prompt or not — so alignment
+  // moves to an auto inline-start margin on this still block-level, still
+  // full-width-by-default element instead.
+  margin-inline-start: auto;
   max-width: min(46rem, 100%);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-lg);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import {
@@ -14,7 +14,6 @@ import {
 } from '@/shared/ui'
 import { useSessionStream } from '../hooks/use-session-stream'
 import {
-  type SessionMessage,
   useInterruptSession,
   useSendMessage,
   useSession,
@@ -36,11 +35,6 @@ const STATUS_TONE = {
   failed: 'danger',
 } as const
 
-// A shared empty array rather than a fresh `[]` per render: `Transcript` is
-// memoised on this identity, and a new one each time would defeat it for the
-// whole of the first load.
-const NO_MESSAGES: SessionMessage[] = []
-
 // `projectId` stays in the prop type — the route still supplies it — but is no
 // longer destructured: the only thing that read it was the back-to-list button.
 export function SessionPage({ sessionId }: { projectId: string; sessionId: string }) {
@@ -49,31 +43,103 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   const messages = useSessionMessages(sessionId)
   const send = useSendMessage(sessionId)
   const interrupt = useInterruptSession(sessionId)
-  const { connected } = useSessionStream(sessionId)
+  // Gated on the messages query's own success, not just mount: opening the
+  // stream before that first page has landed leaves nothing in the cache to
+  // seed `lastSeq` from, so the backend treats it as a brand new reader and
+  // replays the entire transcript down the stream on top of the REST fetch
+  // that just did the same thing.
+  const { connected } = useSessionStream(sessionId, messages.isSuccess)
 
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
+  // Guards `requestOlder` against re-entry: a fetch already in flight does not
+  // flip `messages.isLoadingOlder` (react-query state, seen only on the next
+  // render) until after this synchronous call returns, and momentum-scrolling
+  // near the top can fire many `scroll` events before that render happens.
+  const loadingOlder = useRef(false)
+  // `scrollHeight` recorded just before a `loadOlder` fetch, consumed by the
+  // layout effect below once the older page lands. `null` means "no prepend
+  // to compensate for" — the ordinary case of every render that is not that
+  // one.
+  const pendingScrollAdjust = useRef<number | null>(null)
 
-  const list = messages.data ?? NO_MESSAGES
-  const busy = BUSY.includes(session.data?.status ?? '')
-
-  // Follow the transcript only while the reader is already at the bottom, so
-  // scrolling up to read something does not get yanked back by the next message.
-  // list.length is the trigger rather than a value the effect reads: a new
-  // message is exactly when the scroll position needs revisiting.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: explained above
-  useEffect(() => {
+  const requestOlder = () => {
     const el = scroller.current
-    if (el && pinned.current) el.scrollTop = el.scrollHeight
-  }, [list.length])
+    // `hasPreviousPage`, not `hasOlder`: the latter is only ever the *first*
+    // loaded page's own flag, so a page that ever comes back empty while
+    // still claiming `hasOlder: true` would leave this guard permanently
+    // open on a button that can no longer fetch anything (`getPreviousPageParam`
+    // has nothing to anchor on and returns `undefined` forever). `hasPreviousPage`
+    // is derived from that same function, so it is false in exactly the cases
+    // where fetching again would be a no-op.
+    if (!el || loadingOlder.current || !messages.hasPreviousPage) return
+    loadingOlder.current = true
+    pendingScrollAdjust.current = el.scrollHeight
+    // A prepend is a scrollback read, never "stay pinned to the bottom" — even
+    // a short first page that fits the whole viewport reads as `pinned` under
+    // the at-bottom heuristic below, and without this it would get yanked
+    // back down the moment older history landed above it.
+    pinned.current = false
+    void messages.loadOlder().finally(() => {
+      loadingOlder.current = false
+    })
+  }
+
+  // The oldest loaded message's own seq, not `messages.messages` itself: it
+  // moves only when a page is *prepended* (a lower seq now leads the array),
+  // and is untouched by the stream appending at the tail — which is exactly
+  // the distinction that keeps this effect from ever firing for the wrong
+  // reason and fighting the pin-to-bottom ResizeObserver below.
+  const oldestSeq = messages.messages[0]?.seq
+  // biome-ignore lint/correctness/useExhaustiveDependencies: oldestSeq is the trigger, not a value read inside
+  useLayoutEffect(() => {
+    const el = scroller.current
+    const recorded = pendingScrollAdjust.current
+    pendingScrollAdjust.current = null
+    if (!el || recorded === null) return
+    // Inserting older messages above the viewport pushes everything already
+    // on screen down by exactly the height that was added; without this the
+    // reader is thrown backwards to whatever now occupies their old scroll
+    // position. Reassigning `scrollTop` here rather than trusting the
+    // browser's own scroll anchoring, which is not specified to survive a
+    // batch insert above the viewport.
+    el.scrollTop += el.scrollHeight - recorded
+  }, [oldestSeq])
+
+  // Keeps the transcript pinned to the bottom as its true height settles, not
+  // only when a message arrives: `.row`'s `content-visibility: auto` (see
+  // transcript.module.scss) makes `scrollHeight` an *estimate* for a row never
+  // yet rendered, so a single `scrollTop = scrollHeight` on the old message
+  // count can land short of the real bottom once markdown or code in that row
+  // resolves taller than its placeholder. A `ResizeObserver` on the rendered
+  // content re-asserts the pin every time its layout height actually changes,
+  // which covers that settling as well as ordinary growth — and does so only
+  // while `pinned.current` is true, so a prepend (which clears it in
+  // `requestOlder` above, even from a short first page that reads as "at the
+  // bottom") is never mistaken for "content grew, so follow it".
+  const setContent = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return
+    const observer = new ResizeObserver(() => {
+      const el = scroller.current
+      if (el && pinned.current) el.scrollTop = el.scrollHeight
+    })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
 
   const onScroll = () => {
     const el = scroller.current
     if (!el) return
+    // Follow the transcript only while the reader is already at the bottom,
+    // so scrolling up to read something does not get yanked back by the next
+    // message.
     pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    if (el.scrollTop < 80) requestOlder()
   }
+
+  const busy = BUSY.includes(session.data?.status ?? '')
 
   const submit = () => {
     const value = text.trim()
@@ -174,7 +240,26 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
         {messages.isPending ? (
           <Spinner label={t('common.loading')} block />
         ) : (
-          <Transcript messages={list} />
+          <div ref={setContent}>
+            {messages.hasPreviousPage && (
+              <div className={styles.loadOlder}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={requestOlder}
+                  loading={messages.isLoadingOlder}
+                  loadingLabel={t('sessions.transcript.loadingOlder')}
+                >
+                  {t('sessions.transcript.loadOlder')}
+                </Button>
+                {messages.isLoadOlderError && (
+                  <Alert tone="danger">{t('sessions.transcript.loadOlderFailed')}</Alert>
+                )}
+              </div>
+            )}
+            <Transcript messages={messages.messages} />
+          </div>
         )}
       </div>
 

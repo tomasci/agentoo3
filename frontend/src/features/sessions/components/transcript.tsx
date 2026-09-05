@@ -294,7 +294,18 @@ function TranscriptView({ messages }: { messages: SessionMessage[] }) {
   return (
     <div className={styles.transcript}>
       {nodes.map((node) => (
-        <Node key={node.id} node={node} />
+        // `.row` is the `content-visibility` containment boundary (see the
+        // stylesheet): the textarea's autoresize forces a synchronous layout
+        // on every keystroke, and without a boundary here its scope was the
+        // whole transcript rather than whatever rows are actually on screen.
+        // Only top-level nodes get one — a nested row inside an open task
+        // group is already gated by Collapsible's own unmount-on-exit, and
+        // wrapping one there anyway does not just duplicate that work: the
+        // size containment freezes it at the 6rem placeholder, clipping
+        // whatever the child actually renders.
+        <div key={node.id} className={styles.row}>
+          <Node node={node} />
+        </div>
       ))}
     </div>
   )

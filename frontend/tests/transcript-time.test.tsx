@@ -113,8 +113,15 @@ async function openAll(container: Element) {
 const stamps = (el: Element) => [...el.querySelectorAll('span[title]')] as HTMLElement[]
 const times = (el: Element) => stamps(el).map((s) => s.textContent)
 
-/** The transcript's top-level rows, in order. */
-const rows = (container: Element) => [...(container.firstElementChild?.children ?? [])]
+/** The transcript's top-level rows, in order.
+ *
+ * Each is now wrapped in its own `.row` div — the `content-visibility`
+ * containment boundary that keeps the composer's forced layout from scoping
+ * over the whole transcript — so this unwraps one level to hand back what it
+ * always did: the node's own root element (a Collapsible, the prompt bubble,
+ * the answer block), not the wrapper around it. */
+const rows = (container: Element) =>
+  [...(container.firstElementChild?.children ?? [])].map((row) => row.firstElementChild as HTMLElement)
 
 /** HH:MM in the local zone, computed without Intl so the expectation is not
  *  the implementation restated. */

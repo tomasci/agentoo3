@@ -236,7 +236,10 @@
       "noArguments": "No arguments",
       "result": "Result",
       "showMore": "Show more",
-      "showLess": "Show less"
+      "showLess": "Show less",
+      "loadOlder": "Load older messages",
+      "loadingOlder": "Loading older messages…",
+      "loadOlderFailed": "Could not load older messages"
     }
   },
   "notFound": {

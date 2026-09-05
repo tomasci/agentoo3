@@ -50,6 +50,18 @@
   padding-right: var(--space-1);
 }
 
+// Above the transcript, not only reachable by scrolling: a first page short
+// enough to fill the whole viewport has no scroll position left to trigger
+// from, so the button is the one affordance guaranteed to exist regardless of
+// how much history there is.
+.loadOlder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
 // --- header -------------------------------------------------------------------
 //
 // One row on a desktop-width screen: status, title, meta, live, actions. Below

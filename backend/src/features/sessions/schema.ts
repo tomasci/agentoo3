@@ -117,6 +117,22 @@ export const sessionMessageSchema = z.object({
 })
 export type SessionMessageDto = z.infer<typeof sessionMessageSchema>
 
+// A backward page is always handed back ascending, same as the after-mode
+// (whole-transcript) response — one ordering for the whole endpoint, so a
+// client never re-sorts depending on which cursor it used.
+export const messagePageSchema = z.object({
+  messages: z.array(sessionMessageSchema),
+  hasOlder: z.boolean().openapi({
+    description:
+      'Whether messages exist below the oldest one in this page, i.e. there is another ' +
+      'backward page to fetch with before=messages[0].seq. Computed honestly for both bounded ' +
+      'modes — a before page, and limit alone for an initial load — and always false for the ' +
+      'unbounded after response (including the whole-transcript default), since nothing is held ' +
+      'back there for this flag to report on.',
+  }),
+})
+export type SessionMessagePageDto = z.infer<typeof messagePageSchema>
+
 export const sendMessageSchema = z.object({
   text: z.string().min(1).max(100_000),
 })
