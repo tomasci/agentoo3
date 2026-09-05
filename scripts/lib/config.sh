@@ -58,6 +58,16 @@ SOURCES_DIR="${SOURCES_DIR:-$REPO_ROOT/sources}"
 SSH_KEYS_DIR="${SSH_KEYS_DIR:-$REPO_ROOT/keys}"
 # Each Claude Code instance wants ~4GB, so concurrency is deliberately low.
 WORKER_CONCURRENCY="${WORKER_CONCURRENCY:-1}"
+
+# Optional soft memory ceiling for the worker's cgroup — the worker, its agents
+# and every command they run. Empty means no ceiling, which is systemd's own
+# default. Accepts systemd's syntax: '3G', '80%'.
+#
+# MemoryHigh throttles and reclaims rather than killing, so the worst it can do
+# is make an agent slow. Worth setting on a small box, where the alternative is
+# the kernel picking an OOM victim across the whole machine and possibly landing
+# on postgres.
+WORKER_MEMORY_HIGH="${WORKER_MEMORY_HIGH:-}"
 # Generated credentials and connection strings are written here.
 ENV_FILE="${ENV_FILE:-$REPO_ROOT/.env}"
 
@@ -67,6 +77,42 @@ MIN_UBUNTU_VERSION="${MIN_UBUNTU_VERSION:-22.04}"
 SUPPORTED_ARCHS="${SUPPORTED_ARCHS:-x86_64 aarch64}"
 MIN_DISK_FREE_GB="${MIN_DISK_FREE_GB:-5}"
 MIN_RAM_MB="${MIN_RAM_MB:-1024}"
+
+# ------------------------------------------------------------------ swap -----
+#
+# An agent runs whatever the work needs — a test suite, a bundler, a type
+# checker — and those spike. Without swap there is no slack at all between "this
+# is heavy" and the kernel OOM-killing something, and what it kills is not
+# necessarily the greedy process: sessions on a 4GB box died because the OOM
+# killer fired while a frontend test suite ran, and took the agent with it.
+#
+# Swap is the slack. It is a safety valve, not storage: SWAP_SWAPPINESS is low
+# on purpose, so pages only go out under real pressure.
+SWAP_ENABLE="${SWAP_ENABLE:-1}"
+SWAP_FILE="${SWAP_FILE:-/swapfile}"
+# Every size below goes through num_or: these are read straight from the
+# environment and then used in arithmetic, where under `set -u` a typo is not a
+# bad value but an "unbound variable" that kills the step — and SWAP_ENOUGH_MB
+# is read by the preflight, so a typo there would end the install at step zero.
+#
+# Empty SWAP_SIZE_MB means "decide from RAM": twice memory, floored at 2GB and
+# capped at 8GB. Twice, because the peak this covers is one Claude Code process
+# (~4GB) landing on a machine that was already busy.
+SWAP_SIZE_MB="${SWAP_SIZE_MB:-}"
+SWAP_MIN_MB="$(num_or SWAP_MIN_MB "${SWAP_MIN_MB:-}" 2048)"
+SWAP_MAX_MB="$(num_or SWAP_MAX_MB "${SWAP_MAX_MB:-}" 8192)"
+if (( SWAP_MIN_MB > SWAP_MAX_MB )); then
+  log_warn "SWAP_MIN_MB=$SWAP_MIN_MB is above SWAP_MAX_MB=$SWAP_MAX_MB; the cap wins."
+fi
+# 10, not the default 60: swap here exists to stop an OOM kill, not to page out
+# a working set that fits. Above zero because zero would defeat the point.
+SWAP_SWAPPINESS="$(num_or SWAP_SWAPPINESS "${SWAP_SWAPPINESS:-}" 10)"
+# Below this, existing swap is treated as too small to count as a safety valve.
+SWAP_ENOUGH_MB="$(num_or SWAP_ENOUGH_MB "${SWAP_ENOUGH_MB:-}" 1024)"
+# The smallest swapfile the step will make. Also what tells a leftover of ours
+# apart from a file SWAP_FILE was pointed at by mistake, which must not be
+# deleted: nothing this step writes is ever smaller than this.
+SWAP_FLOOR_MB="$(num_or SWAP_FLOOR_MB "${SWAP_FLOOR_MB:-}" 64)"
 
 # ------------------------------------------------------------- packages -----
 

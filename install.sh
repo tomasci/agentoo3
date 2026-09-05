@@ -27,6 +27,7 @@ export REPO_ROOT
 STEPS=(
   "preflight:00-preflight.sh:Validate the host"
   "upgrade:10-system-upgrade.sh:apt update && full-upgrade"
+  "swap:15-configure-swap.sh:Swapfile, so a memory spike is slow not fatal"
   "utils:20-install-utils.sh:Base utilities (curl, wget, git, build tools...)"
   "python:30-install-python.sh:Python 3 + venv + uv"
   "node:40-install-node.sh:Node.js LTS + npm"
@@ -74,6 +75,9 @@ ${C_BOLD}Environment overrides${C_RESET} (see scripts/lib/config.sh):
   BUN_VERSION=1.1.38      Pin Bun instead of tracking latest
   INSTALL_UV=0            Skip the uv install
   CLAUDE_CODE_CHANNEL=latest  Track every Claude Code release
+  SWAP_ENABLE=0           Do not create a swapfile
+  SWAP_SIZE_MB=4096       Pin the swapfile size instead of deriving it from RAM
+  WORKER_MEMORY_HIGH=3G   Soft memory ceiling for the worker and its agents
   TAILSCALE_AUTHKEY=...   Join the tailnet unattended
   NGINX_DOMAIN=x.com      Override the auto-detected MagicDNS server_name
   UFW_TAILSCALE_ONLY=1    Move SSH behind the VPN (Tailscale must be up)

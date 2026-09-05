@@ -44,3 +44,8 @@ process.env.DATABASE_URL = 'postgres://u:p@127.0.0.1:5432/db'
 // the system stats, which is the state of a freshly installed box.
 export const MISSING_PROJECTS_DIR = '/nonexistent-agentoo-projects-dir'
 process.env.PROJECTS_DIR = MISSING_PROJECTS_DIR
+
+// A credential, so `hasClaudeCredential` is true and a turn under test gets as
+// far as the SDK instead of stopping at the guard before it. Nothing here ever
+// reaches Anthropic: the SDK is mocked wherever a turn is actually run.
+process.env.CLAUDE_CODE_OAUTH_TOKEN = 'test-not-a-real-token'

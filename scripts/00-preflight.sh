@@ -75,13 +75,27 @@ fi
 log_ok "disk ${free_gb}GB free on /"
 
 # --- memory ---
+# Swap is checked on its own, not only when RAM is short. What runs here is an
+# agent's builds and test suites, and those spike well past the baseline: a 4GB
+# host with no swap OOM-killed a `bun test` run, and systemd's default
+# OOMPolicy=stop took the whole worker unit down with it. RAM being "enough"
+# does not cover that — headroom is a separate property from size.
 ram_mb=$(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1024 ))
 swap_mb=$(( $(awk '/SwapTotal/ {print $2}' /proc/meminfo) / 1024 ))
+
 if (( ram_mb < MIN_RAM_MB )); then
   log_warn "Only ${ram_mb}MB RAM (recommended >= ${MIN_RAM_MB}MB)."
-  (( swap_mb < 512 )) && log_warn "Swap is ${swap_mb}MB; consider adding swap before building."
 else
-  log_ok "memory ${ram_mb}MB RAM, ${swap_mb}MB swap"
+  log_ok "memory ${ram_mb}MB RAM"
+fi
+
+if (( swap_mb >= SWAP_ENOUGH_MB )); then
+  log_ok "swap ${swap_mb}MB"
+elif [[ "$SWAP_ENABLE" == "1" ]]; then
+  log_info "swap ${swap_mb}MB — the 'swap' step will add a swapfile"
+else
+  log_warn "swap ${swap_mb}MB and SWAP_ENABLE=0. Without headroom, a heavy build or"
+  log_warn "test run can be OOM-killed mid-session. Set SWAP_ENABLE=1 or add swap yourself."
 fi
 
 log_ok "Preflight passed"

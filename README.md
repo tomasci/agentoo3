@@ -420,6 +420,13 @@ SSH_PORT=2222 /opt/agentoo/install.sh --only ufw
 
 # publish the site to the internet as well as the tailnet
 UFW_PUBLIC_PORTS="80/tcp 443/tcp" /opt/agentoo/install.sh --only ufw
+
+# swap: size it yourself, or opt out entirely
+SWAP_SIZE_MB=4096 /opt/agentoo/install.sh --only swap
+SWAP_ENABLE=0 /opt/agentoo/install.sh --only swap
+
+# soft memory ceiling for the worker and everything its agents run
+WORKER_MEMORY_HIGH=3G /opt/agentoo/install.sh --only backend
 ```
 
 Adding a package means appending to `PKGS_UTILS` in that file — nothing else.
@@ -453,3 +460,67 @@ systemd unit, once the backend exists.
   and model generations outlive the default 60s timeout.
 - **Tailscale SSH** (`TAILSCALE_SSH=1`) is off by default. It changes how the
   host authenticates SSH, which should be a deliberate choice.
+- **Memory.** See below — this is the failure mode most likely to bite a small
+  box, and it does not look like a memory problem when it happens.
+
+## Running out of memory
+
+An agent runs whatever the work needs: a test suite, a bundler, a type checker,
+a dev server. Those spike, and a session's peak is nothing like its baseline.
+Three things keep that from taking the machine — or the session — down with it.
+
+**Swap.** The `swap` step gives the host a swapfile if it has none: twice RAM,
+floored at 2GB and capped at 8GB, at `vm.swappiness=10` so pages only go out
+under real pressure. It is a safety valve, not a tier of memory. Every failure
+in that step is a warning rather than an error, because plenty of hosts (most
+container runtimes) forbid `swapon` outright and an install must still finish
+there.
+
+**`OOMPolicy=continue` on the services.** This one is worth understanding,
+because without it the symptom is unrecognisable. Everything an agent starts —
+the `claude` process, its shells, its `bun test` runs — lives inside
+`agentoo-worker.service`'s cgroup. systemd's `OOMPolicy` defaults to `stop`,
+which means: *if the kernel OOM-kills anything anywhere in this unit's cgroup,
+terminate the entire unit*. So one test run that exhausted the box took down the
+worker, the agent it was driving, and the session with them.
+
+What the operator saw was not "out of memory". It was
+
+```
+Turn failed: Claude Code process exited with code 143
+```
+
+— 143 being 128 + 15, SIGTERM, sent by systemd — four times in an hour, on four
+sessions that had done nothing wrong. `continue` leaves the kill where it
+belongs: one failed command, which the agent sees as a non-zero exit and can
+work around.
+
+**Sessions resume themselves.** A turn whose process was killed from outside is
+not a failed turn: the conversation is intact, so the worker says so in the
+transcript and picks the thread back up, up to three times before it stops and
+explains why. A turn that failed for any other reason — including the CLI
+crashing on its own, which would only crash again — still fails immediately
+rather than being retried at model prices.
+
+Check where a host stands with:
+
+```bash
+free -h                                          # swap present?
+systemctl show agentoo-worker -p OOMPolicy       # want: continue
+systemctl show agentoo-worker -p NRestarts       # climbing = something is killing it
+grep oom_kill /sys/fs/cgroup/system.slice/memory.events
+journalctl -u agentoo-worker | grep -i 'out of memory\|oom'
+```
+
+An existing install picks all of this up with
+
+```bash
+sudo /opt/agentoo/install.sh --only swap,backend
+```
+
+If the box keeps hitting it, the honest fixes in order are: give it more RAM
+(Claude Code alone asks for 4GB), keep `WORKER_CONCURRENCY=1` so only one
+session runs at a time, and set `WORKER_MEMORY_HIGH` — a soft ceiling that
+throttles and reclaims rather than killing, so the agent slows down instead of
+the OOM killer choosing a victim elsewhere on the machine. Losing postgres costs
+far more than a slow test run.

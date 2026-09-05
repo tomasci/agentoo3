@@ -151,6 +151,18 @@ else
   log_warn "Run: sudo $INSTALL_SH --only frontend"
 fi
 
+# Headroom, not just size. An agent's builds and test runs spike, and a host
+# with no swap has nothing between a spike and the OOM killer — which is how
+# four sessions on a 4GB box died in an hour reporting "exited with code 143".
+ram_mb=$(( $(awk '/MemTotal/ {print $2}' /proc/meminfo) / 1024 ))
+swap_mb=$(( $(awk '/SwapTotal/ {print $2}' /proc/meminfo) / 1024 ))
+if (( swap_mb >= SWAP_ENOUGH_MB )); then
+  log_ok "Memory ${ram_mb}MB RAM + ${swap_mb}MB swap"
+else
+  log_warn "Memory ${ram_mb}MB RAM and only ${swap_mb}MB swap — heavy work can be OOM-killed."
+  log_warn "Run: sudo $INSTALL_SH --only swap"
+fi
+
 if [[ -f "$SETTINGS_FILE" ]]; then
   log_ok "Remembered installer settings ($SETTINGS_FILE):"
   while IFS= read -r line; do
