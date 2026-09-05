@@ -81,6 +81,32 @@ const NOTIFICATION_STATUS: Record<string, TaskNode['status']> = {
  */
 export const displayAgent = (name: string) => name.replace(/^agentoo:/, '')
 
+/**
+ * `messages` is a *window* into the transcript, not the whole of it, now that
+ * the caller pages: the newest `PAGE_SIZE` on open, older pages prepended as
+ * the reader scrolls up (see use-sessions.ts). When the window happens to
+ * start mid-turn, four things degrade, all accepted rather than worked
+ * around, because every one of them self-heals as the next older page loads:
+ *
+ * - a `task_started` above the window means `listFor()` below falls back to
+ *   `roots` for that group's own children, so a subagent's messages render
+ *   flattened at top level instead of nested under it;
+ * - `task_progress` / `task_updated` / `task_notification` naming a task
+ *   whose `task_started` is above the window find no group in `byTaskId` and
+ *   are silently ignored;
+ * - a `tool_result` whose `tool_use` is above the window finds no owner in
+ *   `toolUseOwners`, so the result is discarded — real content loss, but one
+ *   that predates pagination (a `tool_use`/`tool_result` pair has always been
+ *   able to straddle two different fetches) and pagination only makes it the
+ *   common case instead of the theoretical one;
+ * - `markAnswers` walks `roots` positionally, so a window that starts or ends
+ *   mid-turn can promote the wrong assistant message as "the answer", or none.
+ *
+ * The alternative — pages aligned to turn boundaries — would need turn
+ * boundaries recorded in the schema, and even then could not bound a page's
+ * size (one turn can be arbitrarily long), so it was not worth the schema
+ * change for a problem four cheap, self-healing degradations already cover.
+ */
 export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
   const roots: TranscriptNode[] = []
   // tool_use_id -> the group collecting that delegation's messages.
