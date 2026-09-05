@@ -249,6 +249,34 @@ failure the queue is deliberately *not* drained — replaying the same failure
 against every waiting message helps nobody — so those stay pending until the
 next send.
 
+### A turn that was killed is not a turn that failed
+
+"Never retried" has one exception, and it is not a retry. If the CLI process was
+ended by something *outside* it — SIGTERM, SIGKILL, SIGHUP, SIGINT — the turn did
+not fail, it was interrupted. `resume` still has the conversation and
+`sdkSessionId` was persisted the moment the session started, so the worker writes
+a notice saying what happened, queues a continuation explaining it to the model,
+and carries on. Three continuations per operator message, counted back out of the
+transcript, then it stops and says so.
+
+The exception is narrow on purpose. A process that killed *itself* — SIGSEGV,
+SIGABRT — crashed on this conversation and would crash again, so those keep
+failing the turn, as does every ordinary non-zero exit. Retrying them would spend
+real money to reproduce a bug.
+
+The signal usually arrives as an exit code rather than a signal: the CLI handles
+it and exits `128 + n`, which is why the incident this was built for showed up as
+the number **143** — SIGTERM, from systemd, because a `bun test` run had been
+OOM-killed inside the worker's cgroup and systemd's `OOMPolicy` defaults to
+`stop`. See "Running out of memory" in the root README; `OOMPolicy=continue` on
+the unit is the other half of the fix, and stops the kill spreading at all.
+
+Everything in that recovery path is guarded, including the read that counts the
+continuations. It runs precisely when the machine is in trouble, so Postgres or
+Redis may be going down in the same moment — and an error escaping there would
+leave the session at `running` with no worker holding it, which the UI will not
+delete and will only queue new messages behind.
+
 Two SDK options do most of the work in the UI:
 
 - `forwardSubagentText: true` forwards a subagent's whole conversation with

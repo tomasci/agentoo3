@@ -152,6 +152,103 @@ export function lostSubagents(message: TranscriptMessage | undefined): number {
 }
 
 /**
+ * The ways something *outside* a process ends it.
+ *
+ * Deliberately not every signal. A turn that died because the machine, systemd
+ * or an operator stopped the process can be picked straight back up: the work
+ * was interrupted, not wrong, and running it again is the right answer. A turn
+ * that died on SIGSEGV or SIGABRT is the opposite — the CLI killed itself, on
+ * this conversation, and resuming it buys three more identical crashes at full
+ * model cost. Those keep the old behaviour and fail the turn.
+ *
+ * Keyed by number as well as named, because the exit code is often all there
+ * is: a runtime that handles a signal and exits reports `128 + n`, and Claude
+ * Code does exactly that, which is why the incident this exists for showed up
+ * as the number 143 rather than as the word SIGTERM.
+ */
+const TERMINATION_SIGNALS: Record<number, string> = {
+  1: 'SIGHUP',
+  2: 'SIGINT',
+  9: 'SIGKILL',
+  15: 'SIGTERM',
+}
+
+export interface ProcessKill {
+  /** What ended it. */
+  signal: string
+  /** Why it most likely happened, in the terms an operator can act on. */
+  cause: string
+}
+
+/**
+ * The signal a failure message describes, if it describes one at all.
+ *
+ * The SDK composes two different wordings and the worker only ever sees the
+ * finished string: `terminated by signal SIGX` when the child's exit event
+ * carried a signal, and `exited with code N` when it did not — which is the
+ * usual case here, because the CLI installs its own handler and translates the
+ * signal into `128 + n` on the way out.
+ *
+ * Whichever wording appears *first* wins. The rest of the message can be up to
+ * 2KB of the child's own stderr, and that is arbitrary text from whatever the
+ * agent was running: it may quote either wording, and a genuine `exited with
+ * code 1` must not be re-read as a kill because something further down the
+ * output mentioned SIGKILL.
+ */
+function signalIn(detail: string): string | undefined {
+  const named = detail.match(/Claude Code process terminated by signal (SIG[A-Z0-9]{1,8})/)
+  const coded = detail.match(/Claude Code process exited with code (\d+)/)
+  const namedAt = named?.index ?? Number.POSITIVE_INFINITY
+  const codedAt = coded?.index ?? Number.POSITIVE_INFINITY
+
+  if (named && namedAt < codedAt) {
+    const signal = named[1] ?? ''
+    return Object.values(TERMINATION_SIGNALS).includes(signal) ? signal : undefined
+  }
+  if (coded) return TERMINATION_SIGNALS[Number(coded[1]) - 128]
+  return undefined
+}
+
+/**
+ * Whether a turn died because something stopped the CLI process, rather than
+ * because the model or the work failed.
+ *
+ * The distinction is the whole point: a stopped process is not a failed turn.
+ * The conversation is intact on the SDK's side and `sdkSessionId` is already
+ * persisted, so the session can simply be picked back up — whereas a genuine
+ * error usually repeats, and re-running it would spend the money twice.
+ *
+ * Read out of the message text because that is all there is. The SDK raises a
+ * plain `Error` whose message it composes itself, and by the time it reaches
+ * the worker every structured field is gone.
+ *
+ * This is not hypothetical. A session on a 4GB box hit it four times in an
+ * hour: `bun test` on the frontend suite exhausted the machine, the kernel
+ * OOM-killed the test process, and systemd — whose `OOMPolicy` defaults to
+ * `stop` — reacted by terminating the entire worker unit, the running `claude`
+ * with it. What the operator saw was "Claude Code process exited with code
+ * 143" and a dead session they had to type "Continue" into, four times.
+ */
+export function processKill(detail: string): ProcessKill | undefined {
+  const signal = signalIn(detail)
+  return signal ? { signal, cause: causeOf(signal) } : undefined
+}
+
+function causeOf(signal: string): string {
+  switch (signal) {
+    case 'SIGKILL':
+      // Nothing in userspace SIGKILLs this process, so the kernel did, and on a
+      // box like this the only thing that does is the OOM killer.
+      return 'That is the kernel killing it outright, which here means the out-of-memory killer: something this session ran — a test suite or a build, usually — took the machine past its RAM.'
+    case 'SIGTERM':
+      // Two candidates, and from in here they are indistinguishable.
+      return 'Something asked it to stop: either the worker service was restarted under it, or systemd stopped the whole unit because a process inside it was OOM-killed.'
+    default:
+      return 'Something outside this session ended it.'
+  }
+}
+
+/**
  * Continuations already sent since the operator last spoke.
  *
  * The worker keeps no state between turns, so the bound is read back out of the
@@ -200,6 +297,82 @@ async function enqueueContinuation(sessionId: string, text: string): Promise<voi
     .returning()
 }
 
+/**
+ * How a session gets itself moving again after a turn ended badly.
+ *
+ * Both callers say the same three things in different words, so they say them
+ * through one shape: what the transcript shows while it is recovering, what the
+ * model is told to do about it, and what the session reports if it never does.
+ */
+interface Recovery {
+  /** The transcript line, told which attempt this is out of how many. */
+  notice: (attempt: number, of: number) => string
+  /** The continuation prompt: what actually happened, and what to do now. */
+  instruction: string
+  /** The session's `lastError` once the continuation budget is spent. */
+  giveUp: string
+}
+
+/**
+ * Nudge the session onwards, or stop and say why.
+ *
+ * The bound is what keeps this from being a loop that bills: a turn that ends
+ * badly for the same reason every time would otherwise re-queue itself forever
+ * at full model cost. It is read back out of the transcript rather than held in
+ * memory, because the worker keeps no state between turns — and, for the kill
+ * case, may not survive to the next one.
+ *
+ * Every database and queue call in here is guarded, all of them, because of
+ * where this runs. The kill path fires precisely when the machine is in
+ * trouble, so Postgres or Redis may be going down in the same moment — and now
+ * that `OOMPolicy=continue` keeps the worker alive through an OOM kill, the
+ * worker is *more* likely than before to reach this code with a sick database
+ * under it. A throw escaping here would escape `runTurn`'s catch as well and
+ * leave the session at `running` with nothing coming: not merely stuck, but
+ * beyond the reach of the UI, which refuses to delete a running session and
+ * only queues new messages behind one. That is worse than the failure this was
+ * called to recover from, so the fallback is the honest thing — mark it failed,
+ * and say that the recovery itself did not land.
+ *
+ * Exported for the tests, like the other decisions in this file worth pinning:
+ * nothing else imports it.
+ */
+export async function recover(sessionId: string, who: string, recovery: Recovery): Promise<void> {
+  // What the session is told happened, if everything below this line fails. It
+  // becomes the notice once we know we are nudging rather than stopping.
+  let why = recovery.giveUp
+  try {
+    const sent = await autoContinuationsSincePrompt(sessionId)
+    if (sent < MAX_AUTO_CONTINUATIONS) {
+      why = recovery.notice(sent + 1, MAX_AUTO_CONTINUATIONS)
+      await appendMessage(sessionId, { type: 'notice', message: why }, who)
+      await enqueueContinuation(sessionId, recovery.instruction)
+      await setStatus(sessionId, 'queued', null)
+      await enqueueSessionRun({ sessionId })
+      return
+    }
+    // Said in the transcript as well as on the session row: a failure that
+    // shows only as a red line on the sessions list is invisible from inside
+    // the session, which is where whoever is reading it actually is.
+    await appendMessage(sessionId, { type: 'error', message: recovery.giveUp }, who)
+    await setStatus(sessionId, 'failed', recovery.giveUp)
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    logger.error(`Session ${sessionId} could not be resumed: ${detail}`)
+    try {
+      await setStatus(sessionId, 'failed', `${why} Recovering from that failed too: ${detail}`)
+    } catch (fatal) {
+      // Nothing left to write with. Said as loudly as this process can say it,
+      // because the row is now stale: the session reads as `running` and no
+      // worker holds it.
+      const why2 = fatal instanceof Error ? fatal.message : String(fatal)
+      logger.error(
+        `Session ${sessionId} is stranded: it still reads as 'running' and could not be marked failed (${why2}). Reset it by hand once the database is back.`,
+      )
+    }
+  }
+}
+
 /** The label a message is attributed to, tracked as tasks start and finish. */
 function attribution(
   message: TranscriptMessage,
@@ -212,7 +385,8 @@ function attribution(
   return fallback
 }
 
-async function runTurn(job: SessionRunJob): Promise<void> {
+/** Exported for the tests; the worker below is the only real caller. */
+export async function runTurn(job: SessionRunJob): Promise<void> {
   const { sessionId } = job
 
   // Claim the turn. A conditional update is the mutex: whichever worker moves
@@ -367,29 +541,12 @@ async function runTurn(job: SessionRunJob): Promise<void> {
     if (lost > 0) {
       const one = lost === 1
       const tasks = `${lost} delegated task${one ? '' : 's'}`
-      const sent = await autoContinuationsSincePrompt(sessionId)
-      if (sent < MAX_AUTO_CONTINUATIONS) {
-        await appendMessage(
-          sessionId,
-          {
-            type: 'notice',
-            message: `The turn ended while ${tasks} ${one ? 'was' : 'were'} still running in the background, so ${one ? 'it was' : 'they were'} stopped — this session cannot outlive its turn. Picking the work back up (${sent + 1} of ${MAX_AUTO_CONTINUATIONS}).`,
-          },
-          orchestratorName,
-        )
-        await enqueueContinuation(
-          sessionId,
-          `Your previous turn ended while ${tasks} ${one ? 'was' : 'were'} still running in the background, so ${one ? 'it was' : 'they were'} stopped when the turn closed. No report is coming for ${one ? 'it' : 'them'}, and any claim that ${one ? 'it' : 'they'} finished is unsafe: check what actually landed on disk first, then carry on from there. Delegation blocks — send the work again and read the result inside the turn you are in, rather than ending a turn to wait for it.`,
-        )
-        await setStatus(sessionId, 'queued', null)
-        await enqueueSessionRun({ sessionId })
-        return
-      }
-      await setStatus(
-        sessionId,
-        'failed',
-        `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: every turn ended with delegated work still running in the background. Check the worktree for partial work.`,
-      )
+      await recover(sessionId, orchestratorName, {
+        notice: (attempt, of) =>
+          `The turn ended while ${tasks} ${one ? 'was' : 'were'} still running in the background, so ${one ? 'it was' : 'they were'} stopped — this session cannot outlive its turn. Picking the work back up (${attempt} of ${of}).`,
+        instruction: `Your previous turn ended while ${tasks} ${one ? 'was' : 'were'} still running in the background, so ${one ? 'it was' : 'they were'} stopped when the turn closed. No report is coming for ${one ? 'it' : 'them'}, and any claim that ${one ? 'it' : 'they'} finished is unsafe: check what actually landed on disk first, then carry on from there. Delegation blocks — send the work again and read the result inside the turn you are in, rather than ending a turn to wait for it.`,
+        giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: every turn ended with delegated work still running in the background. Check the worktree for partial work.`,
+      })
       return
     }
 
@@ -402,6 +559,24 @@ async function runTurn(job: SessionRunJob): Promise<void> {
     }
     const detail = error instanceof Error ? error.message : String(error)
     logger.error(`Session ${sessionId} failed: ${detail}`)
+
+    // A killed process is not a failed turn, and must not be reported as one.
+    // The work stopped where it stood for a reason that had nothing to do with
+    // the model, and `resume` still has the conversation, so the session picks
+    // itself back up instead of waiting for someone to notice and type
+    // "Continue" — which is exactly what its operator had to do, four times in
+    // one hour, before this existed.
+    const kill = processKill(detail)
+    if (kill) {
+      await recover(sessionId, orchestratorName, {
+        notice: (attempt, of) =>
+          `The Claude Code process running this turn was killed by ${kill.signal}. ${kill.cause} Resuming where it left off (${attempt} of ${of}).`,
+        instruction: `Your previous turn was cut short: the process running it was killed by ${kill.signal} partway through, so everything in flight stopped where it stood rather than finishing. ${kill.cause} Nothing is coming back for that work, and any note you left claiming it was done is unsafe — check what actually landed on disk before you trust it, then carry on. If a command you ran is what exhausted the machine, do not run it the same way again: split it up, run it over fewer files at a time, or cap its memory.`,
+        giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: the Claude Code process keeps being killed (${detail}). ${kill.cause}`,
+      })
+      return
+    }
+
     // Recorded in the transcript as well as on the session: a failure that only
     // shows up as a red line on the sessions list is invisible from inside the
     // session, which is where someone reading the history actually is.

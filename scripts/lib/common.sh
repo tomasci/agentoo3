@@ -118,6 +118,22 @@ require_root() {
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# A whole number, or the fallback — with a warning when the value was not empty.
+#
+# Guards arithmetic. `set -u` is on, and inside (( )) bash resolves a bare word
+# as a variable name, so `(( x < SWAP_MAX_MB ))` with SWAP_MAX_MB=abc dies with
+# "abc: unbound variable" and takes the whole installer down with it. Every knob
+# an operator can set from the environment and we then do arithmetic on has to
+# come through here.
+#
+#   SWAP_MAX_MB="$(num_or SWAP_MAX_MB "${SWAP_MAX_MB:-}" 8192)"
+num_or() {
+  local name="$1" value="${2:-}" fallback="$3"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then printf '%s' "$value"; return 0; fi
+  [[ -n "$value" ]] && log_warn "$name='$value' is not a whole number; using $fallback."
+  printf '%s' "$fallback"
+}
+
 # True when the current user can read/write this path without escalating.
 writable_by_me() {
   local f="$1"
