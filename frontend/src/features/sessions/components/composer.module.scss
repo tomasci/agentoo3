@@ -1,0 +1,131 @@
+// Mirrors session-page.module.scss's own `.composer`/`.queueStatus`/
+// `.composerRow`/`.textareaWrap` byte for byte — this file took over
+// rendering them when the composer was extracted, and the header/scroll
+// styles stayed behind with the page that owns them.
+
+.composer {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.queueStatus {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-text-muted);
+}
+
+.composerRow {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+}
+
+.textareaWrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.fileInput {
+  // Triggered only via the attach button's own `.click()` — never a focus
+  // target of its own, so it never enters the tab sequence.
+  display: none;
+}
+
+// --- attachment tray ------------------------------------------------------
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 16rem;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+
+  &[data-status='error'] {
+    border-color: var(--color-danger-border);
+    background: var(--color-danger-bg);
+  }
+}
+
+.chipName {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chipSize {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.chipProgress {
+  width: 3rem;
+  height: var(--space-1);
+  flex-shrink: 0;
+
+  // Track and value colour independently across the two rendering models a
+  // native <progress> is built from; both have to be set for it to read as
+  // "accent fill on a neutral track" in every engine rather than the
+  // platform's own default green/blue bar.
+  &::-webkit-progress-bar { background: var(--color-border); border-radius: var(--radius-full); }
+  &::-webkit-progress-value { background: var(--color-accent); border-radius: var(--radius-full); }
+  &::-moz-progress-bar { background: var(--color-accent); border-radius: var(--radius-full); }
+}
+
+.chipError {
+  flex-basis: 100%;
+  color: var(--color-danger-text);
+}
+
+.chipRemove {
+  appearance: none;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-muted);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+
+  // A hit target no smaller than the rest of the app's icon-only controls
+  // (see button.module.scss's own sizeSm), even though the glyph itself is
+  // one character.
+  min-width: var(--control-height-sm);
+  min-height: var(--control-height-sm);
+
+  &:hover { color: var(--color-text-primary); }
+
+  &:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+}
+
+// --- usage line ------------------------------------------------------------
+
+.usage {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  color: var(--color-text-muted);
+}
+
+.usageError { color: var(--color-danger-text); }
+.usageText { font-variant-numeric: tabular-nums; }

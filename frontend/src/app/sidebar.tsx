@@ -71,6 +71,9 @@ export function SystemSidebar() {
       <Link to="/ssh-keys" className={styles.navItem} activeProps={{ 'aria-current': 'page' }}>
         {t('nav.sshKeys')}
       </Link>
+      <Link to="/storage" className={styles.navItem} activeProps={{ 'aria-current': 'page' }}>
+        {t('nav.storage')}
+      </Link>
       <Link to="/settings" className={styles.navItem} activeProps={{ 'aria-current': 'page' }}>
         {t('nav.configuration')}
       </Link>

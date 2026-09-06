@@ -36,6 +36,20 @@
       "when": 1788562597851,
       "tag": "0004_useful_hannibal_king",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788656400342,
+      "tag": "0005_useful_runaways",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788660843061,
+      "tag": "0006_amused_tarantula",
+      "breakpoints": true
     }
   ]
 }

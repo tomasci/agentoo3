@@ -9,15 +9,19 @@
 
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { Worker } from 'bullmq'
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { sanitizeForDb } from '@/db/sanitize'
-import { messages, projects, sessions } from '@/db/schema'
+import { messageFiles, messages, projects, sessionFiles, sessions } from '@/db/schema'
 import { env, hasClaudeCredential } from '@/env'
+import { announcementFor } from '@/features/attachments/manifest'
+import { toManifestFile } from '@/features/attachments/service'
 import { optionsFor } from '@/features/sessions/runner-options'
+import { messageDto } from '@/features/sessions/service'
 import { type TranscriptMessage, titleFor } from '@/features/sessions/titles'
 import { publishSessionEvent, subscribeControl } from '@/lib/events'
 import { logger } from '@/lib/logger'
+import { sessionUploadsDir } from '@/lib/paths'
 import { enqueueSessionRun, QUEUE_SESSION_RUN, redisConnection, type SessionRunJob } from './index'
 
 /**
@@ -385,6 +389,38 @@ function attribution(
   return fallback
 }
 
+/**
+ * Undo this turn's announcement stamp when the turn ends without the model
+ * ever having produced anything for it.
+ *
+ * The stamp is written *before* `query()` runs, in the transaction above —
+ * that is what lets the *next* turn tell new files apart from already-seen
+ * ones with a plain `announced_seq IS NULL`, rather than a timestamp diff
+ * that breaks across an interrupted turn or the auto-recovery continuation
+ * path. The cost of stamping early is that "stamped" and "the model actually
+ * saw it" can come apart: an interrupt, a killed CLI process recovered from,
+ * or any other error can all end a turn before `query()` yielded a single
+ * message. There is no structured way to tell from here whether it yielded
+ * zero messages or several before dying, so this does not try to guess —
+ * every one of those three paths just re-opens whatever this turn stamped.
+ * Biased deliberately toward re-announcing: a duplicate notice on the next
+ * turn costs a few tokens, while a file that is never mentioned again because
+ * its one announcement was spent on a turn the model never saw costs the
+ * feature (see attachments-announcement.test.ts's "a file announced on a
+ * turn that died" for the incident this exists for).
+ */
+async function unstampAnnouncement(
+  sessionId: string,
+  seq: number,
+  messageId: string,
+): Promise<void> {
+  await db
+    .update(sessionFiles)
+    .set({ announcedSeq: null })
+    .where(and(eq(sessionFiles.sessionId, sessionId), eq(sessionFiles.announcedSeq, seq)))
+  await db.delete(messageFiles).where(eq(messageFiles.messageId, messageId))
+}
+
 /** Exported for the tests; the worker below is the only real caller. */
 export async function runTurn(job: SessionRunJob): Promise<void> {
   const { sessionId } = job
@@ -437,8 +473,76 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
     await setStatus(sessionId, 'idle')
     return
   }
-  await db.update(messages).set({ pending: false }).where(eq(messages.id, userRow.id))
-  const prompt = String((userRow.payload as { text?: unknown }).text ?? '')
+  // Flipping `pending` and stamping which files this turn announces happen in
+  // one round-trip on purpose: `announcedSeq` is read back by the *next*
+  // turn (`WHERE announced_seq IS NULL`) to decide what is new, and diffing a
+  // timestamp instead would break on exactly the paths this worker is built
+  // to survive — an interrupted turn, the auto-recovery continuation above,
+  // and several messages queued during a long turn draining in order
+  // afterwards.
+  let announcement = ''
+  await db.transaction(async (tx) => {
+    await tx.update(messages).set({ pending: false }).where(eq(messages.id, userRow.id))
+
+    const toAnnounce = await tx
+      .select()
+      .from(sessionFiles)
+      .where(
+        and(
+          eq(sessionFiles.sessionId, sessionId),
+          isNull(sessionFiles.deletedAt),
+          isNull(sessionFiles.announcedSeq),
+          eq(sessionFiles.status, 'ready'),
+        ),
+      )
+      .orderBy(sessionFiles.createdAt, sessionFiles.id)
+    if (toAnnounce.length === 0) return
+
+    await tx
+      .update(sessionFiles)
+      .set({ announcedSeq: userRow.seq })
+      .where(
+        inArray(
+          sessionFiles.id,
+          toAnnounce.map((f) => f.id),
+        ),
+      )
+    // "Attached at turn N" made explicit — the message that carried the
+    // announcement is the turn that first told the agent about these files.
+    // originalFilename is denormalised here (not just fileId) so a message
+    // can still say which file this was after a hard delete clears fileId —
+    // see message_files in db/schema.ts.
+    await tx.insert(messageFiles).values(
+      toAnnounce.map((f) => ({
+        messageId: userRow.id,
+        fileId: f.id,
+        originalFilename: f.originalFilename,
+      })),
+    )
+
+    announcement = announcementFor(sessionUploadsDir(sessionId), toAnnounce.map(toManifestFile))
+  })
+
+  // The prompt the browser is holding was published at send time, before any
+  // `message_files` row existed, so its `files` is stuck at `[]` until
+  // something tells it otherwise — this is that something. Published in the
+  // same shape `listMessages` returns (see `messageDto`), so a client that
+  // merges this event on `seq` and a client that instead refetches land on
+  // the same state. Gated on `announcement`, exactly the signal above already
+  // uses for "this turn linked files" (announcementFor returns '' only when
+  // toAnnounce was empty): a turn with nothing new to say must not add SSE
+  // traffic for a `files` the browser already has right. Deliberately not
+  // done from inside the transaction above or on the un-stamp paths below —
+  // an interrupted or failed turn already removes what it just linked, and
+  // republishing there would just be undone again.
+  if (announcement) {
+    const dto = await messageDto(userRow.id)
+    if (dto)
+      await publishSessionEvent({ kind: 'message', sessionId, seq: userRow.seq, message: dto })
+  }
+
+  const userText = String((userRow.payload as { text?: unknown }).text ?? '')
+  const prompt = announcement ? `${announcement}\n${userText}` : userText
 
   const abortController = new AbortController()
   let interrupted = false
@@ -502,6 +606,7 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
     }
 
     if (interrupted) {
+      if (announcement) await unstampAnnouncement(sessionId, userRow.seq, userRow.id)
       await setStatus(sessionId, 'interrupted', null)
       return
     }
@@ -554,6 +659,7 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
   } catch (error) {
     // An abort surfaces here as a thrown error, but it was asked for.
     if (interrupted) {
+      if (announcement) await unstampAnnouncement(sessionId, userRow.seq, userRow.id)
       await setStatus(sessionId, 'interrupted', null)
       return
     }
@@ -568,6 +674,7 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
     // one hour, before this existed.
     const kill = processKill(detail)
     if (kill) {
+      if (announcement) await unstampAnnouncement(sessionId, userRow.seq, userRow.id)
       await recover(sessionId, orchestratorName, {
         notice: (attempt, of) =>
           `The Claude Code process running this turn was killed by ${kill.signal}. ${kill.cause} Resuming where it left off (${attempt} of ${of}).`,
@@ -580,6 +687,7 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
     // Recorded in the transcript as well as on the session: a failure that only
     // shows up as a red line on the sessions list is invisible from inside the
     // session, which is where someone reading the history actually is.
+    if (announcement) await unstampAnnouncement(sessionId, userRow.seq, userRow.id)
     await appendMessage(sessionId, { type: 'error', message: detail }, orchestratorName)
     // Anything still pending stays pending. Draining it now would replay the
     // same failure against every queued message in turn.

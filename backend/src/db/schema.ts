@@ -1,5 +1,6 @@
-import { relations } from 'drizzle-orm'
+import { relations, sql } from 'drizzle-orm'
 import {
+  bigint,
   boolean,
   doublePrecision,
   index,
@@ -203,6 +204,170 @@ export const messages = pgTable(
   (t) => [uniqueIndex('messages_session_seq_key').on(t.sessionId, t.seq)],
 )
 
+// --- session files --------------------------------------------------------
+
+// 'missing' is set by the GC job when a row's blob is gone from disk (a
+// dangling row — see storage_anomalies below); the manifest and the per-turn
+// announcement both omit it, so an agent is never pointed at a Read that will
+// fail. 'unreadable' exists for a file that later turns out to be unopenable
+// (e.g. corrupt on disk); nothing sets it at upload time today.
+export const sessionFileStatusEnum = pgEnum('session_file_status', [
+  'ready',
+  'missing',
+  'unreadable',
+])
+
+// One row per uploaded file. Bytes live on disk (see features/attachments/
+// storage.ts); this is metadata only — Postgres never holds a blob.
+export const sessionFiles = pgTable(
+  'session_files',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    // The name the human uploaded. Never used to build a path — see
+    // storedName — so it can hold anything, including characters that would
+    // be unsafe on disk.
+    originalFilename: text('original_filename').notNull(),
+    // The on-disk basename: `<file-uuid>-<sanitized-name>`. Generated, never
+    // derived from user input directly, which is what keeps a `.claude`
+    // subdirectory from ever being possible inside an uploads dir (see the
+    // `.claude` trap in runner-options.ts).
+    storedName: text('stored_name').notNull(),
+    // Sniffed from content server-side, never the client's declared type and
+    // never the extension alone. See features/attachments/sniff.ts.
+    mimeType: text('mime_type').notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    checksum: text('checksum').notNull(),
+    status: sessionFileStatusEnum('status').notNull().default('ready'),
+    // Line count for text-ish files, page count for PDFs — computed once
+    // while the upload streams to disk (or, for PDFs, in one bounded extra
+    // read right after) and cached here. The alternative — recomputing them
+    // by re-reading every file's bytes each time ATTACHMENTS.md regenerates,
+    // which happens on every upload and delete — would turn every mutation
+    // into an O(session size) disk read.
+    lineCount: integer('line_count'),
+    pageCount: integer('page_count'),
+    // Null until a turn has told the agent about this file. Set once, at
+    // announcement time, by session-run.worker.ts — never diffed from a
+    // timestamp, which would break on an interrupted turn, the auto-recovery
+    // continuation path, or several messages queued during a long turn.
+    announcedSeq: integer('announced_seq'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Soft delete: a user-deleted file keeps its row so a past message that
+    // referenced it (see message_files) still resolves to something instead
+    // of a broken join, and so its checksum can be re-uploaded later without
+    // colliding with a row that no longer represents a real file.
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('session_files_session_idx').on(t.sessionId),
+    // Dedup is scoped to a session, and only among files still present — a
+    // deleted file's checksum must not block re-adding the same content
+    // later. A partial unique index expresses that at the database level
+    // rather than only in the service layer's check-then-insert.
+    uniqueIndex('session_files_session_checksum_key')
+      .on(t.sessionId, t.checksum)
+      .where(sql`${t.deletedAt} is null`),
+  ],
+)
+
+// Which turn first surfaced a file to the agent — "attached at turn N" made
+// explicit, for the UI paperclip, and the one place a message can still name
+// a file whose row was later hard-deleted (gc.ts's cleanup can remove a
+// dangling_row or a checksum_mismatch outright — see reconcile.ts). Populated
+// by session-run.worker.ts when it stamps announcedSeq, linking the prompt
+// message that carried the announcement to every file it just announced. The
+// worker itself never reads this table back — it reads announcedSeq on the
+// file row to decide what is new. One consumer per fact.
+//
+// `fileId` is nullable, ON DELETE SET NULL rather than cascade: a cascade
+// here is what used to leave a message with nothing at all to say about an
+// attachment whose row cleanup later removed (acceptance criterion 11 — "a
+// message referencing an attachment whose row was cleaned up still renders,
+// showing a 'file removed' placeholder" — had no way to hold with the link
+// itself gone too). `originalFilename` is denormalised alongside it for the
+// same reason: once fileId is null, it is the only thing left that can still
+// say *which* file this was — nullable because a schema migration cannot
+// retroactively know a name for a link created before this column existed.
+export const messageFiles = pgTable(
+  'message_files',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    fileId: uuid('file_id').references(() => sessionFiles.id, { onDelete: 'set null' }),
+    originalFilename: text('original_filename'),
+  },
+  (t) => [
+    index('message_files_message_idx').on(t.messageId),
+    // Only meaningful while fileId is still live: several links for the same
+    // message legitimately end up with a null fileId once cleanup clears it,
+    // and Postgres already treats NULLs as distinct in a unique index, so the
+    // WHERE is what keeps the original one-link-per-file guarantee for the
+    // case that still matters without also forbidding that.
+    uniqueIndex('message_files_message_file_key')
+      .on(t.messageId, t.fileId)
+      .where(sql`${t.fileId} is not null`),
+  ],
+)
+
+// --- storage anomalies -----------------------------------------------------
+
+// Exactly four classes, by design — see features/attachments/gc.ts:
+//   orphan_blob        bytes on disk with no DB row
+//   dangling_row       a DB row whose blob is missing (breaks a turn)
+//   orphan_session_dir a storage-root directory whose session_id has no
+//                       matching session row
+//   checksum_mismatch  a row's size/checksum disagrees with the file on disk
+export const storageAnomalyClassEnum = pgEnum('storage_anomaly_class', [
+  'orphan_blob',
+  'dangling_row',
+  'orphan_session_dir',
+  'checksum_mismatch',
+])
+
+// Persisted rather than computed on page load, so the page is instant and so
+// an anomaly seen on three consecutive runs reads differently from one seen
+// once mid-upload. Not deleted when it disappears — resolvedAt is set instead
+// — so a flapping problem stays visible in history.
+//
+// sessionId and fileId carry no foreign key on purpose: for two of the four
+// classes (orphan_blob, orphan_session_dir) the whole point is that the
+// session or file they'd reference may not exist any more, or never matched
+// one to begin with.
+export const storageAnomalies = pgTable(
+  'storage_anomalies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    class: storageAnomalyClassEnum('class').notNull(),
+    sessionId: uuid('session_id'),
+    fileId: uuid('file_id'),
+    path: text('path'),
+    originalFilename: text('original_filename'),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }),
+    detail: text('detail'),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('storage_anomalies_class_idx').on(t.class),
+    index('storage_anomalies_session_idx').on(t.sessionId),
+    // Two upsert keys, one per identity a class is found by: orphan_blob and
+    // orphan_session_dir are filesystem-keyed (no row, so path is what
+    // repeats across runs); dangling_row and checksum_mismatch are row-keyed
+    // (path may be absent or wrong, so fileId is what repeats). Postgres
+    // never treats two NULLs as colliding in a unique index, so the classes
+    // that leave the other column NULL never spuriously conflict with each
+    // other here.
+    uniqueIndex('storage_anomalies_class_path_key').on(t.class, t.path),
+    uniqueIndex('storage_anomalies_class_file_key').on(t.class, t.fileId),
+  ],
+)
+
 // --- relations ----------------------------------------------------------------
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
@@ -222,8 +387,20 @@ export const projectLibraryItemsRelations = relations(projectLibraryItems, ({ on
 export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   project: one(projects, { fields: [sessions.projectId], references: [projects.id] }),
   messages: many(messages),
+  files: many(sessionFiles),
 }))
 
-export const messagesRelations = relations(messages, ({ one }) => ({
+export const messagesRelations = relations(messages, ({ one, many }) => ({
   session: one(sessions, { fields: [messages.sessionId], references: [sessions.id] }),
+  files: many(messageFiles),
+}))
+
+export const sessionFilesRelations = relations(sessionFiles, ({ one, many }) => ({
+  session: one(sessions, { fields: [sessionFiles.sessionId], references: [sessions.id] }),
+  messages: many(messageFiles),
+}))
+
+export const messageFilesRelations = relations(messageFiles, ({ one }) => ({
+  message: one(messages, { fields: [messageFiles.messageId], references: [messages.id] }),
+  file: one(sessionFiles, { fields: [messageFiles.fileId], references: [sessionFiles.id] }),
 }))

@@ -49,3 +49,15 @@ process.env.PROJECTS_DIR = MISSING_PROJECTS_DIR
 // far as the SDK instead of stopping at the guard before it. Nothing here ever
 // reaches Anthropic: the SDK is mocked wherever a turn is actually run.
 process.env.CLAUDE_CODE_OAUTH_TOKEN = 'test-not-a-real-token'
+
+// A scratch attachments root, per process.
+//
+// `@/env` defaults ATTACHMENTS_DIR to /opt/agentoo/attachments — the real
+// store, holding real uploads on a deployed box. Anything that calls
+// storage.put(), writeManifest() or the GC walk builds its paths from that
+// value at call time, so a test that touches disk without this line writes
+// into (and, for the GC, deletes out of) production data. Set here rather than
+// per file for the same reason REDIS_URL is: the parsed env is shared across
+// the whole run, so the first file to reach `@/env` decides it for everyone.
+export const TEST_ATTACHMENTS_DIR = `/tmp/agentoo-test-attachments-${process.pid}`
+process.env.ATTACHMENTS_DIR = TEST_ATTACHMENTS_DIR

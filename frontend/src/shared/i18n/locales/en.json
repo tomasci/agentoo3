@@ -125,6 +125,7 @@
   },
   "nav": {
     "sshKeys": "SSH keys",
+    "storage": "Storage",
     "project": "Project",
     "sessions": "Sessions",
     "overview": "Overview",
@@ -227,6 +228,18 @@
     "sendFailed": "Could not send the message",
     "pendingPrompts_one": "{{count}} message waiting",
     "pendingPrompts_other": "{{count}} messages waiting",
+    "attachments": {
+      "attach": "Attach a file",
+      "cancel": "Cancel uploading {{name}}",
+      "remove": "Remove {{name}}",
+      "tooLargeForSession": "Too large for what's left of this session's storage limit",
+      "uploadFailed": "Could not upload the file",
+      "usageLoadFailed": "Could not load attachment usage",
+      "usage": "{{count}} of {{maxFiles}} files · {{used}} of {{max}}",
+      "blockingSend_one": "Waiting for {{count}} upload to finish before this can be sent",
+      "blockingSend_other": "Waiting for {{count}} uploads to finish before this can be sent",
+      "removed": "File removed"
+    },
     "transcript": {
       "you": "You",
       "empty": "Nothing yet. Send a message to start the session.",
@@ -373,5 +386,109 @@
     "themeHint": "Light or dark colours throughout the app.",
     "themeDark": "Dark",
     "themeLight": "Light"
+  },
+  "storage": {
+    "heading": "Storage",
+    "lead": "Attachment usage across every session, and the reconciliation job that keeps the database and the disk in agreement.",
+    "loadFailed": "Could not load the storage summary",
+    "summary": {
+      "heading": "Summary",
+      "totalFiles": "Attachments",
+      "totalBytes": "Storage used",
+      "sessionCount": "Sessions with attachments",
+      "openAnomalies": "Open anomalies",
+      "lastCheck": "Last check",
+      "lastCleanup": "Last cleanup",
+      "nextCheck": "Next check",
+      "notScheduled": "Not scheduled yet",
+      "never": "Never run"
+    },
+    "classes": {
+      "orphan_blob": "Orphan blob",
+      "dangling_row": "Dangling row",
+      "orphan_session_dir": "Orphan session directory",
+      "checksum_mismatch": "Checksum mismatch"
+    },
+    "topSessions": {
+      "heading": "Largest sessions",
+      "session": "Session",
+      "size": "Size",
+      "files": "Files",
+      "empty": "No session has any attachments yet."
+    },
+    "noCheckYet": "No check has ever run yet, so these anomalies may be out of date — use \"Run check now\" below.",
+    "runCheck": "Run check now",
+    "checking": "Checking…",
+    "checkFailed": "Could not start the check",
+    "cleanupEverything": "Clean up everything",
+    "cleanupFailed": "Could not start cleanup",
+    "cleanupCountsFailed": "Could not load exact counts for cleanup",
+    "cleanupConfirm": {
+      "title": "Clean up storage?",
+      "body": "Deletes {{blobs}} orphan file(s), {{rows}} dangling row(s), {{dirs}} orphan session director(y/ies) and {{mismatches}} checksum mismatch(es) found by the last check — {{bytes}} in total. A checksum mismatch deletes both the corrupt blob and its row.",
+      "empty": "Nothing to clean up — the last check found no anomalies to remove."
+    },
+    "anomalies": {
+      "heading": "Anomalies",
+      "viewLabel": "Show",
+      "view": {
+        "open": "Open",
+        "resolved": "Resolved"
+      },
+      "filterByClass": "Class",
+      "allClasses": "All classes",
+      "empty": "No anomalies in this view.",
+      "loadFailed": "Could not load anomalies",
+      "sessionGone": "Session {{id}} (deleted)",
+      "actionsFor": "Actions for this anomaly",
+      "resolve": "Resolve",
+      "resolveConfirm": {
+        "title": "Resolve this anomaly?",
+        "body": "Dismisses it without deleting anything. If it is still genuinely present, the next check reopens it."
+      },
+      "select": "Select this anomaly",
+      "recheck": "Re-check",
+      "recheckFailed": "Could not re-check this anomaly",
+      "delete": "Delete",
+      "deleteFailed": "Could not delete this anomaly",
+      "deleteConfirm": {
+        "title": "Delete this anomaly?",
+        "body": "Deletes the orphan blob, dangling row or orphan session directory this anomaly names — or, for a checksum mismatch, both the corrupt blob and its row. This cannot be undone."
+      },
+      "resolveSelected": "Resolve selected",
+      "resolveSelectedFailed": "Could not resolve the selected anomalies",
+      "resolveSelectedConfirm": {
+        "title": "Resolve the selected anomalies?",
+        "body": "Dismisses {{count}} selected anomaly/anomalies, without deleting anything."
+      },
+      "deleteSelected": "Delete selected",
+      "deleteSelectedFailed": "Could not delete the selected anomalies",
+      "deleteSelectedConfirm": {
+        "title": "Delete the selected anomalies?",
+        "body": "Deletes what each of the {{count}} selected anomaly/anomalies names. This cannot be undone."
+      },
+      "deleteSelectedResultTitle": "Delete selected — results",
+      "outcome": {
+        "deleted": "Deleted",
+        "revalidated": "No longer an anomaly — nothing was deleted",
+        "unchanged": "Still open",
+        "failed": "Could not complete"
+      },
+      "outcomeShort": {
+        "deleted": "deleted",
+        "revalidated": "revalidated",
+        "unchanged": "unchanged",
+        "failed": "failed"
+      },
+      "table": {
+        "class": "Class",
+        "session": "Session",
+        "filename": "Filename",
+        "path": "Path",
+        "size": "Size",
+        "firstSeen": "First seen",
+        "lastSeen": "Last seen"
+      }
+    }
   }
 }

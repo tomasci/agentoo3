@@ -142,32 +142,3 @@
   // the branch name or the running cost at a glance.
   .live { order: -1; }
 }
-
-// --- composer -------------------------------------------------------------------
-
-.composer {
-  padding-top: var(--space-2);
-  border-top: 1px solid var(--color-border);
-}
-
-.queueStatus {
-  font-size: var(--text-xs);
-  line-height: var(--leading-xs);
-  color: var(--color-text-muted);
-}
-
-// Send sits to the right of the textarea, chat-client style. `Inline` has no
-// grow-one-child concept, so this is the feature's own wrapper.
-.composerRow {
-  display: flex;
-
-  // Not center: as the textarea grows with autoresize, the button should stay
-  // level with the last line rather than drifting to the vertical middle.
-  align-items: flex-end;
-  gap: var(--space-2);
-}
-
-.textareaWrap {
-  flex: 1;
-  min-width: 0;
-}

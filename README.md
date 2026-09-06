@@ -182,6 +182,31 @@ are passphraseless and there is no ssh-agent — `backend/README.md` explains wh
 neither is an oversight. The private key never leaves the server: no API response
 contains it.
 
+## Attachments
+
+Session-scoped file uploads live under `ATTACHMENTS_DIR` (default
+`attachments/` in the repo root), sharded two levels deep by session id —
+`sessions/<aa>/<bb>/<session-id>/uploads/` — so the directory never becomes one
+flat pile of session folders. It is **0700**, owned by the service account,
+unlike the 0755 data directories above it: this one holds user-uploaded data,
+and nginx (running as `www-data`) has no business reading it. Deleting a
+session deletes its files along with it.
+
+An hourly reconciliation job compares the database against what is actually on
+disk and surfaces four anomaly classes on the System tab's **Storage** page: an
+orphan blob (file with no row), a dangling row (row with no file), an orphan
+session directory (no matching session in the database), and a checksum
+mismatch (file changed underneath its row). Only orphan blobs older than the
+grace period (`ATTACHMENTS_GC_GRACE_MS`) are deleted automatically; the other
+three are surfaced for a human to look at rather than corrected on their own.
+
+There is no filesystem quota here — no separate volume and no quota tooling on
+this host — so `ATTACHMENT_MAX_BYTES`, `ATTACHMENTS_SESSION_MAX_BYTES` and
+`ATTACHMENTS_TOTAL_MAX_BYTES` are the only cap on how much a runaway upload can
+write. The backend setup step warns when `ATTACHMENTS_DIR` ends up sharing a
+filesystem with Postgres's data directory; if that risk matters to you, mount
+it on its own filesystem or set an XFS/ext4 project quota.
+
 ## Frontend
 
 Built and run as a service by step `frontend`: `bun install --frozen-lockfile`,

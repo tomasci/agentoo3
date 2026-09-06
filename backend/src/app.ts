@@ -2,6 +2,7 @@ import { OpenAPIHono } from '@hono/zod-openapi'
 import { cors } from 'hono/cors'
 import { logger as httpLogger } from 'hono/logger'
 import { env } from '@/env'
+import { attachmentsRouter } from '@/features/attachments/routes'
 import { healthRouter } from '@/features/health/routes'
 import { libraryRouter } from '@/features/library/routes'
 import { projectsRouter } from '@/features/projects/routes'
@@ -61,6 +62,7 @@ export function createApp() {
   app.route('/api', sshKeysRouter)
   app.route('/api', sourcesRouter)
   app.route('/api', sessionsRouter)
+  app.route('/api', attachmentsRouter)
   app.route('/api', systemRouter)
 
   app.doc('/api/openapi.json', {

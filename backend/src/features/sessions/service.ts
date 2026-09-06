@@ -1,7 +1,8 @@
 import { and, count, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { sanitizeForDb } from '@/db/sanitize'
-import { messages, projects, sessions } from '@/db/schema'
+import { messageFiles, messages, projects, sessionFiles, sessions } from '@/db/schema'
+import { deleteSessionFiles } from '@/features/attachments/storage'
 import { keyPathFor } from '@/features/ssh-keys/service'
 import { badRequest, conflict, notFound } from '@/lib/errors'
 import { publishControl, publishSessionEvent } from '@/lib/events'
@@ -23,6 +24,7 @@ import type { BaseBranchPlan } from './base-branch'
 import { planBaseBranch } from './base-branch'
 import type {
   CreateSessionInput,
+  MessageFileDto,
   SessionDto,
   SessionExport,
   SessionMessageDto,
@@ -32,7 +34,7 @@ import type {
 
 type MessageRow = typeof messages.$inferSelect
 
-function toMessageDto(row: MessageRow): SessionMessageDto {
+function toMessageDto(row: MessageRow, files: MessageFileDto[] = []): SessionMessageDto {
   return {
     id: row.id,
     sessionId: row.sessionId,
@@ -42,8 +44,72 @@ function toMessageDto(row: MessageRow): SessionMessageDto {
     title: row.title,
     pending: row.pending,
     payload: row.payload,
+    files,
     createdAt: row.createdAt.toISOString(),
   }
+}
+
+/**
+ * Attachments each message in `messageIds` carried, keyed by message id.
+ *
+ * Two selects rather than one join: message_files carries its own
+ * denormalised originalFilename precisely for the case a join would lose —
+ * `fileId` gone (ON DELETE SET NULL) — so the live session_files row is only
+ * ever an *enrichment* of what the link row already knows, not the only
+ * source of it. A message with no attachments never reaches the second
+ * query at all, which is the common case for almost every row in a
+ * transcript.
+ */
+async function filesForMessages(messageIds: string[]): Promise<Map<string, MessageFileDto[]>> {
+  const byMessage = new Map<string, MessageFileDto[]>()
+  if (messageIds.length === 0) return byMessage
+
+  const links = await db
+    .select()
+    .from(messageFiles)
+    .where(inArray(messageFiles.messageId, messageIds))
+  if (links.length === 0) return byMessage
+
+  const liveIds = [...new Set(links.map((l) => l.fileId).filter((id): id is string => id !== null))]
+  const liveRows =
+    liveIds.length === 0
+      ? []
+      : await db.select().from(sessionFiles).where(inArray(sessionFiles.id, liveIds))
+  const liveById = new Map(liveRows.map((r) => [r.id, r]))
+
+  for (const link of links) {
+    const live = link.fileId ? liveById.get(link.fileId) : undefined
+    const dto: MessageFileDto = {
+      id: link.fileId,
+      originalFilename: live?.originalFilename ?? link.originalFilename,
+      mimeType: live?.mimeType ?? null,
+      sizeBytes: live?.sizeBytes ?? null,
+      status: live?.status ?? null,
+    }
+    const existing = byMessage.get(link.messageId)
+    if (existing) existing.push(dto)
+    else byMessage.set(link.messageId, [dto])
+  }
+  return byMessage
+}
+
+/**
+ * One message, in exactly the shape `listMessages`/`listMessagePage` return it
+ * for the same row — the one place a caller outside this module needs a
+ * single row's `files` freshly resolved rather than a whole page.
+ *
+ * Its one caller is `runTurn` (queue/session-run.worker.ts), which uses it to
+ * re-publish a prompt right after the transaction that links its attachments
+ * commits: the copy a client got at send time was published before any
+ * `message_files` row existed, so it is missing exactly what this resolves.
+ * Returning the same DTO shape here is what lets a client merging that SSE
+ * event and a client that instead refetches converge on identical state.
+ */
+export async function messageDto(messageId: string): Promise<SessionMessageDto | null> {
+  const [row] = await db.select().from(messages).where(eq(messages.id, messageId)).limit(1)
+  if (!row) return null
+  const filesByMessage = await filesForMessages([row.id])
+  return toMessageDto(row, filesByMessage.get(row.id))
 }
 
 type SessionRow = typeof sessions.$inferSelect
@@ -267,8 +333,8 @@ export async function updateSession(id: string, input: UpdateSessionInput): Prom
  * Delete a session and remove its worktree.
  *
  * The branch is deliberately left behind: it holds whatever the agent did, and
- * deleting a session should not silently discard work. Messages go with the
- * session through the cascade.
+ * deleting a session should not silently discard work. Messages and
+ * session_files rows go with the session through the cascade.
  */
 export async function deleteSession(id: string): Promise<void> {
   const [row] = await db.select().from(sessions).where(eq(sessions.id, id)).limit(1)
@@ -286,6 +352,15 @@ export async function deleteSession(id: string): Promise<void> {
     } else {
       logger.info(`Removed worktree ${row.worktreePath}; branch ${row.branch} kept`)
     }
+  }
+
+  // Same treatment as the worktree above: idempotent, and must not fail the
+  // session deletion if the directory is already gone. The DB rows cascade
+  // off the delete below regardless of whether this succeeds.
+  try {
+    await deleteSessionFiles(id)
+  } catch (error) {
+    logger.warn(`Could not remove attachments for session ${id}: ${String(error)}`)
   }
 
   await db.delete(sessions).where(eq(sessions.id, id))
@@ -378,7 +453,8 @@ export async function listMessages(sessionId: string, after = -1): Promise<Sessi
     .where(and(eq(messages.sessionId, sessionId), gt(messages.seq, after)))
     .orderBy(messages.seq)
 
-  return rows.map(toMessageDto)
+  const filesByMessage = await filesForMessages(rows.map((r) => r.id))
+  return rows.map((r) => toMessageDto(r, filesByMessage.get(r.id)))
 }
 
 /** Backward page size when a bounded mode is given without an explicit `limit`. */
@@ -443,7 +519,8 @@ export async function listMessagePage(
 
     const hasOlder = rows.length > limit
     const page = rows.slice(0, limit).reverse()
-    return { messages: page.map(toMessageDto), hasOlder }
+    const filesByMessage = await filesForMessages(page.map((r) => r.id))
+    return { messages: page.map((r) => toMessageDto(r, filesByMessage.get(r.id))), hasOlder }
   }
 
   // Unbounded: `after` mode itself, or neither cursor and no `limit` at all —
@@ -453,7 +530,11 @@ export async function listMessagePage(
     .from(messages)
     .where(and(eq(messages.sessionId, sessionId), gt(messages.seq, opts.after ?? -1)))
     .orderBy(messages.seq)
-  return { messages: rows.map(toMessageDto), hasOlder: false }
+  const filesByMessage = await filesForMessages(rows.map((r) => r.id))
+  return {
+    messages: rows.map((r) => toMessageDto(r, filesByMessage.get(r.id))),
+    hasOlder: false,
+  }
 }
 
 // --- export ---------------------------------------------------------------

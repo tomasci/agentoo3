@@ -8,6 +8,8 @@
 /library/
 # generated ssh private keys — never
 /keys/
+# user-uploaded session attachments — never
+/attachments/
 
 # generated secrets
 config/*.local

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { AgentEditorPage, LibraryPage, SkillEditorPage } from '@/features/library'
 import { SettingsPage } from '@/features/settings'
 import { SshKeysPage } from '@/features/ssh-keys'
+import { StoragePage } from '@/features/storage'
 import { SYSTEM_HOME } from '@/shared/store/tabs'
 import { Button, EmptyState } from '@/shared/ui'
 import { ProjectLayout } from './project-layout'
@@ -124,6 +125,14 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 })
 
+// The System tab's storage dashboard: attachment usage and the
+// reconciliation job's open anomalies, across every session.
+const storageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/storage',
+  component: StoragePage,
+})
+
 // Exported so a test can build its own router over the same tree, with a
 // history it controls, rather than the browser one this module's router uses.
 export const routeTree = rootRoute.addChildren([
@@ -143,6 +152,7 @@ export const routeTree = rootRoute.addChildren([
   libraryRoute,
   sshKeysRoute,
   settingsRoute,
+  storageRoute,
 ])
 
 /** An unknown URL should say so, not render an empty layout. */

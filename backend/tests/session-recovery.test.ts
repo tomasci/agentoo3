@@ -69,6 +69,9 @@ const db = {
       let ordered = false
       const rows = () => {
         if (table(t) === 'projects') return [{ id: 'proj-1', slug: 'demo', sshKeyId: null }]
+        // The attachments announcement's own select — nothing here uploads a
+        // file, so there is never anything new to announce.
+        if (table(t) === 'session_files') return []
         if (fields === undefined) return pending
         if (selectFails) throw new Error(DB_DOWN)
         // Ordered means `autoContinuationsSincePrompt` reading prompts back;
@@ -133,6 +136,10 @@ const db = {
       },
     }),
   }),
+  // The attachments announcement runs inside one — see session-run.worker.ts.
+  // Nothing here needs real atomicity, only that the callback gets an object
+  // shaped like `db` itself to call `.select`/`.update`/`.insert` on.
+  transaction: async (fn: (tx: typeof db) => unknown) => fn(db),
 }
 
 mock.module(`${B}/db/client.ts`, () => ({ db, closeDb: async () => {} }))
@@ -173,21 +180,34 @@ afterAll(() => {
 mock.module(`${B}/queue/index.ts`, () => ({
   QUEUE_PROJECT_SETUP: 'project-setup',
   QUEUE_SESSION_RUN: 'session-run',
+  QUEUE_ATTACHMENTS_GC: 'attachments-gc',
   redisConnection: () => ({}),
   projectSetupQueue: {},
   sessionRunQueue: {},
+  // attachments/service.ts's storageSummary reads completed-job history off
+  // this for lastCheckAt/lastCleanupAt; nothing this file exercises reaches
+  // that path, so an empty history is enough to satisfy the import.
+  attachmentsGcQueue: { getJobs: async () => [] },
   enqueueProjectSetup: async () => ({}),
   enqueueSessionRun: async ({ sessionId }: { sessionId: string }) => {
     if (enqueueFails) throw new Error('Stream is not writeable and enableOfflineQueue is false')
     queued.push(sessionId)
     return {}
   },
+  enqueueAttachmentsGc: async () => ({}),
+  ensureAttachmentsGcSchedule: async () => {},
 }))
 
 // Nothing here may reach Anthropic, a git worktree or the plugin directory.
-// Only `query` is ever called from the SDK at runtime; everything else this
-// codebase takes from it is a type, which is erased.
-mock.module('@anthropic-ai/claude-agent-sdk', () => ({ query: () => turnBehaviour() }))
+// `query` is the only thing ever called from the SDK at runtime; almost
+// everything else this codebase takes from it is a type, erased at build
+// time — except SYSTEM_PROMPT_DYNAMIC_BOUNDARY, a real value runner-options.ts
+// imports, so the stub has to export it too or importing that module (below)
+// fails to resolve the name against this mock rather than the real package.
+mock.module('@anthropic-ai/claude-agent-sdk', () => ({
+  query: () => turnBehaviour(),
+  SYSTEM_PROMPT_DYNAMIC_BOUNDARY: '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__',
+}))
 
 // Forwarding again, and for the same reason: delegation-hook.test.ts imports
 // `delegationHook` from this module and a stub namespace reached it too, taking

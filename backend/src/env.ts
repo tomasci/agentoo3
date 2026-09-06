@@ -14,6 +14,9 @@ const schema = z.object({
   // Where projects are cloned and where the shared agent/skill library lives.
   PROJECTS_DIR: z.string().default('/opt/agentoo/projects'),
   LIBRARY_DIR: z.string().default('/opt/agentoo/library'),
+  // Where session attachments live, sharded by session id so no single
+  // directory accumulates tens of thousands of entries. See lib/paths.ts.
+  ATTACHMENTS_DIR: z.string().default('/opt/agentoo/attachments'),
   // Drop a folder here to adopt it as a project. Kept separate from
   // PROJECTS_DIR, which holds our own managed project roots — mixing the two
   // would mean listing our own scaffolding as adoptable.
@@ -29,6 +32,22 @@ const schema = z.object({
 
   // Where generated ssh keys live. Empty falls back to ~/.ssh/agentoo.
   SSH_KEYS_DIR: z.string().default(''),
+
+  // Per-file cap. Must stay under nginx's client_max_body_size (50m today) —
+  // otherwise nginx 413s the request before our own, more specific error can
+  // ever be produced.
+  ATTACHMENT_MAX_BYTES: z.coerce.number().int().positive().default(26_214_400),
+  ATTACHMENTS_SESSION_MAX_BYTES: z.coerce.number().int().positive().default(209_715_200),
+  ATTACHMENTS_SESSION_MAX_FILES: z.coerce.number().int().positive().default(50),
+  ATTACHMENTS_TOTAL_MAX_BYTES: z.coerce.number().int().positive().default(5_368_709_120),
+  // How often the attachments-gc queue runs its scheduled reconciliation pass.
+  ATTACHMENTS_GC_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
+  // An orphan blob younger than this is left alone: it may be an upload still
+  // in flight rather than something abandoned.
+  ATTACHMENTS_GC_GRACE_MS: z.coerce.number().int().positive().default(86_400_000),
+  // 0 disables retention purging. Shipped off: nobody asked for attachments to
+  // vanish on a timer, and turning it on is a per-deployment decision.
+  ATTACHMENTS_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
 
   // Comma-separated origin allowlist. Empty by default: nginx and the Vite dev
   // proxy both make the frontend same-origin, so nothing legitimate needs CORS.
