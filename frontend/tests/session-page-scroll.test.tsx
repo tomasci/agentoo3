@@ -1,6 +1,6 @@
 // The mechanisms session-page.tsx uses to keep the transcript's scroll
 // position sane: the IntersectionObserver-driven "load older" trigger, the
-// viewport-offset anchor that compensates a prepend, the `settle`-based
+// viewport-offset anchor that compensates a prepend, the `hold`-based
 // pin-to-bottom effect, and the touch guard that suppresses it mid-gesture.
 //
 // WHAT IS SIMULATED, AND WHY IT STILL MEANS SOMETHING
@@ -23,8 +23,11 @@
 //     options it was constructed with (including `root`), and the node it
 //     was pointed at, so a test can decide when the sentinel "intersects";
 //   - a recording `requestAnimationFrame`/`cancelAnimationFrame` pair, so
-//     `settle`'s follow-up passes run only when a test asks for them, and a
-//     cancelled frame can be told apart from one that ran.
+//     `hold`'s follow-up passes run only when a test asks for them, and a
+//     cancelled frame can be told apart from one that ran, plus a fake clock
+//     for its 500ms hard stop (ticking fake frames does not advance any real
+//     one) and a mutable `extraGrowth` knob standing in for a row still
+//     resolving from its placeholder over several of them.
 // Everything else is the real thing: the real component, the real hooks, the
 // real query client, the real cache.
 //
@@ -177,6 +180,16 @@ const realEventSource = (globalThis as { EventSource?: unknown }).EventSource
 const ROW_HEIGHT = 100
 const VIEWPORT = 300
 
+/** Extra pixels added to the container's simulated `scrollHeight`, on top of
+ *  `rowCount() * ROW_HEIGHT` — the one thing a fixed-height-per-row model
+ *  cannot stand in for on its own. A test drives this to fake a row still
+ *  resolving from its `content-visibility: auto` placeholder into its real
+ *  height over several frames, which is exactly what `hold`'s own
+ *  re-assertion (session-page.tsx) exists to correct for. Reset to 0 in
+ *  `beforeEach` — every test that never touches it gets the trivial
+ *  "nothing ever grows" model the rest of this file relies on. */
+let extraGrowth = 0
+
 let client: QueryClient
 let container: HTMLDivElement
 let root: Root
@@ -197,7 +210,10 @@ const rowCount = () => rows().length
  */
 function simulateLayout(el: HTMLElement) {
   let top = 0
-  Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => rowCount() * ROW_HEIGHT })
+  Object.defineProperty(el, 'scrollHeight', {
+    configurable: true,
+    get: () => rowCount() * ROW_HEIGHT + extraGrowth,
+  })
   Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => VIEWPORT })
   Object.defineProperty(el, 'scrollTop', {
     configurable: true,
@@ -302,11 +318,11 @@ class RecordingIntersectionObserver {
 const realIntersectionObserver = (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver
 ;(globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = RecordingIntersectionObserver
 
-// --- `settle`'s animation frames -------------------------------------------------
+// --- `hold`'s animation frames, and its clock ------------------------------------
 
 /** Records every frame `requestAnimationFrame` schedules and every one
  *  `cancelAnimationFrame` cancels, and runs nothing until a test asks it to —
- *  `settle` (session-page.tsx) schedules its next pass from inside the
+ *  `hold` (session-page.tsx) schedules its next pass from inside the
  *  previous one, so "advance one frame" has to mean exactly that, not "run
  *  every frame there will ever be". */
 let frameId = 0
@@ -327,6 +343,14 @@ const realCAF = globalThis.cancelAnimationFrame
 globalThis.requestAnimationFrame = fakeRequestAnimationFrame as typeof requestAnimationFrame
 globalThis.cancelAnimationFrame = fakeCancelAnimationFrame as typeof cancelAnimationFrame
 
+/** `hold`'s 500ms hard stop is measured against `Date.now()`, not a frame
+ *  count — ticking fake frames above does not advance any clock, so proving
+ *  that bound actually fires needs a clock a test can move by hand instead of
+ *  waiting out 500 real milliseconds. Reset to 0 in `beforeEach`. */
+let fakeNow = 0
+const realDateNow = Date.now
+Date.now = () => fakeNow
+
 /** Advances exactly one animation frame: everything scheduled so far runs
  *  once, and anything a running callback schedules for the *next* frame
  *  waits for the next call. */
@@ -344,6 +368,7 @@ afterAll(() => {
   Element.prototype.getBoundingClientRect = realGetBoundingClientRect
   globalThis.requestAnimationFrame = realRAF
   globalThis.cancelAnimationFrame = realCAF
+  Date.now = realDateNow
 })
 
 const { SessionPage } = await import('../src/features/sessions/components/session-page')
@@ -401,6 +426,8 @@ beforeEach(() => {
   pendingFrames = []
   cancelledFrames = []
   frameId = 0
+  extraGrowth = 0
+  fakeNow = 0
 })
 
 /**
@@ -618,12 +645,13 @@ test('within 80px of the bottom still counts as being at the bottom', async () =
   await unmount()
 })
 
-test("settle's own follow-up frames are idempotent once the position is already correct", async () => {
-  // Nothing in this simulated model actually grows after commit (happy-dom
-  // does no layout, and the row-height model is a fixed constant), so the two
-  // extra passes `settle` schedules have nothing left to do — this is the
-  // idempotence the real component leans on to make them safe to run
-  // unconditionally, not proof that a real placeholder ever needs them.
+test('a hold with nothing left to correct settles in exactly two frames and stops scheduling', async () => {
+  // Nothing in this simulated model actually grows after commit unless a test
+  // drives `extraGrowth` itself (see the "hold" section below), so both of
+  // `hold`'s passes after the synchronous one at commit find the position
+  // already correct. Two is not a hardcoded count here — it is the minimum
+  // `hold` ever needs: one frame to notice nothing moved, a second to confirm
+  // that still holds, which is what "two consecutive" requires.
   respond = () => ({ messages: range(1, 5), hasOlder: false })
   await mount()
   const atBottom = scroller.scrollTop
@@ -634,6 +662,9 @@ test("settle's own follow-up frames are idempotent once the position is already 
   expect(scroller.scrollTop).toBe(atBottom)
   await tick()
   expect(scroller.scrollTop).toBe(atBottom)
+  // Two consecutive zero-delta passes are enough on their own: the hold lets
+  // go instead of polling forever the way a loop with no exit condition would.
+  expect(pendingFrames.length).toBe(0)
   await unmount()
 })
 
@@ -719,6 +750,128 @@ test('momentum scrolling after a touch ends keeps the guard armed', async () => 
   await settle(() => scroller.scrollTop === bottom(), 60)
   expect(scroller.scrollTop).toBe(bottom())
   await unmount()
+})
+
+// --- hold: how long it keeps re-asserting, and what ends it -------------------
+
+test('a hold keeps re-asserting while the target keeps moving, and stops once it stabilises twice in a row', async () => {
+  // Stands in for a row still resolving from its `content-visibility: auto`
+  // placeholder into its real height over several frames — this simulated
+  // model has no layout to do that on its own (see the file header), so the
+  // growth is driven by hand, one `extraGrowth` bump per tick.
+  respond = () => ({ messages: range(1, 5), hasOlder: false })
+  await mount()
+  await scrollTo(bottom())
+
+  await act(async () => {
+    appendStreamedMessage(client, 's1', [msg(6)])
+  })
+  await settle(() => rowCount() === 6)
+  expect(scroller.scrollTop).toBe(bottom())
+
+  // Frame 1: content grows further before the hold's next pass runs.
+  extraGrowth = 40
+  await tick()
+  expect(scroller.scrollTop).toBe(bottom())
+  expect(pendingFrames.length).toBeGreaterThan(0)
+
+  // Frame 2: it grows again — a real placeholder resolving is not a single
+  // step, and neither is this.
+  extraGrowth = 90
+  await tick()
+  expect(scroller.scrollTop).toBe(bottom())
+  expect(pendingFrames.length).toBeGreaterThan(0)
+
+  // Frame 3: nothing has changed since frame 2 — one settled pass, but one on
+  // its own is not enough to stop.
+  await tick()
+  expect(pendingFrames.length).toBeGreaterThan(0)
+
+  // Frame 4: settled a second time running — the hold lets go.
+  await tick()
+  expect(pendingFrames.length).toBe(0)
+  expect(scroller.scrollTop).toBe(bottom())
+  await unmount()
+})
+
+test('a hold that never stabilises is still cut off once 500ms have passed', async () => {
+  respond = () => ({ messages: range(1, 5), hasOlder: false })
+  await mount()
+  await scrollTo(bottom())
+
+  await act(async () => {
+    appendStreamedMessage(client, 's1', [msg(6)])
+  })
+  await settle(() => rowCount() === 6)
+
+  // Content keeps growing forever, so nothing here would ever hand `hold` two
+  // consecutive settled frames on its own — the clock is the only thing that
+  // can end this, which is the point of the test.
+  let ticks = 0
+  while (pendingFrames.length > 0 && ticks < 20) {
+    extraGrowth += 10
+    fakeNow += 60
+    await tick()
+    ticks++
+  }
+
+  expect(pendingFrames.length).toBe(0)
+  // Comfortably past the 500ms bound, not right at its edge — the deadline,
+  // not a lucky stabilisation, is what ended this.
+  expect(fakeNow).toBeGreaterThanOrEqual(500)
+  await unmount()
+})
+
+test('a touch beginning after a hold has already made its first pass still aborts it', async () => {
+  // The "suppresses the pin until it ends" test above covers a touch already
+  // in progress before the pin effect ever runs, which never calls `hold` at
+  // all. This covers what only a per-frame check inside `correct` itself can
+  // catch: the touch starting *after* the hold's first pass has already run.
+  respond = () => ({ messages: range(1, 5), hasOlder: false })
+  await mount()
+  await scrollTo(bottom())
+
+  await act(async () => {
+    appendStreamedMessage(client, 's1', [msg(6)])
+  })
+  await settle(() => rowCount() === 6)
+  expect(scroller.scrollTop).toBe(bottom())
+  expect(pendingFrames.length).toBeGreaterThan(0)
+
+  // Content is still resolving — left alone this would keep moving the
+  // scrollbar for several more frames, as the test above shows.
+  extraGrowth = 200
+  const growingBottom = bottom()
+
+  await touch('touchstart')
+  await tick()
+  // Aborted, not merely idle: the scrollbar never chased the new bottom.
+  expect(scroller.scrollTop).not.toBe(growingBottom)
+  expect(pendingFrames.length).toBeGreaterThan(0)
+
+  await tick()
+  expect(pendingFrames.length).toBe(0)
+  expect(scroller.scrollTop).not.toBe(growingBottom)
+
+  await touch('touchend')
+  await unmount()
+})
+
+test('unmounting mid-hold cancels whatever frame is still outstanding', async () => {
+  respond = () => ({ messages: range(1, 5), hasOlder: false })
+  await mount()
+
+  await act(async () => {
+    appendStreamedMessage(client, 's1', [msg(6)])
+  })
+  await settle(() => rowCount() === 6)
+
+  const outstanding = pendingFrames[0]?.id
+  expect(outstanding).toBeDefined()
+
+  await unmount()
+
+  expect(cancelledFrames).toContain(outstanding)
 })
 
 // --- 3. the prepend, and the position it has to preserve ----------------------
@@ -822,6 +975,47 @@ test('scrolling further while the older page is still loading is not fought', as
   // The anchor row was 50px into the viewport when the fetch started and 80px
   // when it landed — the compensation follows the later position.
   expect(scroller.scrollTop).toBe(580)
+  await unmount()
+})
+
+test('the reader scrolling mid-hold rebases the anchor instead of ending the hold early', async () => {
+  // `onScroll`'s own live re-recording of the anchor's offset (the test
+  // above) only matters before the layout effect below has run — once it has
+  // consumed `anchor.current` into a local `picked`, a further scroll can
+  // only be caught by `hold`'s own per-frame check.
+  respond = (query) =>
+    query?.before === undefined
+      ? { messages: range(10, 5), hasOlder: true }
+      : { messages: range(5, 5), hasOlder: false }
+  await mount()
+  await scrollTo(50)
+  await click(loadOlderButton() as Element)
+  await settle(() => rowCount() === 10)
+
+  // The synchronous correct() at commit already applied the whole delta in
+  // one pass (nothing in this model needs a second), which is why a frame is
+  // still outstanding: `hold` cannot yet tell that pass was its last.
+  expect(scroller.scrollTop).toBe(550)
+  expect(pendingFrames.length).toBeGreaterThan(0)
+
+  // The reader moves the scrollbar themselves before that frame runs — set
+  // directly rather than through `scrollTo`, so this exercises `hold`'s own
+  // rebase and not `onScroll`'s.
+  scroller.scrollTop = 600
+
+  await tick()
+  // Left exactly where they put themselves — nothing fights the scroll back
+  // towards the pre-scroll anchor position.
+  expect(scroller.scrollTop).toBe(600)
+  // A rebase reports non-zero on purpose, so this pass does not count towards
+  // the two consecutive settled frames a real stabilisation needs.
+  expect(pendingFrames.length).toBeGreaterThan(0)
+
+  await tick()
+  expect(pendingFrames.length).toBeGreaterThan(0)
+  await tick()
+  expect(pendingFrames.length).toBe(0)
+  expect(scroller.scrollTop).toBe(600)
   await unmount()
 })
 
