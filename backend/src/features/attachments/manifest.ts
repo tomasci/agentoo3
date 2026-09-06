@@ -8,6 +8,12 @@
 export interface ManifestFile {
   id: string
   originalFilename: string
+  /** The on-disk basename: `<file-uuid>-<sanitized name>` (see
+   * storage.ts's `put()`). Never the same string as `originalFilename` once a
+   * name needed flattening, which is exactly why every surface below prints
+   * the absolute path built from this rather than one composed from
+   * `originalFilename` — that composed path cannot exist. */
+  storedName: string
   mimeType: string
   sizeBytes: number
   checksum: string
@@ -38,6 +44,13 @@ function extentOf(file: {
   return undefined
 }
 
+/** The absolute path an agent can actually Read — `uploadsDir` plus the
+ * on-disk name, never `originalFilename`, which lacks the uuid prefix every
+ * stored file actually has (see storage.ts's `put()`). */
+function pathOf(uploadsDir: string, file: { storedName: string }): string {
+  return `${uploadsDir}/${file.storedName}`
+}
+
 /**
  * Deterministic order for every rendering below: by upload time, then by id
  * to break a tie — so a no-op regeneration (nothing changed) produces
@@ -54,8 +67,14 @@ function ordered<T extends { id: string; createdAt: Date }>(files: T[]): T[] {
  * ATTACHMENTS.md: the full index, regenerated on every upload and delete.
  * Deliberately not CLAUDE.md — that is project context, shared and read from
  * the working directory, not a per-session, harness-generated file.
+ *
+ * `uploadsDir` is the same absolute directory `announcementFor` and
+ * `attachmentsSystemPromptBlock` take — this is the surface an agent re-reads
+ * after compaction, so its own Path column has to be sufficient on its own,
+ * not just a label that matches whatever the agent was told earlier in the
+ * conversation.
  */
-export function renderManifest(files: ManifestFile[]): string {
+export function renderManifest(uploadsDir: string, files: ManifestFile[]): string {
   const header = [
     '# Attachments',
     '',
@@ -67,11 +86,11 @@ export function renderManifest(files: ManifestFile[]): string {
     files.length === 0
       ? ['No files yet.', '']
       : [
-          '| File | Type | Size | Extent | SHA-256 | Added |',
-          '| --- | --- | --- | --- | --- | --- |',
+          '| Path | File | Type | Size | Extent | SHA-256 | Added |',
+          '| --- | --- | --- | --- | --- | --- | --- |',
           ...ordered(files).map((f) => {
             const extent = extentOf(f) ?? '—'
-            return `| ${f.originalFilename} | ${f.mimeType} | ${humanSize(f.sizeBytes)} | ${extent} | ${f.checksum.slice(0, 12)} | ${f.createdAt.toISOString()} |`
+            return `| ${pathOf(uploadsDir, f)} | ${f.originalFilename} | ${f.mimeType} | ${humanSize(f.sizeBytes)} | ${extent} | ${f.checksum.slice(0, 12)} | ${f.createdAt.toISOString()} |`
           }),
           '',
         ]
@@ -84,6 +103,10 @@ export function renderManifest(files: ManifestFile[]): string {
  * caller can unconditionally prepend `announcement + prompt` — see
  * session-run.worker.ts, where this is composed once per turn from whatever
  * has `announcedSeq IS NULL`.
+ *
+ * Each line leads with the absolute path — the thing an agent can actually
+ * Read — then the original filename, since that is how the human who
+ * attached it referred to it in their message.
  */
 export function announcementFor(uploadsDir: string, files: ManifestFile[]): string {
   if (files.length === 0) return ''
@@ -94,7 +117,7 @@ export function announcementFor(uploadsDir: string, files: ManifestFile[]): stri
     const parts = [f.mimeType, extent, humanSize(f.sizeBytes)].filter((p): p is string =>
       Boolean(p),
     )
-    return `- ${f.originalFilename} — ${parts.join(', ')}`
+    return `- ${pathOf(uploadsDir, f)} — ${f.originalFilename}, ${parts.join(', ')}`
   })
 
   return [
@@ -125,5 +148,7 @@ export function attachmentsSystemPromptBlock(
     '',
     `${fileCount} file${fileCount === 1 ? '' : 's'} currently. The full index, with type, size and a ` +
       `checksum for each, is at ${manifestPath}.`,
+    'On-disk filenames are prefixed with a file id (<uuid>-<original name>) — use the exact path ' +
+      'given in the announcement or in ATTACHMENTS.md rather than composing one from a display name.',
   ].join('\n')
 }
