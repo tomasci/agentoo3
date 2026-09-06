@@ -6,7 +6,14 @@
 // that were not crashes, because both signals were being read wrong.
 
 import { expect, test } from 'bun:test'
-import { lostSubagents, newSpend } from '../src/queue/session-run.worker'
+import {
+  type BackgroundCommandLedger,
+  cancelledWithoutInterrupt,
+  foldBackgroundCommand,
+  lostBackgroundCommands,
+  lostSubagents,
+  newSpend,
+} from '../src/queue/session-run.worker'
 
 /** A result message, with only the fields these two helpers look at. */
 const result = (stats?: Record<string, unknown>, cost?: number) =>
@@ -15,6 +22,27 @@ const result = (stats?: Record<string, unknown>, cost?: number) =>
     subtype: 'success',
     ...(cost !== undefined && { total_cost_usd: cost }),
     ...(stats && { subagent_stats: stats }),
+  }) as never
+
+/** A task_started message, with only the fields foldBackgroundCommand looks at. */
+const taskStarted = (fields: Record<string, unknown>) =>
+  ({ type: 'system', subtype: 'task_started', ...fields }) as never
+
+/** A task_updated message: only task_id and patch ever arrive on the real thing. */
+const taskUpdated = (task_id: string, patch: Record<string, unknown>) =>
+  ({ type: 'system', subtype: 'task_updated', task_id, patch }) as never
+
+/** A task_notification message, with only the fields foldBackgroundCommand looks at. */
+const taskNotification = (task_id: string, fields: Record<string, unknown>) =>
+  ({ type: 'system', subtype: 'task_notification', task_id, ...fields }) as never
+
+/** A user message reporting a tool result cancelled with the given kind. */
+const userCancelled = (nonExecutionKind: unknown) =>
+  ({
+    type: 'user',
+    message: { role: 'user', content: [] },
+    parent_tool_use_id: null,
+    tool_result_meta: [{ id: 'toolu_01', non_execution_kind: nonExecutionKind }],
   }) as never
 
 // --- what it cost ------------------------------------------------------------
@@ -143,3 +171,402 @@ test('an unrecognisable result degrades to "nothing lost"', () => {
 test('over-accounting cannot produce a negative count', () => {
   expect(lostSubagents(result({ spawned: 1, completed: 3, started_in_background: 1 }))).toBe(0)
 })
+
+
+// --- whether a backgrounded command survived the turn ------------------------
+//
+// The incident this covers: an agentoo session backgrounded a `git push`
+// behind a multi-minute pre-push hook, ended its turn, and the SDK killed the
+// task about five seconds *after* the turn's own `result` had already
+// streamed by. `lostSubagents` cannot see this — `subagent_stats` only counts
+// delegated work — so this is a second, parallel ledger for commands.
+
+test('a backgrounded local_bash task that gets killed counts as lost', () => {
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(ledger, taskUpdated('t1', { status: 'killed' }))
+  expect(lostBackgroundCommands(ledger)).toBe(1)
+})
+
+test('a backgrounded local_agent task is not double-counted here', () => {
+  // lostSubagents already owns this loss, read off subagent_stats on the
+  // final result. Counting it again here would make one turn emit two
+  // contradictory notices about the same lost work.
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_agent', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(ledger, taskUpdated('t1', { status: 'killed' }))
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('a foreground command that never backgrounds counts as nothing', () => {
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: false }),
+  )
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('a backgrounded command that never settles counts as lost', () => {
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: true }),
+  )
+  expect(lostBackgroundCommands(ledger)).toBe(1)
+})
+
+test('a paused command at loop end still counts as lost, not settled', () => {
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(ledger, taskUpdated('t1', { status: 'paused' }))
+  expect(lostBackgroundCommands(ledger)).toBe(1)
+})
+
+test('a task_notification reporting "stopped" is destroyed, not completed', () => {
+  // 'stopped' is the SDK's word for cut off rather than finished, matching how
+  // the frontend (transcript.ts) already folds it into 'killed'.
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(ledger, taskNotification('t1', { status: 'stopped' }))
+  expect(lostBackgroundCommands(ledger)).toBe(1)
+})
+
+test('an ambient housekeeping task is never counted', () => {
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: true, ambient: true }),
+  )
+  foldBackgroundCommand(ledger, taskUpdated('t1', { status: 'killed' }))
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('a command auto-backgrounded past its timeout is still tracked', () => {
+  // The CLI backgrounds a foreground Bash call that overruns its timeout with
+  // no task_started ever having said so — only patch.is_backgrounded does.
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: false }),
+  )
+  foldBackgroundCommand(ledger, taskUpdated('t1', { is_backgrounded: true }))
+  foldBackgroundCommand(ledger, taskUpdated('t1', { status: 'killed' }))
+  expect(lostBackgroundCommands(ledger)).toBe(1)
+})
+
+test('garbage message shapes fold into an empty, harmless ledger', () => {
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(ledger, undefined)
+  foldBackgroundCommand(ledger, {} as never)
+  foldBackgroundCommand(ledger, { type: 'assistant' } as never)
+  foldBackgroundCommand(ledger, { type: 'system' } as never)
+  foldBackgroundCommand(ledger, { type: 'system', subtype: 'task_updated' } as never)
+  foldBackgroundCommand(
+    ledger,
+    { type: 'system', subtype: 'task_started', task_type: 'local_bash' } as never,
+  )
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+// --- a tool cancelled by the harness, not refused by anyone -------------------
+//
+// The other half of the same incident: on the two turns after the push was
+// lost, the agent's first Bash call came back with tool_result_meta reporting
+// non_execution_kind: "cancelled" and permission_denials: [] — an SDK
+// cancellation, not a human answering "no" — and the model read it as a
+// refusal both times.
+
+test('cancelledWithoutInterrupt is true for the real tool_result_meta shape', () => {
+  expect(cancelledWithoutInterrupt(userCancelled('cancelled'))).toBe(true)
+})
+
+test('cancelledWithoutInterrupt degrades to false on anything else', () => {
+  expect(cancelledWithoutInterrupt(undefined)).toBe(false)
+  expect(cancelledWithoutInterrupt({ type: 'assistant' } as never)).toBe(false)
+  expect(cancelledWithoutInterrupt({ type: 'user' } as never)).toBe(false)
+  expect(cancelledWithoutInterrupt({ type: 'user', tool_result_meta: 'nope' } as never)).toBe(false)
+  expect(cancelledWithoutInterrupt(userCancelled('permission_denied'))).toBe(false)
+  expect(cancelledWithoutInterrupt({ type: 'user', tool_result_meta: [{}] } as never)).toBe(false)
+})
+
+// --- the false positive that would degrade every healthy session --------------
+//
+// `lostBackgroundCommands` drives `recover`, which spends one of three auto
+// continuations and then *fails* the session. Every task the ledger enrols is
+// therefore a liability: the enrolment is deliberately wide (every `local_bash`,
+// foreground included, so an auto-backgrounded command is still caught), so the
+// only thing standing between a healthy turn and a nudge is `background` staying
+// false. These pin that gate from the false-alarm side.
+
+test('a task_started with no is_backgrounded field at all is not a background command', () => {
+  // The field is optional on SDKTaskStartedMessage. `=== true` is the only
+  // enrolment, so an absent field has to read as foreground — otherwise every
+  // turn that ran one Bash call and ended before the CLI settled it would nudge
+  // itself, three times, and then fail.
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(ledger, taskStarted({ task_id: 't1', task_type: 'local_bash' }))
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('a foreground command that the turn never settles counts as nothing', () => {
+  // The exact case a turn cut short produces: task_started arrives, the
+  // task_notification that would have settled it never does, the stream ends.
+  // The entry sits at 'running' forever and must still not be counted.
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: false }),
+  )
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('a foreground command left mid-flight by a patch that only says "running"', () => {
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: false }),
+  )
+  foldBackgroundCommand(ledger, taskUpdated('t1', { status: 'running' }))
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('a foreground command killed at the boundary is still not a background loss', () => {
+  // Its caller blocked on it and saw the failure inside the turn, so there is
+  // nothing to tell the next turn about. Only `is_backgrounded` promotes.
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: false }),
+  )
+  foldBackgroundCommand(ledger, taskUpdated('t1', { status: 'killed' }))
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('a skip_transcript housekeeping task is never counted either', () => {
+  // `ambient` has a test above; `skip_transcript` is the other half of the same
+  // guard and the SDK sets it independently.
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({
+      task_id: 't1',
+      task_type: 'local_bash',
+      is_backgrounded: true,
+      skip_transcript: true,
+    }),
+  )
+  foldBackgroundCommand(ledger, taskNotification('t1', { status: 'stopped' }))
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('a backgrounded command that settles after the result is not a loss', () => {
+  // The other half of the late-arriving-message design. The settle can land
+  // after the turn's result exactly as the kill can, so reading the ledger at
+  // the result rather than after the loop would report a finished command lost.
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(ledger, taskNotification('t1', { status: 'completed' }))
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('a backgrounded command that failed on its own is settled, not lost', () => {
+  // A non-zero exit is a result the model already has. Nudging over it would
+  // re-run work that ran.
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(ledger, taskUpdated('t1', { status: 'failed' }))
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+// --- the subagent exclusion, from both directions -----------------------------
+
+test('a subagent task_id neither enrols nor corrupts a real bash entry', () => {
+  // `lostSubagents` owns delegated work. A `task_updated`/`task_notification`
+  // carrying a subagent's task_id has to find nothing here — otherwise one turn
+  // emits two contradictory notices about one loss.
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 'agent-1', task_type: 'local_agent', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 'bash-1', task_type: 'local_bash', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(ledger, taskUpdated('agent-1', { status: 'killed', is_backgrounded: true }))
+  foldBackgroundCommand(ledger, taskNotification('agent-1', { status: 'stopped' }))
+  foldBackgroundCommand(ledger, taskNotification('bash-1', { status: 'completed' }))
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('a task_type the SDK adds later is not enrolled', () => {
+  // The set is open — local_workflow already exists — and anything unrecognised
+  // has to stay out rather than be guessed at.
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_workflow', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(ledger, taskUpdated('t1', { status: 'killed' }))
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+// --- malformed input, from all three new readers ------------------------------
+
+test('null, arrays and wrong-typed ids fold into nothing rather than a false alarm', () => {
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(ledger, null as never)
+  foldBackgroundCommand(ledger, [] as never)
+  foldBackgroundCommand(ledger, 'task_started' as never)
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 42, task_type: 'local_bash', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: ['t1'], task_type: 'local_bash', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't2', task_type: ['local_bash'], is_backgrounded: true }),
+  )
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't3', task_type: 'local_bash', is_backgrounded: 'yes' }),
+  )
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('a settle message with a malformed patch neither throws nor invents an entry', () => {
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(ledger, { type: 'system', subtype: 'task_updated', task_id: 'gone',
+    patch: { status: 'killed' } } as never)
+  foldBackgroundCommand(ledger, { type: 'system', subtype: 'task_notification', task_id: 'gone',
+    status: 'stopped' } as never)
+  foldBackgroundCommand(ledger, { type: 'system', subtype: 'task_updated', task_id: 't1',
+    patch: null } as never)
+  foldBackgroundCommand(ledger, { type: 'system', subtype: 'task_updated', task_id: 't1',
+    patch: ['killed'] } as never)
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('a garbled patch on a live entry leaves it exactly as it was', () => {
+  // Unsettled going in, unsettled coming out: a shape change must not be able
+  // to flip a state either way.
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(ledger, taskUpdated('t1', { status: { done: true } }))
+  foldBackgroundCommand(ledger, taskNotification('t1', { status: ['completed'] }))
+  expect(lostBackgroundCommands(ledger)).toBe(1)
+})
+
+test('a settled entry is not resurrected by a later garbled message', () => {
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(ledger, taskNotification('t1', { status: 'completed' }))
+  foldBackgroundCommand(ledger, taskUpdated('t1', { status: 'unknown-to-us' }))
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('cancelledWithoutInterrupt survives every wrong shape it could be handed', () => {
+  expect(cancelledWithoutInterrupt(null as never)).toBe(false)
+  expect(cancelledWithoutInterrupt({ type: 'user', tool_result_meta: null } as never)).toBe(false)
+  expect(cancelledWithoutInterrupt({ type: 'user', tool_result_meta: {} } as never)).toBe(false)
+  expect(cancelledWithoutInterrupt({ type: 'user', tool_result_meta: [null] } as never)).toBe(false)
+  expect(cancelledWithoutInterrupt({ type: 'user', tool_result_meta: [[]] } as never)).toBe(false)
+  expect(cancelledWithoutInterrupt({ type: 'user', tool_result_meta: ['cancelled'] } as never)).toBe(
+    false,
+  )
+  expect(cancelledWithoutInterrupt(userCancelled(null))).toBe(false)
+  expect(cancelledWithoutInterrupt(userCancelled(['cancelled']))).toBe(false)
+  // Case matters: only the SDK's own literal counts, not something like it.
+  expect(cancelledWithoutInterrupt(userCancelled('Cancelled'))).toBe(false)
+  // A rejection that carries a reason is a boundary, not harness noise.
+  expect(cancelledWithoutInterrupt(userCancelled('rejected'))).toBe(false)
+})
+
+test('a cancellation anywhere in tool_result_meta is found, not just the first entry', () => {
+  expect(
+    cancelledWithoutInterrupt({
+      type: 'user',
+      tool_result_meta: [{ id: 'a' }, null, { id: 'b', non_execution_kind: 'cancelled' }],
+    } as never),
+  ).toBe(true)
+})
+
+// --- two fixes from an independent review -------------------------------------
+//
+// Both confirmed with concrete inputs against the first version of this file:
+// an ambient/skip_transcript flag on a *settle* message (not the enrolling
+// task_started) dropped the settle instead of applying it, and two commands
+// lost in one turn were never exercised together.
+
+test('an ambient flag on the settling task_notification does not block the settle', () => {
+  // The guard only does real work in the task_started branch, where it keeps
+  // an ambient task off the ledger entirely. Repeating it here on a
+  // *settling* message for an already-enrolled real command was the bug: it
+  // returned before `task.status = 'settled'` ran, leaving a command that
+  // reported `completed` still reading as unsettled — a false alarm on a
+  // healthy turn, not a suppressed one.
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(ledger, taskNotification('t1', { status: 'completed', ambient: true }))
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('a skip_transcript flag on the settling task_notification does not block it either', () => {
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(
+    ledger,
+    taskNotification('t1', { status: 'completed', skip_transcript: true }),
+  )
+  expect(lostBackgroundCommands(ledger)).toBe(0)
+})
+
+test('two backgrounded commands lost in the same turn both count', () => {
+  const ledger: BackgroundCommandLedger = new Map()
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't1', task_type: 'local_bash', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(
+    ledger,
+    taskStarted({ task_id: 't2', task_type: 'local_bash', is_backgrounded: true }),
+  )
+  foldBackgroundCommand(ledger, taskUpdated('t1', { status: 'killed' }))
+  foldBackgroundCommand(ledger, taskUpdated('t2', { status: 'killed' }))
+  expect(lostBackgroundCommands(ledger)).toBe(2)
+})
+

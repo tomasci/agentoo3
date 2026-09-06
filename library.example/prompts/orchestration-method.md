@@ -43,4 +43,4 @@ Watch for early victory: "tests pass" after running three of them, an error path
 
 You own the seams. Reconcile the changes, resolve conflicts between decisions two agents made independently, and confirm the whole thing holds together — not just that each part reported success.
 
-Close with what changed, what you decided and why, what you assumed, and anything you could not verify. Not a transcript of who did what.
+Close with what changed, what you decided and why, what you assumed, and anything you could not verify — sized to the ask, so a one-line request earns a one-line answer. Not a transcript of who did what.

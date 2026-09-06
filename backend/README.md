@@ -247,7 +247,15 @@ A message sent while a turn is running is not rejected. It is stored `pending`,
 and the running turn drains whatever accumulated behind it when it finishes. On
 failure the queue is deliberately *not* drained — replaying the same failure
 against every waiting message helps nobody — so those stay pending until the
-next send.
+next send. An interrupt does not drain it either, and for the same reason: an
+operator who just stopped a turn is not asking for whatever queued up behind it
+to run anyway. Both of `runTurn`'s interrupt exits return before the drain check
+below, so a message that arrived mid-turn would otherwise sit `pending` with
+nothing saying so — it isn't lost, `sendMessage` re-queues an `interrupted`
+session on its next send and `runTurn` always takes the oldest pending row
+first, so the stranded message still runs before whatever the operator types
+next — but the worker writes a transcript notice on the way out
+(`noticeStrandedPrompt`) instead of leaving that to be discovered later.
 
 ### A turn that was killed is not a turn that failed
 
@@ -271,11 +279,67 @@ OOM-killed inside the worker's cgroup and systemd's `OOMPolicy` defaults to
 `stop`. See "Running out of memory" in the root README; `OOMPolicy=continue` on
 the unit is the other half of the fix, and stops the kill spreading at all.
 
-Everything in that recovery path is guarded, including the read that counts the
-continuations. It runs precisely when the machine is in trouble, so Postgres or
-Redis may be going down in the same moment — and an error escaping there would
-leave the session at `running` with no worker holding it, which the UI will not
-delete and will only queue new messages behind.
+A killed process is one reader of this recovery path (`recover` in
+`session-run.worker.ts`), not the only one. Three more conditions nudge a turn
+back onto the same three-continuation budget, all of them work the turn threw
+away rather than the model getting anything wrong:
+
+A subagent the SDK's own shutdown killed mid-delegation, or spawned in the
+background and then never accounted for at all, is read off `subagent_stats` on
+the turn's final result (`lostSubagents`). The delegation hook already forces
+every subagent to the foreground, so this should not arise while that hook
+holds — but it is read back from the result rather than assumed, because the
+old behaviour was to mark such a turn `completed` regardless. That field is not
+in the SDK's published types, so a shape it does not recognise degrades to
+"nothing lost" rather than a false alarm, and it is gated on
+`started_in_background`: what the same stats mean for an ordinary foreground
+delegation is equally undocumented, and nudging on that alone would misread a
+session that delegated normally as one that lost work — exactly the false alarm
+this gate exists to avoid.
+
+A shell command the operator backgrounded with `run_in_background` — legitimate
+mid-turn, since nothing here forces Bash to the foreground — that was still
+running, or had already been killed, when the turn ended is read off a
+turn-local ledger folded from the stream as it runs (`foldBackgroundCommand`,
+`lostBackgroundCommands`), not off the final result: the kill for a backgrounded
+`git push` behind a multi-minute pre-push hook can arrive several seconds
+*after* the result that would otherwise read as "the turn finished cleanly." The
+constraint this reflects is only that nothing survives the turn boundary, not
+that backgrounding itself is disallowed.
+
+A tool call the harness cancelled on its own, rather than the operator declining
+it, is read off the next `user` message's `tool_result_meta`
+(`cancelledWithoutInterrupt`). This session runs with
+`permissionMode: 'bypassPermissions'` and no `canUseTool` registered anywhere in
+`src`, so there was never a prompt for an operator to have answered — and a
+cancellation seen while the turn's own `interrupted` flag is still false was not
+agentoo either, since `abortController.abort()` is agentoo's only cancel source.
+Left to read that shape on its own, a model treats it as a refusal and goes
+passive, asking a human to choose from a menu nobody offered. This is the one
+trigger that also checks the result: it is skipped whenever the result already
+says the turn stopped for a declared reason (any `error_*` subtype, including
+the budget cutoff below), because a limit that is working correctly should not
+be fought.
+
+All four causes spend the same three-continuations-per-operator-message budget
+and end the same way: the model is told plainly that something it started did
+not finish, and to check what actually happened before trusting any claim that
+it did — rather than a session going quiet and an operator finding out first.
+
+Not everything gets nudged. `error_max_budget_usd` still fails the session
+outright — a spent budget is the session correctly stopping, not lost work —
+and none of the three above even run if a message arrived while the turn was
+running: the drain check further up moves the session straight back to
+`queued` on that alone, before budget, cancellation or lost-work get a look, so
+an operator's own next message always outranks an auto-nudge rather than racing
+it.
+
+Everything in every one of these recovery paths is guarded, including the read
+that counts the continuations. The killed-process path in particular runs
+precisely when the machine is in trouble, so Postgres or Redis may be going down
+in the same moment — and an error escaping any of them would leave the session
+at `running` with no worker holding it, which the UI will not delete and will
+only queue new messages behind.
 
 Two SDK options do most of the work in the UI:
 
