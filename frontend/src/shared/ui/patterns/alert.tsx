@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { cx } from '../lib/cx'
 import type { Tone } from '../lib/types'
 import styles from './alert.module.scss'
@@ -18,6 +19,22 @@ interface AlertProps {
   title?: ReactNode
   children?: ReactNode
   action?: ReactNode
+  /**
+   * Renders a dismiss control when given, omits it when not. Optional is
+   * load-bearing: 24 existing call sites render an `Alert` with no way to
+   * close it and must stay pixel-identical — this can only add a control
+   * for the one caller that asks for it (version-skew-alert.tsx, the first
+   * `Alert` that sits over other content rather than inline in a page flow,
+   * which is what makes it need one at all).
+   *
+   * Deliberately just a callback, not a dismissed/visible flag: `Alert` has
+   * no idea what "the same notice" means to a caller that re-renders it
+   * (version-skew-alert.tsx's answer is "same version pair"), so owning that
+   * state here would either bake in one caller's definition or force every
+   * other caller to feed one in. The caller decides whether to keep
+   * rendering `Alert` at all; this only decides whether the button shows.
+   */
+  onDismiss?: () => void
 }
 
 /**
@@ -35,7 +52,8 @@ interface AlertProps {
  * No `preformatted` prop for the `<pre>` case that used to exist at some call
  * sites — it composes instead: `<Alert tone="danger"><Code block wrap>{stderr}</Code></Alert>`.
  */
-export function Alert({ tone = 'danger', title, children, action }: AlertProps) {
+export function Alert({ tone = 'danger', title, children, action, onDismiss }: AlertProps) {
+  const { t } = useTranslation()
   const announced = tone === 'danger'
 
   return (
@@ -49,6 +67,16 @@ export function Alert({ tone = 'danger', title, children, action }: AlertProps) 
         {children && <div className={styles.content}>{children}</div>}
       </div>
       {action && <div className={styles.action}>{action}</div>}
+      {onDismiss && (
+        <button
+          type="button"
+          className={styles.dismiss}
+          aria-label={t('common.dismiss')}
+          onClick={onDismiss}
+        >
+          ✕
+        </button>
+      )}
     </div>
   )
 }

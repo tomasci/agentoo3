@@ -11,6 +11,7 @@
 
 import Redis from 'ioredis'
 import { env } from '@/env'
+import type { SessionMessageDto } from '@/features/sessions/schema'
 import { logger } from './logger'
 
 /** Transcript events for one session: appended messages and status changes. */
@@ -20,7 +21,12 @@ export const sessionChannel = (sessionId: string) => `agentoo:session:${sessionI
 export const controlChannel = (sessionId: string) => `agentoo:control:${sessionId}`
 
 export type SessionEvent =
-  | { kind: 'message'; sessionId: string; seq: number; message: unknown }
+  // `message` is the same DTO every read path returns (see `toMessageDto` in
+  // sessions/service.ts) — never a raw Drizzle row. All three publish sites
+  // (sendMessage, appendMessage, the post-turn files re-publish) go through
+  // that one function so a browser can never tell a live frame from a
+  // replayed one by which keys happen to be present.
+  | { kind: 'message'; sessionId: string; seq: number; message: SessionMessageDto }
   | { kind: 'status'; sessionId: string; status: string; lastError?: string | null }
 
 export type ControlEvent = { kind: 'interrupt' }

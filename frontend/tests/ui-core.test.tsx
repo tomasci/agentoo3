@@ -14,6 +14,15 @@ import type { ReactNode } from 'react'
 // therefore cannot change how any file outside this track resolves its own
 // styles (verified: `core/button.module.scss`, which this track does not
 // own, still resolves to `undefined` after this plugin registers).
+
+// Real translations, not raw i18next keys: Alert's optional dismiss control
+// reads its aria-label through react-i18next, and `common.dismiss` in the
+// output would be a weaker assertion than the actual "Dismiss" a screen
+// reader announces. A static import, not a dynamic one like the components
+// below: `@/shared/i18n` touches no `.module.scss`, so it does not need the
+// `plugin()` call underneath it to have run first.
+import '@/shared/i18n'
+
 const OWNED_STYLES =
   /src\/shared\/ui\/(core\/(badge|status-dot|code|layout)|patterns\/(card|page-header|empty-state|alert|definition-list|data-table))\.module\.scss$/
 
@@ -201,6 +210,24 @@ test('Alert composes with Code for the preformatted stderr case', () => {
   expect(out).toContain('Build failed')
   expect(out).toContain('<pre')
   expect(out).toContain('error: cannot find module')
+})
+
+test('Alert with no onDismiss is unchanged: no dismiss button in the tree', () => {
+  // The load-bearing guarantee for the 24 call sites that predate this prop:
+  // omitting it must render exactly what they already render.
+  const out = renderToStaticMarkup(<Alert tone="danger">Something failed</Alert>)
+  expect(out).not.toContain('<button')
+  expect(out).not.toContain('Dismiss')
+})
+
+test('Alert renders a labelled dismiss button only when onDismiss is given', () => {
+  const out = renderToStaticMarkup(
+    <Alert tone="warning" onDismiss={() => {}}>
+      Update available
+    </Alert>
+  )
+  expect(out).toContain('<button')
+  expect(out).toContain('aria-label="Dismiss"')
 })
 
 // --- DefinitionList ---

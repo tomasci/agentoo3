@@ -17,7 +17,7 @@
 // mocked to fail there, which is what already makes `SessionRefLink` render
 // its no-router-needed "session gone" fallback for the anomalies table too.
 
-import { afterAll, afterEach, beforeEach, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, expect, test } from 'bun:test'
 
 // Same identity-proxy loader, same allowlist, as tests/ui-core.test.tsx,
 // tests/transcript-row.test.tsx and tests/transcript-time.test.tsx: `StoragePage`
@@ -42,6 +42,7 @@ plugin({
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { mockModule } from './mock-module'
 
 type Query = Record<string, unknown> | undefined
 
@@ -86,19 +87,13 @@ const RECHECK_CLIENT = '@/shared/api/generated/clients/postApiStorageAnomaliesId
 const BULK_DELETE_CLIENT = '@/shared/api/generated/clients/postApiStorageAnomaliesBulkDelete'
 const BULK_CLIENT = '@/shared/api/generated/clients/postApiStorageAnomaliesBulk'
 
-const realSummary = await import('../src/shared/api/generated/clients/getApiStorageSummary')
-const realAnomalies = await import('../src/shared/api/generated/clients/getApiStorageAnomalies')
-const realSession = await import('../src/shared/api/generated/clients/getApiSessionsId')
-const realDelete = await import('../src/shared/api/generated/clients/postApiStorageAnomaliesIdDelete')
-const realRecheck = await import(
-  '../src/shared/api/generated/clients/postApiStorageAnomaliesIdRecheck'
-)
-const realBulkDelete = await import(
-  '../src/shared/api/generated/clients/postApiStorageAnomaliesBulkDelete'
-)
-const realBulk = await import('../src/shared/api/generated/clients/postApiStorageAnomaliesBulk')
-
-await mock.module(SUMMARY_CLIENT, () => ({
+// Registered through tests/mock-module.ts rather than `mock.module` directly:
+// a bare `mock.module` here would hand all seven fakes to every file `bun test`
+// loads afterwards — `getApiSessionsId` most damagingly, since the fake below
+// makes every session lookup in the process throw. See that helper for why the
+// undo this file used to do — saving each namespace and putting it back in
+// `afterAll` — restored nothing.
+await mockModule(SUMMARY_CLIENT, () => ({
   getApiStorageSummary: async () => ({
     data: {
       totalBytes: 212_000_050,
@@ -117,7 +112,7 @@ await mock.module(SUMMARY_CLIENT, () => ({
   }),
 }))
 
-await mock.module(ANOMALIES_CLIENT, () => ({
+await mockModule(ANOMALIES_CLIENT, () => ({
   getApiStorageAnomalies: async (opts: { query?: Query }) => {
     const query = opts.query ?? {}
     let rows = query.resolved === 'true' ? RESOLVED : openAnomalies
@@ -129,7 +124,7 @@ await mock.module(ANOMALIES_CLIENT, () => ({
 // No test in this file exercises a real, resolvable session — see the file's
 // own header comment — so this always answers "not found", which is what
 // lets `SessionRefLink` render its no-router-needed fallback everywhere.
-await mock.module(SESSION_CLIENT, () => ({
+await mockModule(SESSION_CLIENT, () => ({
   getApiSessionsId: async () => {
     throw new Error('no session in this test')
   },
@@ -139,7 +134,7 @@ let deleteCalls: { id: string }[] = []
 let deleteOutcome: 'deleted' | 'revalidated' | 'unchanged' | 'failed' = 'deleted'
 let deleteError: string | undefined
 
-await mock.module(DELETE_CLIENT, () => ({
+await mockModule(DELETE_CLIENT, () => ({
   postApiStorageAnomaliesIdDelete: async (opts: { path: { id: string } }) => {
     deleteCalls.push(opts.path)
     const row = openAnomalies.find((a) => a.id === opts.path.id) ?? openAnomalies[0]
@@ -150,7 +145,7 @@ await mock.module(DELETE_CLIENT, () => ({
 let recheckCalls: { id: string }[] = []
 let recheckOutcome: 'deleted' | 'revalidated' | 'unchanged' | 'failed' = 'unchanged'
 
-await mock.module(RECHECK_CLIENT, () => ({
+await mockModule(RECHECK_CLIENT, () => ({
   postApiStorageAnomaliesIdRecheck: async (opts: { path: { id: string } }) => {
     recheckCalls.push(opts.path)
     const row = openAnomalies.find((a) => a.id === opts.path.id) ?? openAnomalies[0]
@@ -161,7 +156,7 @@ await mock.module(RECHECK_CLIENT, () => ({
 let bulkDeleteCalls: { ids?: string[] }[] = []
 let bulkDeleteResults: { outcome: string }[] = [{ outcome: 'deleted' }]
 
-await mock.module(BULK_DELETE_CLIENT, () => ({
+await mockModule(BULK_DELETE_CLIENT, () => ({
   postApiStorageAnomaliesBulkDelete: async (opts: { body?: { ids?: string[] } }) => {
     bulkDeleteCalls.push(opts.body ?? {})
     return { data: { results: bulkDeleteResults } }
@@ -170,22 +165,12 @@ await mock.module(BULK_DELETE_CLIENT, () => ({
 
 let bulkResolveCalls: { ids?: string[]; class?: string }[] = []
 
-await mock.module(BULK_CLIENT, () => ({
+await mockModule(BULK_CLIENT, () => ({
   postApiStorageAnomaliesBulk: async (opts: { body?: { ids?: string[]; class?: string } }) => {
     bulkResolveCalls.push(opts.body ?? {})
     return { data: { resolved: opts.body?.ids?.length ?? 0 } }
   },
 }))
-
-afterAll(async () => {
-  await mock.module(SUMMARY_CLIENT, () => realSummary)
-  await mock.module(ANOMALIES_CLIENT, () => realAnomalies)
-  await mock.module(SESSION_CLIENT, () => realSession)
-  await mock.module(DELETE_CLIENT, () => realDelete)
-  await mock.module(RECHECK_CLIENT, () => realRecheck)
-  await mock.module(BULK_DELETE_CLIENT, () => realBulkDelete)
-  await mock.module(BULK_CLIENT, () => realBulk)
-})
 
 const { StoragePage } = await import('../src/features/storage/components/storage-page')
 const { Toaster, toaster } = await import('../src/shared/ui/overlay/toast')

@@ -7,10 +7,11 @@
 // and tests/use-session-stream-hook.test.tsx use for their own generated
 // clients.
 
-import { afterAll, afterEach, beforeEach, expect, mock, test } from 'bun:test'
+import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { mockModule } from './mock-module'
 import type { SessionFile } from '../src/features/sessions/hooks/use-session-files'
 import { useAttachmentUploads } from '../src/features/sessions/hooks/use-session-files'
 
@@ -29,9 +30,11 @@ interface Call {
 let calls: Call[] = []
 
 const CLIENT_SPEC = '@/shared/api/generated/clients/postApiSessionsIdFiles'
-const real = await import('../src/shared/api/generated/clients/postApiSessionsIdFiles')
 
-await mock.module(CLIENT_SPEC, () => ({
+// Through tests/mock-module.ts rather than `mock.module` directly, so this
+// fake is taken back when the file is done rather than answering for every
+// file `bun test` loads afterwards.
+await mockModule(CLIENT_SPEC, () => ({
   postApiSessionsIdFiles: (opts: {
     body: { file: File }
     signal?: AbortSignal
@@ -51,10 +54,6 @@ await mock.module(CLIENT_SPEC, () => ({
       opts.signal?.addEventListener('abort', () => reject(new Error('aborted')))
     }),
 }))
-
-afterAll(async () => {
-  await mock.module(CLIENT_SPEC, () => real)
-})
 
 const fileDto = (overrides: Partial<SessionFile> = {}): SessionFile => ({
   id: 'server-file-1',

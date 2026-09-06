@@ -1,5 +1,5 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
-import { AppError } from '@/lib/errors'
+import { AppError, errorBody } from '@/lib/errors'
 import { createProjectSchema, errorSchema, projectSchema, updateProjectSchema } from './schema'
 import {
   createProject,
@@ -133,16 +133,12 @@ projectsRouter.openapi(
   },
 )
 
-// Surface AppError's status and recovery commands instead of a bare 500.
+// Surface AppError's status and recovery commands instead of a bare 500 —
+// needed so this router's own tests (which exercise it directly, not through
+// the full app) see the real status rather than Hono's generic 500 for an
+// uncaught throw. errorBody is shared with app.ts's onError so the two never
+// format an AppError differently depending on which one happens to catch it.
 projectsRouter.onError((error, c) => {
-  if (error instanceof AppError) {
-    return c.json(
-      {
-        error: error.message,
-        ...(error.recoveryCommands && { recoveryCommands: error.recoveryCommands }),
-      },
-      error.status as 400,
-    )
-  }
+  if (error instanceof AppError) return c.json(errorBody(error), error.status as 400)
   throw error
 })

@@ -19,6 +19,7 @@ import type {
   GetApiSessionsIdMessagesQuery,
   GetApiSessionsIdMessagesStatus200,
 } from '@/shared/api/generated/types/GetApiSessionsIdMessages'
+import { getApiSessionsIdMessagesStatus200Schema } from '@/shared/api/generated/zod/getApiSessionsIdMessagesSchema'
 import { sessionMessagesKey } from '../lib/message-cache'
 
 // The 200 response is an array, so a session is its element type.
@@ -102,6 +103,15 @@ export function useSessionMessages(sessionId: string) {
         query,
         signal,
         throwOnError: true,
+        // The wire shape a client trusts without checking, checked: commit
+        // 76113a8 changed this endpoint's 200 body from a bare array to this
+        // envelope, and a tab still running the JS from before that landed
+        // read `.messages` off an array and crashed three layers deeper, in a
+        // cache updater, as `n.findIndex is not a function` — a shape change
+        // failing anywhere but here. `payload` inside each message is
+        // `z.unknown()`, so this does not walk a transcript's worth of Bash
+        // output to do it.
+        validator: { response: getApiSessionsIdMessagesStatus200Schema },
       })
       return data
     },
@@ -139,6 +149,25 @@ export function useSessionMessages(sessionId: string) {
     hasPreviousPage: query.hasPreviousPage,
     isPending: query.isPending,
     isSuccess: query.isSuccess,
+    // The *initial* page load failing, distinct from `isLoadOlderError`
+    // below: a rejected first page (the validator above throwing on a
+    // malformed envelope, or any other queryFn rejection) used to leave
+    // `messages` at `NO_MESSAGES` with nothing to tell "no messages yet" apart
+    // from "failed to load any" — an empty transcript, silently. `error` rides
+    // along so a caller can show what actually went wrong rather than a bare
+    // "it failed".
+    //
+    // Not just `query.isError`: query-core's `Query` reducer sets the whole
+    // query's `status` to `'error'` on ANY failed fetch, including a later
+    // `fetchPreviousPage` — `isFetchPreviousPageError` below is exactly that
+    // same flag, narrowed by direction, not a separate one — and that reducer
+    // never clears `data`. So after an initial page has already loaded,
+    // `query.data` stays defined even while a failed `loadOlder` makes
+    // `query.isError` true too. Gating on `query.data === undefined` as well
+    // is what keeps this to "the first page never loaded", leaving a later
+    // `loadOlder` failure to `isLoadOlderError` and the transcript on screen.
+    isError: query.isError && query.data === undefined,
+    error: query.error,
     isLoadingOlder: query.isFetchingPreviousPage,
     isLoadOlderError: query.isFetchPreviousPageError,
     loadOlder: () => query.fetchPreviousPage(),

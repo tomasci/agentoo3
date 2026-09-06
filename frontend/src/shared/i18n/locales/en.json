@@ -13,13 +13,17 @@
     "working": "Working…",
     "save": "Save",
     "edit": "Edit",
-    "noOptions": "No options available"
+    "noOptions": "No options available",
+    "dismiss": "Dismiss"
   },
   "health": {
     "checking": "Checking backend…",
     "ok": "Backend ready",
     "down": "Backend unreachable",
-    "noCredential": "No Claude credential"
+    "noCredential": "No Claude credential",
+    "outdatedTitle": "Update available",
+    "outdatedMessage": "This tab is running an older build than the server. Reload to pick up the latest version.",
+    "reload": "Reload"
   },
   "projects": {
     "loadFailed": "Could not load projects",
@@ -250,6 +254,7 @@
       "result": "Result",
       "showMore": "Show more",
       "showLess": "Show less",
+      "loadFailed": "Could not load the messages",
       "loadOlder": "Load older messages",
       "loadingOlder": "Loading older messages…",
       "loadOlderFailed": "Could not load older messages"

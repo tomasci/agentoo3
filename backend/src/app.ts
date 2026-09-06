@@ -10,27 +10,12 @@ import { sessionsRouter } from '@/features/sessions/routes'
 import { sourcesRouter } from '@/features/sources/routes'
 import { sshKeysRouter } from '@/features/ssh-keys/routes'
 import { systemRouter } from '@/features/system/routes'
-import { AppError } from '@/lib/errors'
+import { AppError, errorBody } from '@/lib/errors'
 import { logger } from '@/lib/logger'
+import { openApiValidationHook } from '@/lib/openapi-hook'
 
 export function createApp() {
-  const app = new OpenAPIHono({
-    // Return the field-level detail instead of a bare 400.
-    defaultHook: (result, c) => {
-      if (!result.success) {
-        return c.json(
-          {
-            error: 'Validation failed',
-            issues: result.error.issues.map((i) => ({
-              path: i.path.join('.'),
-              message: i.message,
-            })),
-          },
-          400,
-        )
-      }
-    },
-  })
+  const app = new OpenAPIHono({ defaultHook: openApiValidationHook })
 
   app.use(
     '*',
@@ -73,13 +58,7 @@ export function createApp() {
   app.onError((error, c) => {
     if (error instanceof AppError) {
       logger.warn(`${error.status} ${error.message}`)
-      return c.json(
-        {
-          error: error.message,
-          ...(error.recoveryCommands && { recoveryCommands: error.recoveryCommands }),
-        },
-        error.status as 400,
-      )
+      return c.json(errorBody(error), error.status as 400)
     }
     logger.error(error)
     return c.json({ error: 'Internal server error' }, 500)

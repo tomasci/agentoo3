@@ -268,6 +268,14 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
       <div className={styles.scroll} ref={scroller} onScroll={onScroll}>
         {messages.isPending ? (
           <Spinner label={t('common.loading')} block />
+        ) : messages.isError ? (
+          // Distinct from an empty transcript: a rejected initial page (the
+          // boundary validator in use-sessions.ts rejecting a malformed
+          // envelope, or any other failure) must not render as though the
+          // session simply has nothing in it yet.
+          <Alert tone="danger">
+            {apiErrorMessage(messages.error, t('sessions.transcript.loadFailed'))}
+          </Alert>
         ) : (
           <div ref={setContent}>
             {messages.hasPreviousPage && (

@@ -1,6 +1,6 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import { errorSchema } from '@/features/projects/schema'
-import { badRequest } from '@/lib/errors'
+import { AppError, errorBody, issuesFor, validationFailed } from '@/lib/errors'
 import { subscribeSession } from '@/lib/events'
 import {
   createSessionSchema,
@@ -31,12 +31,31 @@ const idParam = z.object({
     .openapi({ param: { name: 'id', in: 'path' } }),
 })
 
+// Bare, undecorated validator for `after` — shared between /messages, whose
+// createRoute below attaches the OpenAPI metadata, and /events, which cannot:
+// it lives outside this router (see the comment on it) so it validates its
+// own query by hand instead of getting it from a declared response schema.
+// One definition either way, so "what counts as a legal after" cannot drift
+// between the two routes that both accept it.
+const afterSchema = z.coerce.number().int().min(-1).optional()
+
 const json = <T extends z.ZodTypeAny>(schema: T, description: string) => ({
   content: { 'application/json': { schema } },
   description,
 })
 
 export const sessionsRouter = new OpenAPIHono()
+
+// Surface AppError's status (and any recovery commands or validation issues
+// it carries) instead of a bare 500 — needed for /export and /events, which
+// live outside the OpenAPI router below and so never pass through app.ts's
+// own onError unless this router is actually mounted under the full app.
+// Every other router's error is still up to app.ts: an error that is not an
+// AppError is rethrown and handled exactly once, there.
+sessionsRouter.onError((error, c) => {
+  if (error instanceof AppError) return c.json(errorBody(error), error.status as 400)
+  throw error
+})
 
 sessionsRouter.openapi(
   createRoute({
@@ -165,16 +184,11 @@ sessionsRouter.openapi(
     request: {
       params: idParam,
       query: z.object({
-        after: z.coerce
-          .number()
-          .int()
-          .min(-1)
-          .optional()
-          .openapi({
-            param: { name: 'after', in: 'query' },
-            description:
-              'Exclusive; forward, ascending and unbounded. Cannot be combined with before.',
-          }),
+        after: afterSchema.openapi({
+          param: { name: 'after', in: 'query' },
+          description:
+            'Exclusive; forward, ascending and unbounded. Cannot be combined with before.',
+        }),
         before: z.coerce
           .number()
           .int()
@@ -265,9 +279,12 @@ sessionsRouter.openapi(
  * neither preserves nor exposes Content-Disposition, so the spec would
  * describe the payload while hiding the part that makes it a file.
  *
- * No query parameters: export means the whole transcript. The id is validated
- * here (the openapi router normally does that) so a malformed id 400s before
- * any body bytes go out, same as an unknown id 404s via getSession.
+ * No query parameters: export means the whole transcript. `:id` is validated
+ * by hand against the same `idParam` schema /messages declares to its own
+ * router, through `validationFailed` rather than a route-local `badRequest` —
+ * so a malformed id 400s in the identical envelope /events and /messages both
+ * use, before any body bytes go out, same as an unknown id 404s via
+ * getSession.
  *
  * Excluding worktreePath does not make this file safe to hand out freely —
  * payloads are verbatim and contain absolute paths, bash commands and file
@@ -275,10 +292,10 @@ sessionsRouter.openapi(
  * and defeats the point of exporting a complete transcript.
  */
 sessionsRouter.get('/sessions/:id/export', async (c) => {
-  const parsed = z.string().uuid().safeParse(c.req.param('id'))
-  if (!parsed.success) throw badRequest('Invalid session id')
+  const parsed = idParam.safeParse({ id: c.req.param('id') })
+  if (!parsed.success) throw validationFailed(issuesFor(parsed.error))
 
-  const doc = await exportSession(parsed.data)
+  const doc = await exportSession(parsed.data.id)
   return c.body(JSON.stringify(doc, null, 2), 200, {
     'Content-Type': 'application/json; charset=UTF-8',
     'Content-Disposition': `attachment; filename="${sessionExportFileName(doc.session)}"`,
@@ -295,14 +312,35 @@ sessionsRouter.get('/sessions/:id/export', async (c) => {
  *
  * Reconnection is the client's job and costs nothing: it passes the last seq it
  * saw as `after`, and the replay below closes the gap before live events start.
+ *
+ * `:id` and `after` are validated by hand, against the same schemas the
+ * OpenAPI router uses for /messages, because living outside that router (see
+ * above) means never getting its automatic param validation for free. Without
+ * this, a malformed id reached the database as a literal string and surfaced
+ * as a generic 500 — an alertable server fault for what is plainly a bad
+ * request — while the identical id on /messages correctly 400ed. `after`
+ * matters for a second reason beyond consistency: this route used to treat
+ * any non-finite `after` (`NaN`, a value so large it parses to `Infinity`) as
+ * -1, silently replaying the entire transcript instead of rejecting the
+ * request — cheap on a small session, a full re-download on a long-running
+ * one. `after=-1` itself is untouched: it is the legitimate "my cache is
+ * empty, send everything" case a reconnecting client relies on.
  */
 sessionsRouter.get('/sessions/:id/events', async (c) => {
-  const id = c.req.param('id')
-  const after = Number(c.req.query('after') ?? -1)
+  const parsedId = idParam.safeParse({ id: c.req.param('id') })
+  const parsedQuery = z.object({ after: afterSchema }).safeParse({ after: c.req.query('after') })
+  if (!parsedId.success || !parsedQuery.success) {
+    throw validationFailed([
+      ...(parsedId.success ? [] : issuesFor(parsedId.error)),
+      ...(parsedQuery.success ? [] : issuesFor(parsedQuery.error)),
+    ])
+  }
+  const { id } = parsedId.data
+  const after = parsedQuery.data.after ?? -1
 
-  // Fails with 404 before any stream headers go out, so a bad id is an ordinary
-  // error rather than an immediately-closed stream.
-  const backlog = await listMessages(id, Number.isFinite(after) ? after : -1)
+  // Fails with 404 before any stream headers go out, so an unknown id is an
+  // ordinary error rather than an immediately-closed stream.
+  const backlog = await listMessages(id, after)
 
   let unsubscribe: (() => void) | null = null
   let heartbeat: ReturnType<typeof setInterval> | null = null

@@ -17,10 +17,11 @@
 // flattened array a live arrival produces, and dragging an EventSource in
 // would only add a way for the test to be about something else.
 
-import { afterAll, expect, mock, test } from 'bun:test'
+import { expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, memo, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { mockModule } from './mock-module'
 
 type Query = Record<string, unknown> | undefined
 type Row = { id: string; sessionId: string; seq: number; type: string; parentToolUseId: string | null
@@ -44,13 +45,6 @@ let respond: (query: Query) => { messages: Row[]; hasOlder: boolean }
 
 const CLIENT_SPECIFIER = '@/shared/api/generated/clients/getApiSessionsIdMessages'
 
-// Saved before mocking, so `afterAll` can put the real implementation back:
-// `session-page.tsx` (and through it, `use-sessions.ts`) is on the router's
-// static import graph that `workspace.test.tsx` pulls in for an unrelated
-// reason, and `mock.module` replaces a specifier for every future importer in
-// the process, not only this file's own dynamic import below.
-const real = await import('../src/shared/api/generated/clients/getApiSessionsIdMessages')
-
 /** Milliseconds the fake client stalls before answering. 0 for every test
  *  that is not about what happens *during* a fetch. */
 let delay = 0
@@ -58,18 +52,18 @@ let delay = 0
 // Registered once, at module scope, before the dynamic import below resolves
 // `use-sessions.ts` — the same ordering `tests/transcript-time.test.tsx` uses
 // for its own module-identity plugin, and for the same reason: the mock has
-// to be in place before anything imports the real module.
-await mock.module(CLIENT_SPECIFIER, () => ({
+// to be in place before anything imports the real module. Through
+// tests/mock-module.ts rather than `mock.module` directly, so it is taken back
+// when this file is done: `use-sessions.ts` is on the router's static import
+// graph that tests/workspace.test.tsx pulls in for an unrelated reason, and a
+// bare `mock.module` would still be answering for it there.
+await mockModule(CLIENT_SPECIFIER, () => ({
   getApiSessionsIdMessages: async (opts: { query?: Query }) => {
     calls.push(opts.query)
     if (delay > 0) await new Promise((r) => setTimeout(r, delay))
     return { data: respond(opts.query) }
   },
 }))
-
-afterAll(() => {
-  mock.module(CLIENT_SPECIFIER, () => real)
-})
 
 const { useSessionMessages, PAGE_SIZE } = await import('../src/features/sessions/hooks/use-sessions')
 const { appendStreamedMessage, sessionMessagesKey } = await import(

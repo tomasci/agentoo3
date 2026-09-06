@@ -1,0 +1,13 @@
+// Fixed near the top of the viewport rather than laid out inline, matching
+// toast.module.scss's own floating overlay — this is mounted once alongside
+// <Toaster /> in providers.tsx, not inside RootLayout's grid, so there is
+// no flow position of its own to sit in.
+.root {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + var(--space-3));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-sticky);
+  width: 32rem;
+  max-width: calc(100vw - var(--space-8));
+}
