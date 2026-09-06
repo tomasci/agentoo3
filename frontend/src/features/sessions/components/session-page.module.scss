@@ -48,6 +48,12 @@
   // changes here, and the spacing rule reserves below() for a layout mode
   // change.
   padding-right: var(--space-1);
+
+  // The shell is the only thing that scrolls the document (body is
+  // overflow: hidden), so a fling that runs off the end of the transcript has
+  // nowhere useful to chain — on Android it reaches the root and arms
+  // pull-to-refresh instead.
+  overscroll-behavior-y: contain;
 }
 
 // Above the transcript, not only reachable by scrolling: a first page short
@@ -60,6 +66,13 @@
   align-items: center;
   gap: var(--space-2);
   padding-bottom: var(--space-2);
+}
+
+// Exists only to be observed (see the IntersectionObserver in
+// session-page.tsx) — it must never itself take up scroll space, or it would
+// add to what `requestOlder`'s anchor compensation has to account for.
+.olderSentinel {
+  height: 0;
 }
 
 // --- header -------------------------------------------------------------------

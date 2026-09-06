@@ -95,6 +95,13 @@
   padding: var(--space-3);
   border-top: 1px solid var(--color-border);
   display: grid;
+
+  // The implicit single column defaults to an `auto` track, sized to fit
+  // its widest child — including a nested `overflow-x: auto` box (a `<pre>`,
+  // a `.tableWrap`) that would rather widen the track than ever scroll
+  // itself. `minmax(0, 1fr)` keeps the column pinned to this box's own width
+  // regardless of what a caller puts inside.
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
 }
 

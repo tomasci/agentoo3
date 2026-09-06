@@ -1,4 +1,5 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import { ActionsMenu, Alert, Badge, Button, Code, Spinner, StatusDot } from '@/shared/ui'
@@ -15,6 +16,7 @@ import {
   useSession,
   useSessionMessages,
 } from '../hooks/use-sessions'
+import { type MessagesData, sessionMessagesKey } from '../lib/message-cache'
 import { Composer } from './composer'
 import styles from './session-page.module.scss'
 import { Transcript } from './transcript'
@@ -32,10 +34,52 @@ const STATUS_TONE = {
   failed: 'danger',
 } as const
 
+/**
+ * A row's position relative to the *viewport*, not its `offsetTop` in the
+ * document: where the engine's own scroll anchoring has already compensated
+ * for a prepend (Chrome, Firefox), this delta comes out zero and the caller's
+ * write is a no-op. That is what makes reapplying it safe everywhere —
+ * `settle`'s later passes, and `onScroll` re-recording it while a fetch is
+ * still in flight — on both the browsers that anchor and the one that (as of
+ * this writing) does not.
+ */
+function offsetOf(el: HTMLElement, scroller: HTMLElement): number {
+  return el.getBoundingClientRect().top - scroller.getBoundingClientRect().top
+}
+
+/**
+ * The row a `requestOlder` prepend should anchor its scroll compensation on:
+ * the bottom-most `[data-transcript-row]` (tagged in transcript.tsx, one per
+ * top-level node, in document order) at least partly inside the viewport.
+ *
+ * Bottom-most, not first: `buildTranscript` can restructure the first row
+ * when an older page heals a turn split across the page boundary, so it can
+ * vanish from the DOM entirely once that page lands — anchoring on it would
+ * leave nothing to reattach to. Nothing between a visible row and the
+ * viewport's bottom edge can change size, so this row's offset delta is
+ * exactly the shift the reader experiences.
+ *
+ * Returns `null` — no anchor, no compensation, rather than a guess — for a
+ * transcript shorter than the viewport (nothing yet qualifies) or before this
+ * attribute exists in the tree at all.
+ */
+function pickAnchor(el: HTMLElement): { el: HTMLElement; offset: number } | null {
+  const rows = el.querySelectorAll<HTMLElement>('[data-transcript-row]')
+  const bottomEdge = el.getBoundingClientRect().bottom
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i]
+    if (row && row.getBoundingClientRect().top < bottomEdge) {
+      return { el: row, offset: offsetOf(row, el) }
+    }
+  }
+  return null
+}
+
 // `projectId` stays in the prop type — the route still supplies it — but is no
 // longer destructured: the only thing that read it was the back-to-list button.
 export function SessionPage({ sessionId }: { projectId: string; sessionId: string }) {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const session = useSession(sessionId)
   const messages = useSessionMessages(sessionId)
   const send = useSendMessage(sessionId)
@@ -60,11 +104,81 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // render) until after this synchronous call returns, and momentum-scrolling
   // near the top can fire many `scroll` events before that render happens.
   const loadingOlder = useRef(false)
-  // `scrollHeight` recorded just before a `loadOlder` fetch, consumed by the
-  // layout effect below once the older page lands. `null` means "no prepend
-  // to compensate for" — the ordinary case of every render that is not that
-  // one.
-  const pendingScrollAdjust = useRef<number | null>(null)
+  // The row `requestOlder` picked to anchor a prepend on, and the viewport
+  // offset it had at that moment (see `pickAnchor`/`offsetOf` above). `null`
+  // means "no prepend to compensate for" — the ordinary case of every render
+  // that is not that one. Kept live by `onScroll` below while a fetch is in
+  // flight, so scrolling during the fetch is preserved rather than fought.
+  const anchor = useRef<{ el: HTMLElement; offset: number } | null>(null)
+  // The oldest loaded message's own seq, not `messages.messages` itself: it
+  // moves only when a page is *prepended* (a lower seq now leads the array),
+  // and is untouched by the stream appending at the tail — which is exactly
+  // the distinction that keeps the layout effect below from ever firing for
+  // the wrong reason and fighting the pin-to-bottom effect. Computed here,
+  // ahead of `requestOlder`, because `requestOlder` needs its *current* value
+  // (captured before the fetch) to later tell whether that fetch actually
+  // prepended anything.
+  const oldestSeq = messages.messages[0]?.seq
+  // True from the moment a finger touches the transcript until 200ms after it
+  // — or the momentum it left behind — stops moving things. Suppresses the
+  // pin-to-bottom effect for that whole window: a `scrollTop` write while iOS
+  // is still mid-gesture is what turns "content grew" into a fight the
+  // reader loses.
+  const interacting = useRef(false)
+  const interactionTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Frame ids `settle` (below) has scheduled and not yet run, so a later call
+  // can cancel them rather than pile a write from an earlier call on top of
+  // a newer one.
+  const pendingFrames = useRef<number[]>([])
+
+  const clearInteractionTimer = () => {
+    if (interactionTimer.current !== null) {
+      clearTimeout(interactionTimer.current)
+      interactionTimer.current = null
+    }
+  }
+
+  // Runs `fn` at commit, and again on each of the next two animation frames,
+  // cancelling whatever an earlier call left outstanding. A row inserted
+  // under `contain-intrinsic-size: auto none` (transcript.module.scss) has no
+  // remembered size until the engine's next lifecycle, so its real height is
+  // not knowable yet at commit time — but every write this is used for is
+  // idempotent (an offset delta that is zero once correct; a `scrollTop`
+  // already at the bottom), so re-running it once the real height lands
+  // costs nothing, which is what makes calling this unconditionally safe.
+  const settle = (fn: () => void) => {
+    for (const frame of pendingFrames.current) cancelAnimationFrame(frame)
+    fn()
+    const first = requestAnimationFrame(() => {
+      fn()
+      pendingFrames.current = [requestAnimationFrame(fn)]
+    })
+    pendingFrames.current = [first]
+  }
+
+  // (Re)arms the 200ms window that closes a touch interaction. iOS keeps
+  // delivering `scroll` events well after a finger lifts (momentum), so
+  // `onScroll` below restarts this timer for as long as that continues — only
+  // once nothing has moved for the full 200ms is the gesture actually over.
+  const armInteractionTimer = () => {
+    clearInteractionTimer()
+    interactionTimer.current = setTimeout(() => {
+      interactionTimer.current = null
+      interacting.current = false
+      // Whatever arrived while the guard was up is not left stranded
+      // off-screen — applied once here, not resumed as an ongoing follow:
+      // the pin effect below declined to run while this was armed, and
+      // nothing re-arms it except a genuine new arrival.
+      if (pinned.current) {
+        const el = scroller.current
+        if (el) {
+          settle(() => {
+            el.scrollTop = el.scrollHeight - el.clientHeight
+          })
+        }
+      }
+    }, 200)
+  }
 
   const requestOlder = () => {
     const el = scroller.current
@@ -77,57 +191,142 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
     // where fetching again would be a no-op.
     if (!el || loadingOlder.current || !messages.hasPreviousPage) return
     loadingOlder.current = true
-    pendingScrollAdjust.current = el.scrollHeight
+    anchor.current = pickAnchor(el)
     // A prepend is a scrollback read, never "stay pinned to the bottom" — even
     // a short first page that fits the whole viewport reads as `pinned` under
     // the at-bottom heuristic below, and without this it would get yanked
     // back down the moment older history landed above it.
     pinned.current = false
+    // The seq before the fetch, so `.finally()` below can tell whether it
+    // actually prepended anything.
+    const startedAtSeq = oldestSeq
     void messages.loadOlder().finally(() => {
       loadingOlder.current = false
+      // An empty page, or a fetch that failed, never moves the oldest cached
+      // seq — so the `oldestSeq`-keyed layout effect below never runs to
+      // consume and clear `anchor.current`, leaving `onScroll` to keep
+      // recomputing `offsetOf` against a row nothing will ever compensate for
+      // again. Read the cache directly rather than through `messages`: that
+      // binding is frozen at whichever render `requestOlder` was called from,
+      // and by the time this callback runs, react-query has already written
+      // the fetch's result into the cache (that write happens synchronously
+      // as part of settling this same promise) even if React has not
+      // re-rendered from it yet — so the cache, not this closure, is the
+      // only value guaranteed fresh here.
+      const cached = queryClient.getQueryData<MessagesData>(sessionMessagesKey(sessionId))
+      const freshOldestSeq = cached?.pages[0]?.messages[0]?.seq
+      if (freshOldestSeq === startedAtSeq) anchor.current = null
     })
   }
 
-  // The oldest loaded message's own seq, not `messages.messages` itself: it
-  // moves only when a page is *prepended* (a lower seq now leads the array),
-  // and is untouched by the stream appending at the tail — which is exactly
-  // the distinction that keeps this effect from ever firing for the wrong
-  // reason and fighting the pin-to-bottom ResizeObserver below.
-  const oldestSeq = messages.messages[0]?.seq
+  // The IntersectionObserver set up in the effect below is created once per
+  // sentinel mount, so it has to reach the *current* `requestOlder` (and the
+  // `messages` it closes over) through a ref rather than by closing over this
+  // render's copy directly — otherwise it would keep testing `hasPreviousPage`
+  // from whichever render happened to mount the sentinel, forever. Assigned
+  // directly during render rather than in an effect: the write is idempotent
+  // (the exact same function shape every time), so StrictMode's double render
+  // costs nothing, and nothing ever reads it during render — only from inside
+  // the observer's own callback, well after this render has committed.
+  const requestOlderRef = useRef(requestOlder)
+  requestOlderRef.current = requestOlder
+
+  // The zero-height marker rendered immediately before `.loadOlder`, only
+  // while `messages.hasPreviousPage` — so the observer disappears with the
+  // affordance instead of needing to be told to stop separately.
+  //
+  // The ref callback below only *records* the node — it does not build the
+  // IntersectionObserver itself. React attaches refs bottom-up within a
+  // commit (children before parents), so on a warm cache (`staleTime:
+  // Infinity` on both `useSession` and `useSessionMessages` — see those
+  // hooks) a revisited session's very first render already has data and
+  // mounts `.scroll`, the sentinel and the transcript all in the *same*
+  // commit. Reading `scroller.current` from the sentinel's own ref callback
+  // at that moment reads it before it has been attached — permanently null,
+  // since a memoised ref callback is never invoked again once the node's
+  // identity stops changing. An effect runs only after every ref in the
+  // commit, child and parent alike, has been attached, which is what makes
+  // reading `scroller.current` there safe. Do not move this back into the
+  // ref callback.
+  const [sentinelNode, setSentinelNode] = useState<HTMLDivElement | null>(null)
+
+  // `rootMargin` starts the fetch 300px before the sentinel is actually on
+  // screen, and an IntersectionObserver only fires on a *transition* into
+  // intersection, so bouncing at a top already reached (iOS rubber-band
+  // overscroll) cannot re-fire it — that re-arm rule is why no other
+  // threshold is needed. Kept as the explicit "load older" button's fallback
+  // for a page shorter than the 300px margin: the sentinel would never stop
+  // intersecting, and automatic loading quietly stops. Depends only on
+  // `sentinelNode`'s own identity, not `messages.hasPreviousPage` directly:
+  // the sentinel unmounts (node becomes `null`) exactly when that flag does,
+  // so the node's own transitions already carry it.
+  useEffect(() => {
+    const root = scroller.current
+    if (!sentinelNode || !root) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) requestOlderRef.current()
+      },
+      { root, rootMargin: '300px 0px 0px 0px', threshold: 0 },
+    )
+    observer.observe(sentinelNode)
+    return () => observer.disconnect()
+  }, [sentinelNode])
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: oldestSeq is the trigger, not a value read inside
   useLayoutEffect(() => {
     const el = scroller.current
-    const recorded = pendingScrollAdjust.current
-    pendingScrollAdjust.current = null
-    if (!el || recorded === null) return
+    const picked = anchor.current
+    anchor.current = null
+    if (!el || !picked) return
+    // The anchor row is gone rather than merely pushed down: an older page
+    // restructured it (see `pickAnchor` above). Nothing here can say by how
+    // much the reader's position actually moved, so this does nothing rather
+    // than guess.
+    if (!picked.el.isConnected) return
     // Inserting older messages above the viewport pushes everything already
-    // on screen down by exactly the height that was added; without this the
-    // reader is thrown backwards to whatever now occupies their old scroll
-    // position. Reassigning `scrollTop` here rather than trusting the
-    // browser's own scroll anchoring, which is not specified to survive a
-    // batch insert above the viewport.
-    el.scrollTop += el.scrollHeight - recorded
+    // on screen down; reassigning `scrollTop` here rather than trusting the
+    // browser's own scroll anchoring, which iOS Safari does not implement at
+    // all. `offsetOf` is recomputed fresh on every `settle` pass, which is
+    // what makes this idempotent: once the delta below is applied, the
+    // anchor row's offset equals `picked.offset` again and every later pass
+    // adds zero.
+    settle(() => {
+      el.scrollTop += offsetOf(picked.el, el) - picked.offset
+    })
   }, [oldestSeq])
 
-  // Keeps the transcript pinned to the bottom as its true height settles, not
+  // Keeps the transcript pinned to the bottom while its content changes, not
   // only when a message arrives: `.row`'s `content-visibility: auto` (see
   // transcript.module.scss) makes `scrollHeight` an *estimate* for a row never
-  // yet rendered, so a single `scrollTop = scrollHeight` on the old message
-  // count can land short of the real bottom once markdown or code in that row
-  // resolves taller than its placeholder. A `ResizeObserver` on the rendered
-  // content re-asserts the pin every time its layout height actually changes,
-  // which covers that settling as well as ordinary growth — and does so only
-  // while `pinned.current` is true, so a prepend (which clears it in
-  // `requestOlder` above, even from a short first page that reads as "at the
-  // bottom") is never mistaken for "content grew, so follow it".
-  const setContent = useCallback((node: HTMLDivElement | null) => {
-    if (!node) return
-    const observer = new ResizeObserver(() => {
-      const el = scroller.current
-      if (el && pinned.current) el.scrollTop = el.scrollHeight
+  // yet rendered, so `settle`'s later passes are what catch a row settling
+  // taller than its placeholder once markdown or code in it resolves.
+  //
+  // Keyed on `messages.messages`' own identity, not a ResizeObserver on the
+  // rendered content: `mergeSessionMessages`/`selectMessages`
+  // (lib/message-cache.ts, hooks/use-sessions.ts) hand back the exact same
+  // array reference for an arrival that changed nothing, so this never fires
+  // for a render that has nothing new for it. Given up along with the
+  // ResizeObserver it replaces: a row that grows *without* a new message
+  // arriving — a running task's progress note updating in place — is no
+  // longer followed. Re-adding that would mean re-adding the write-triggers-
+  // resize-triggers-write loop that made the phone case unreasonable in the
+  // first place.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: settle is a fresh closure every render (it closes only over refs, so it is never stale); messages.messages is the one thing that should retrigger this
+  useLayoutEffect(() => {
+    const el = scroller.current
+    if (!el || !pinned.current || interacting.current) return
+    settle(() => {
+      el.scrollTop = el.scrollHeight - el.clientHeight
     })
-    observer.observe(node)
-    return () => observer.disconnect()
+  }, [messages.messages])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: clearInteractionTimer is a fresh closure every render (it closes only over the interactionTimer ref); this runs once, on unmount, regardless
+  useEffect(() => {
+    return () => {
+      clearInteractionTimer()
+      for (const frame of pendingFrames.current) cancelAnimationFrame(frame)
+    }
   }, [])
 
   const onScroll = () => {
@@ -137,8 +336,21 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
     // so scrolling up to read something does not get yanked back by the next
     // message.
     pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
-    if (el.scrollTop < 80) requestOlder()
+    // Keeps the compensation anchored to whatever the reader is looking at
+    // right now, not to where they were the instant `requestOlder` fired —
+    // scrolling during a slow fetch is ordinary, and this is what preserves it.
+    if (anchor.current) anchor.current.offset = offsetOf(anchor.current.el, el)
+    // Momentum keeps delivering `scroll` events after a finger lifts; as long
+    // as they keep coming, the interaction is not actually over yet.
+    if (interacting.current) armInteractionTimer()
   }
+
+  const onTouchStart = () => {
+    interacting.current = true
+    clearInteractionTimer()
+  }
+  const onTouchEnd = () => armInteractionTimer()
+  const onTouchCancel = () => armInteractionTimer()
 
   const busy = BUSY.includes(session.data?.status ?? '')
 
@@ -265,7 +477,14 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
 
       {data.lastError && <Alert tone="danger">{data.lastError}</Alert>}
 
-      <div className={styles.scroll} ref={scroller} onScroll={onScroll}>
+      <div
+        className={styles.scroll}
+        ref={scroller}
+        onScroll={onScroll}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchCancel}
+      >
         {messages.isPending ? (
           <Spinner label={t('common.loading')} block />
         ) : messages.isError ? (
@@ -277,23 +496,26 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
             {apiErrorMessage(messages.error, t('sessions.transcript.loadFailed'))}
           </Alert>
         ) : (
-          <div ref={setContent}>
+          <div>
             {messages.hasPreviousPage && (
-              <div className={styles.loadOlder}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={requestOlder}
-                  loading={messages.isLoadingOlder}
-                  loadingLabel={t('sessions.transcript.loadingOlder')}
-                >
-                  {t('sessions.transcript.loadOlder')}
-                </Button>
-                {messages.isLoadOlderError && (
-                  <Alert tone="danger">{t('sessions.transcript.loadOlderFailed')}</Alert>
-                )}
-              </div>
+              <>
+                <div ref={setSentinelNode} className={styles.olderSentinel} />
+                <div className={styles.loadOlder}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={requestOlder}
+                    loading={messages.isLoadingOlder}
+                    loadingLabel={t('sessions.transcript.loadingOlder')}
+                  >
+                    {t('sessions.transcript.loadOlder')}
+                  </Button>
+                  {messages.isLoadOlderError && (
+                    <Alert tone="danger">{t('sessions.transcript.loadOlderFailed')}</Alert>
+                  )}
+                </div>
+              </>
             )}
             <Transcript messages={messages.messages} sessionId={sessionId} />
           </div>

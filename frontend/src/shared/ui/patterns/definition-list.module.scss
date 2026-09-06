@@ -23,6 +23,18 @@
   font-size: var(--text-sm);
   line-height: var(--leading-sm);
   color: var(--color-text-primary);
+
+  // A flex item's automatic minimum size defaults to its content's min-content
+  // size along the main axis. In `layoutInline` (session-card.tsx,
+  // project-overview.tsx, storage-page.tsx) that axis is horizontal, and this
+  // element sits beside a `.term` fixed at 8rem — without this, a long value
+  // refuses to shrink and pushes the row past its container instead of ever
+  // wrapping. `layoutStacked` (what `ToolInput` uses to hold a `<pre>`) puts
+  // this element on the cross axis instead, where `align-items: stretch`
+  // already gives it a definite width regardless of content — so this
+  // declaration is inert there, not doing any of the transcript's overflow
+  // work.
+  min-width: 0;
 }
 
 // Term and description sit on one row, term at a fixed width — for short
