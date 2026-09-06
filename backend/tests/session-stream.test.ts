@@ -76,17 +76,21 @@ const backlog = [
   { id: 'm1', sessionId: 's1', seq: 0, type: 'prompt', title: null, payload: { text: 'hi' } },
   { id: 'm2', sessionId: 's1', seq: 1, type: 'assistant', title: 'orchestrator: on it', payload: {} },
 ]
-// A fixed replacement object has to cover *every* export routes.ts imports:
-// bun swaps the whole module namespace, so an export the router names but this
-// object omits fails the import with "Export named 'x' not found" and the file
-// dies while loading, before any test runs. Adding a service export used by the
-// router means adding a stub here too — even one this file never calls.
+// Forwarded, not hand-rolled: resolving the real module *before* mock.module
+// runs is what keeps this registration from racing another file's real
+// `import()` of the same specifier — mock.module swaps the whole namespace
+// for the specifier process-wide (see bun's own docs), and if this file
+// registered a stub for it before the real module had ever been loaded
+// anywhere, whichever other file imports it "for real" afterwards (e.g.
+// session-messages.test.ts, exercising real pagination logic against its own
+// fake db) could be served *this* stub instead of the genuine implementation
+// it needs. Awaiting the real module first, then spreading it, means every
+// export this file does not care about keeps working correctly for whoever
+// else's import resolves to this registration.
+const realService = await import(`${B}/features/sessions/service.ts`)
 mock.module(`${B}/features/sessions/service.ts`, () => ({
+  ...realService,
   listMessages: async (_id: string, after: number) => backlog.filter((m) => m.seq > after),
-  listSessions: async () => [], getSession: async () => ({}), createSession: async () => ({}),
-  updateSession: async () => ({}), deleteSession: async () => {},
-  sendMessage: async () => ({}), interruptSession: async () => ({}),
-  exportSession: async () => ({}), sessionExportFileName: () => 'agentoo-session-00000000.json',
 }))
 
 const { sessionsRouter } = await import(`${B}/features/sessions/routes.ts`)

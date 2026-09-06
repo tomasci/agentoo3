@@ -48,6 +48,13 @@ LIBRARY_DIR="${LIBRARY_DIR:-$REPO_ROOT/library}"
 # be nonsense.
 SOURCES_DIR="${SOURCES_DIR:-$REPO_ROOT/sources}"
 
+# Session-scoped file attachments (uploads), sharded on disk by session id.
+# Pinned here like the other data directories rather than left to a backend
+# default, so ownership and permissions are the installer's to set — 0700, not
+# 0755 like the dirs above: see the data-directories section of
+# 68-setup-backend.sh for why.
+ATTACHMENTS_DIR="${ATTACHMENTS_DIR:-$REPO_ROOT/attachments}"
+
 # Generated ssh keys. Beside the other data directories rather than under a
 # home directory: the backend's fallback is ~/.ssh/agentoo, and ~ depends on who
 # is running — keys written while the services ran as root landed in

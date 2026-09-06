@@ -1,17 +1,13 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
+import { ActionsMenu, Alert, Badge, Button, Code, Spinner, StatusDot } from '@/shared/ui'
 import {
-  ActionsMenu,
-  Alert,
-  Badge,
-  Button,
-  Code,
-  Spinner,
-  Stack,
-  StatusDot,
-  Textarea,
-} from '@/shared/ui'
+  type AttachmentUpload,
+  useAttachmentUploads,
+  useDeleteSessionFile,
+  useSessionFiles,
+} from '../hooks/use-session-files'
 import { useSessionStream } from '../hooks/use-session-stream'
 import {
   useInterruptSession,
@@ -19,6 +15,7 @@ import {
   useSession,
   useSessionMessages,
 } from '../hooks/use-sessions'
+import { Composer } from './composer'
 import styles from './session-page.module.scss'
 import { Transcript } from './transcript'
 
@@ -49,6 +46,10 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // replays the entire transcript down the stream on top of the REST fetch
   // that just did the same thing.
   const { connected } = useSessionStream(sessionId, messages.isSuccess)
+
+  const files = useSessionFiles(sessionId)
+  const uploads = useAttachmentUploads(sessionId)
+  const deleteFile = useDeleteSessionFile(sessionId)
 
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -143,7 +144,9 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
 
   const submit = () => {
     const value = text.trim()
-    if (!value) return
+    // Also refuses while an upload is still in flight — see Composer's own
+    // "why is send disabled" line, which reads this same count.
+    if (!value || uploads.pendingCount > 0) return
     setError(null)
     // Cleared now, not in `onSuccess`. Enter sends and people carry straight on
     // typing the next prompt, but the clear used to wait for the round-trip to
@@ -152,13 +155,26 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
     // the first two or three characters of every message after the first.
     setText('')
     pinned.current = true
+    // Read before the mutation fires, not inside `onSuccess`: by the time a
+    // response comes back the reader may already have attached more files for
+    // their *next* prompt, and clearing those from the tray here would be wrong.
+    const attachedFileIds = uploads.uploads
+      .filter((u) => u.status === 'done' && u.serverFile)
+      .map((u) => u.serverFile?.id)
+      .filter((id): id is string => id !== undefined)
     send.mutate(
       { path: { id: sessionId }, body: { text: value } },
       {
+        onSuccess: () => {
+          if (attachedFileIds.length > 0) uploads.clearSent(attachedFileIds)
+        },
         onError: (e) => {
           // Hand the text back rather than losing it, but only into a box still
           // empty: by now the next prompt may already be part-typed, and
-          // restoring over that would repeat the bug this replaced.
+          // restoring over that would repeat the bug this replaced. The
+          // attachments stay in the tray untouched either way — the upload
+          // itself succeeded independently of this send, and is still there
+          // to pair with a retry.
           setText((current) => (current === '' ? value : current))
           setError(apiErrorMessage(e, t('sessions.sendFailed')))
         },
@@ -183,6 +199,19 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   ]
     .filter(Boolean)
     .join(' · ')
+
+  const removeUpload = (upload: AttachmentUpload) => {
+    if (upload.status === 'error') {
+      uploads.dismiss(upload.id)
+      return
+    }
+    if (upload.serverFile) {
+      deleteFile.mutate(
+        { path: { id: sessionId, fileId: upload.serverFile.id } },
+        { onSuccess: () => uploads.dismiss(upload.id) },
+      )
+    }
+  }
 
   return (
     <div className={styles.page}>
@@ -258,42 +287,39 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
                 )}
               </div>
             )}
-            <Transcript messages={messages.messages} />
+            <Transcript messages={messages.messages} sessionId={sessionId} />
           </div>
         )}
       </div>
 
-      <footer className={styles.composer}>
-        <Stack gap={2}>
-          {queueLine && <span className={styles.queueStatus}>{queueLine}</span>}
-          <div className={styles.composerRow}>
-            <div className={styles.textareaWrap}>
-              <Textarea
-                value={text}
-                autoresize
-                rows={2}
-                maxRows={8}
-                resize="none"
-                onChange={(e) => setText(e.target.value)}
-                placeholder={t('sessions.composerPlaceholder')}
-                onKeyDown={(e) => {
-                  // Enter sends; Shift+Enter is a newline. A prompt is usually one
-                  // line, and reaching for the mouse for every send is worse.
-                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                    e.preventDefault()
-                    submit()
-                  }
-                }}
-              />
-            </div>
-            <Button type="button" onClick={submit} disabled={send.isPending || !text.trim()}>
-              {send.isPending ? t('sessions.sending') : t('sessions.send')}
-            </Button>
-          </div>
-          {!data.orchestrator && <Alert tone="warning">{t('sessions.needsOrchestrator')}</Alert>}
-          {error && <Alert tone="danger">{error}</Alert>}
-        </Stack>
-      </footer>
+      <Composer
+        value={text}
+        onChange={setText}
+        onSubmit={submit}
+        onKeyDown={(e) => {
+          // Enter sends; Shift+Enter is a newline. A prompt is usually one
+          // line, and reaching for the mouse for every send is worse.
+          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+            e.preventDefault()
+            submit()
+          }
+        }}
+        sending={send.isPending}
+        canSend={!send.isPending && text.trim().length > 0 && uploads.pendingCount === 0}
+        orchestratorMissing={!data.orchestrator}
+        queueLine={queueLine}
+        error={error}
+        attachments={{
+          uploads: uploads.uploads,
+          usage: files.data?.usage,
+          usagePending: files.isPending,
+          usageError: files.isError ? files.error : undefined,
+          pendingCount: uploads.pendingCount,
+          onAttach: uploads.attach,
+          onCancel: uploads.cancel,
+          onRemove: removeUpload,
+        }}
+      />
     </div>
   )
 }

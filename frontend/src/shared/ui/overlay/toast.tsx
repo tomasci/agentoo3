@@ -5,18 +5,41 @@ import styles from './toast.module.scss'
 
 type ToastTone = 'success' | 'danger' | 'accent'
 
-// Zag's `type` field is a loosely-typed string (its built-ins are
-// success/error/loading/info/warning); our own tone vocabulary is passed
-// straight through rather than translated, so the value read back off each
-// toast in the render below is exactly what `toast()` was called with.
-const TONE_CLASS: Record<ToastTone, string> = {
-  success: styles.toneSuccess as string,
-  danger: styles.toneDanger as string,
-  accent: styles.toneAccent as string,
+/** The only three zag `type`s a toast from this app ever carries. Not
+ * `ToastOptions['type']` itself: that widens to `(string & {})` for
+ * autocomplete, which makes a `Record` over it meaningless — every key would
+ * have to be listed and none of them could be. */
+type ZagToastType = 'success' | 'error' | 'info'
+
+/**
+ * `@zag-js/toast`'s own `type` feeds straight into its internal priority
+ * table (`toast.store.ts`'s `priorities`), which recognises exactly five
+ * literal keys — success/error/loading/info/warning — and destructures
+ * `undefined` for anything else, throwing. Our tone vocabulary is a
+ * different, larger set (`danger`/`accent` name no zag key), so it is
+ * translated here rather than passed straight through as it used to be: that
+ * version crashed the instant any toast used a tone other than the default
+ * `'success'`, which nothing had yet, until this feature's first `tone:
+ * 'danger'` call turned up the bug.
+ */
+const TONE_TO_ZAG_TYPE: Record<ToastTone, ZagToastType> = {
+  success: 'success',
+  danger: 'error',
+  accent: 'info',
 }
 
-function isToastTone(value: ToastOptions['type']): value is ToastTone {
-  return value === 'success' || value === 'danger' || value === 'accent'
+// The reverse of the map above, read back off `item.type` to pick a CSS
+// class. Safe to key straight off zag's own three strings: `toast()` below
+// is the one producer of every toast in this app, so nothing ever hands
+// `ArkToaster` a `type` this map does not know about.
+const ZAG_TYPE_TONE_CLASS: Record<ZagToastType, string> = {
+  success: styles.toneSuccess as string,
+  error: styles.toneDanger as string,
+  info: styles.toneAccent as string,
+}
+
+function isZagToastType(value: ToastOptions['type']): value is ZagToastType {
+  return value === 'success' || value === 'error' || value === 'info'
 }
 
 /**
@@ -36,7 +59,7 @@ export function toast({
   tone?: ToastTone
   duration?: number
 }) {
-  toaster.create({ title, description, type: tone, duration })
+  toaster.create({ title, description, type: TONE_TO_ZAG_TYPE[tone], duration })
 }
 
 /**
@@ -55,7 +78,10 @@ export function Toaster() {
       <ArkToaster toaster={toaster} className={styles.root}>
         {(item: ToastOptions) => (
           <ArkToast.Root
-            className={cx(styles.toast, isToastTone(item.type) && TONE_CLASS[item.type])}
+            className={cx(
+              styles.toast,
+              isZagToastType(item.type) && ZAG_TYPE_TONE_CLASS[item.type],
+            )}
           >
             <ArkToast.Title className={styles.title}>{item.title}</ArkToast.Title>
             {item.description && (

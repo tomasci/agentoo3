@@ -106,6 +106,11 @@ const SEND_CLIENT = '@/shared/api/generated/clients/postApiSessionsIdMessages'
 // real HTTP request out of the test process — observed as an ECONNRESET before
 // this was mocked.
 const SESSION_CLIENT = '@/shared/api/generated/clients/getApiSessionsId'
+// The composer now mounts `useSessionFiles` unconditionally for its usage
+// line — nothing here exercises attachments, so an empty list is the whole
+// contract this needs to honour, but it still has to be mocked or every test
+// in this file fires a real request the test process has no backend for.
+const FILES_CLIENT = '@/shared/api/generated/clients/getApiSessionsIdFiles'
 
 // Saved before mocking so `afterAll` can restore them: `mock.module` replaces a
 // specifier for every future importer in the process, and `session-page.tsx`
@@ -113,6 +118,7 @@ const SESSION_CLIENT = '@/shared/api/generated/clients/getApiSessionsId'
 const realMessages = await import('../src/shared/api/generated/clients/getApiSessionsIdMessages')
 const realSend = await import('../src/shared/api/generated/clients/postApiSessionsIdMessages')
 const realSession = await import('../src/shared/api/generated/clients/getApiSessionsId')
+const realFiles = await import('../src/shared/api/generated/clients/getApiSessionsIdFiles')
 
 await mock.module(MESSAGES_CLIENT, () => ({
   getApiSessionsIdMessages: async (opts: { query?: Query }) => {
@@ -136,10 +142,17 @@ await mock.module(SESSION_CLIENT, () => ({
   getApiSessionsId: async () => ({ data: session() }),
 }))
 
+await mock.module(FILES_CLIENT, () => ({
+  getApiSessionsIdFiles: async () => ({
+    data: { files: [], usage: { fileCount: 0, sizeBytes: 0, maxFiles: 20, maxSessionBytes: 0 } },
+  }),
+}))
+
 afterAll(() => {
   mock.module(MESSAGES_CLIENT, () => realMessages)
   mock.module(SEND_CLIENT, () => realSend)
   mock.module(SESSION_CLIENT, () => realSession)
+  mock.module(FILES_CLIENT, () => realFiles)
 })
 
 /** happy-dom ships no EventSource, and the stream is not what this file is

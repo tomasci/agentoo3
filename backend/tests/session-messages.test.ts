@@ -41,10 +41,16 @@ const fullTranscript = (): Row[] => Array.from({ length: TRANSCRIPT_LEN }, (_, s
 
 let sessionRow: Row | undefined
 let transcript: Row[]
+// Empty by default: every test below exercises pagination, not the `files`
+// field service.ts now attaches — see session-message-files.test.ts for that.
+let messageFileLinks: Row[] = []
+let sessionFileRows: Row[] = []
 
 beforeEach(() => {
   sessionRow = sessionRowFor(SESSION_ID)
   transcript = fullTranscript()
+  messageFileLinks = []
+  sessionFileRows = []
 })
 
 // --- a fake db that actually filters, sorts and truncates ---------------------
@@ -80,6 +86,17 @@ function textOf(node: { queryChunks: unknown[] }): string {
     .join('')
 }
 
+/** Every bound value under an `inArray(...)` node — its params sit in a
+ * nested array chunk rather than alongside the column, so a plain `find`
+ * (which collectLeaves below uses for a single-value condition) misses them. */
+function inArrayValues(node: unknown): unknown[] {
+  if (!isSqlNode(node)) return []
+  return node.queryChunks
+    .flatMap((chunk) => (Array.isArray(chunk) ? chunk : [chunk]))
+    .filter(isParam)
+    .map((p) => p.value)
+}
+
 type Leaf = { col: string; op: '=' | '>' | '<'; value: unknown }
 
 /** Every `col op value` leaf reachable under a where/order argument. */
@@ -102,6 +119,16 @@ function isDescOrder(node: unknown): boolean {
 
 function rowsFor(table: string, whereNode: unknown, orderArg: unknown, limitN: number | null): Row[] {
   if (table === 'sessions') return sessionRow ? [sessionRow] : []
+  // service.ts's filesForMessages() — a message's attachments, resolved off
+  // message_files joined (in application code, not SQL) to session_files.
+  if (table === 'message_files') {
+    const ids = inArrayValues(whereNode)
+    return messageFileLinks.filter((r) => ids.includes(r.messageId))
+  }
+  if (table === 'session_files') {
+    const ids = inArrayValues(whereNode)
+    return sessionFileRows.filter((r) => ids.includes(r.id))
+  }
   if (table !== 'messages') throw new Error(`fake db: unexpected table ${table}`)
 
   const cursor = collectLeaves(whereNode).find((l) => l.col === 'seq')
@@ -154,14 +181,23 @@ mock.module(`${B}/db/client.ts`, () => ({
 
 // service.ts imports these at module scope; stubbed so the import does not
 // try to reach a real Redis, same reasoning as session-export.test.ts.
+// Mocked with the full shape `@/queue/index.ts` actually exports (including
+// the attachments-gc queue), not just what this file's own code path needs —
+// an incomplete mock here poisons the shared module registry for *any* other
+// file whose import chain reaches the real module while this one is loaded
+// (see session-recovery.test.ts's identical mock for the same reason).
 mock.module(`${B}/queue/index.ts`, () => ({
   QUEUE_PROJECT_SETUP: 'project-setup',
   QUEUE_SESSION_RUN: 'session-run',
+  QUEUE_ATTACHMENTS_GC: 'attachments-gc',
   redisConnection: () => ({}),
   projectSetupQueue: {},
   sessionRunQueue: {},
+  attachmentsGcQueue: { getJobs: async () => [] },
   enqueueProjectSetup: async () => ({}),
   enqueueSessionRun: async () => ({}),
+  enqueueAttachmentsGc: async () => ({}),
+  ensureAttachmentsGcSchedule: async () => {},
 }))
 
 const { listMessagePage } = await import(`${B}/features/sessions/service.ts`)
@@ -263,6 +299,76 @@ test('an unknown session id is a 404, not an empty page', async () => {
   )
   expect((error as Error).message).toBe('Session not found')
   expect((error as { status: number }).status).toBe(404)
+})
+
+// --- Gap A: each message's `files`, resolved from message_files ---------------
+//
+// Everything above is pagination; this is the join service.ts now does on
+// top of it. message_files/session_files use the same node-walking fake as
+// `sessions`/`messages` above (see inArrayValues), so `inArray(...)` is
+// exercised for real rather than assumed.
+
+test('a message with no attachments carries an empty files array, not undefined', async () => {
+  const page = await listMessagePage(SESSION_ID, { limit: 1 })
+  expect(page.messages[0]?.files).toEqual([])
+})
+
+test('a message that announced a live file resolves it off session_files', async () => {
+  const id = message(9).id
+  messageFileLinks = [{ messageId: id, fileId: 'f1', originalFilename: 'error.log' }]
+  sessionFileRows = [
+    {
+      id: 'f1',
+      originalFilename: 'error.log',
+      mimeType: 'text/plain',
+      sizeBytes: 2048,
+      status: 'ready',
+    },
+  ]
+
+  const page = await listMessagePage(SESSION_ID, { limit: 1 })
+  expect(page.messages[0]?.files).toEqual([
+    { id: 'f1', originalFilename: 'error.log', mimeType: 'text/plain', sizeBytes: 2048, status: 'ready' },
+  ])
+})
+
+test('files for one message never leak onto another', async () => {
+  messageFileLinks = [{ messageId: message(9).id, fileId: 'f1', originalFilename: 'only-on-9.log' }]
+  sessionFileRows = [
+    { id: 'f1', originalFilename: 'only-on-9.log', mimeType: 'text/plain', sizeBytes: 1, status: 'ready' },
+  ]
+
+  const page = await listMessagePage(SESSION_ID, { limit: 2 })
+  const [eight, nine] = page.messages
+  expect(eight?.seq).toBe(8)
+  expect(eight?.files).toEqual([])
+  expect(nine?.seq).toBe(9)
+  expect(nine?.files).toHaveLength(1)
+})
+
+// --- the removed-file placeholder (acceptance criterion 11) -------------------
+
+test('a hard-deleted file renders a placeholder instead of vanishing from the message', async () => {
+  // fileId null: ON DELETE SET NULL cleared it when session_files was hard
+  // deleted (gc.ts's cleanup / reconcile.ts's remediateAnomaly), but the link
+  // row survives and still carries the denormalised name.
+  messageFileLinks = [{ messageId: message(9).id, fileId: null, originalFilename: 'attached.log' }]
+  sessionFileRows = []
+
+  const page = await listMessagePage(SESSION_ID, { limit: 1 })
+  expect(page.messages[0]?.files).toEqual([
+    { id: null, originalFilename: 'attached.log', mimeType: null, sizeBytes: null, status: null },
+  ])
+})
+
+test('a link written before originalFilename existed still renders a placeholder, unnamed', async () => {
+  messageFileLinks = [{ messageId: message(9).id, fileId: null, originalFilename: null }]
+  sessionFileRows = []
+
+  const page = await listMessagePage(SESSION_ID, { limit: 1 })
+  expect(page.messages[0]?.files).toEqual([
+    { id: null, originalFilename: null, mimeType: null, sizeBytes: null, status: null },
+  ])
 })
 
 // --- the route: query params reach listMessagePage, and zod guards `limit` ----

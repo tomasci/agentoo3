@@ -4,6 +4,7 @@ import { env } from '@/env'
 
 export const QUEUE_PROJECT_SETUP = 'project-setup'
 export const QUEUE_SESSION_RUN = 'session-run'
+export const QUEUE_ATTACHMENTS_GC = 'attachments-gc'
 
 export interface ProjectSetupJob {
   projectId: string
@@ -11,6 +12,13 @@ export interface ProjectSetupJob {
 
 export interface SessionRunJob {
   sessionId: string
+}
+
+export interface AttachmentsGcJob {
+  // 'scheduled' is the hourly upsertJobScheduler tick; 'manual' is the UI's
+  // "run check now"; 'cleanup' resolves what the last check found rather than
+  // scanning again — see gc.ts for why those are two different passes.
+  reason: 'scheduled' | 'manual' | 'cleanup'
 }
 
 // BullMQ requires maxRetriesPerRequest: null on the connection it blocks on.
@@ -48,4 +56,36 @@ export async function enqueueSessionRun(job: SessionRunJob) {
   // Ordering is enforced instead by the session's own status: a turn is only
   // claimed out of 'queued', and the claim is a conditional UPDATE.
   return sessionRunQueue.add('turn', job)
+}
+
+// A third queue rather than a second job type on session-run: gc walks the
+// whole storage tree, not one session, and concurrency: 1 below only makes
+// sense scoped to its own queue — sharing session-run's queue would tie its
+// concurrency to WORKER_CONCURRENCY, which this deliberately does not.
+export const attachmentsGcQueue = new Queue<AttachmentsGcJob>(QUEUE_ATTACHMENTS_GC, {
+  connection: redisConnection(),
+  defaultJobOptions: {
+    attempts: 1,
+    removeOnComplete: { count: 50 },
+    removeOnFail: { count: 50 },
+  },
+})
+
+export async function enqueueAttachmentsGc(job: AttachmentsGcJob) {
+  return attachmentsGcQueue.add('gc', job)
+}
+
+/**
+ * Register the hourly schedule. Idempotent by construction — BullMQ's
+ * `upsertJobScheduler` replaces the existing schedule by this id rather than
+ * adding a second one — so calling this on every worker boot is correct and
+ * self-healing rather than something that needs its own "already scheduled"
+ * check.
+ */
+export async function ensureAttachmentsGcSchedule() {
+  await attachmentsGcQueue.upsertJobScheduler(
+    'attachments-gc-hourly',
+    { every: env.ATTACHMENTS_GC_INTERVAL_MS },
+    { name: 'gc', data: { reason: 'scheduled' } },
+  )
 }

@@ -176,7 +176,7 @@ test('the workspace opens as one system tab, showing system navigation only', as
   expect(tabs()).toEqual(['System'])
   expect(activeTab()).toBe('System')
   // Library, ssh keys, configuration — and nothing about any project.
-  expect(navLinks()).toEqual(['/library', '/library', '/ssh-keys', '/settings'])
+  expect(navLinks()).toEqual(['/library', '/library', '/ssh-keys', '/storage', '/settings'])
   expect(navLinks().some((href) => href?.startsWith('/projects'))).toBe(false)
   expect(problems).toEqual([])
 })

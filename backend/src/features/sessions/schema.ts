@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { sessionFileStatusSchema } from '@/features/attachments/schema'
 import { checkBranchName } from '@/lib/branch-name'
 
 export const sessionStatusSchema = z.enum([
@@ -97,6 +98,35 @@ export const updateSessionSchema = z
   .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update' })
 export type UpdateSessionInput = z.infer<typeof updateSessionSchema>
 
+/** One attachment a message carried, resolved from message_files joined to
+ * session_files — see message_files in db/schema.ts for why id can be null. */
+export const messageFileSchema = z.object({
+  id: z
+    .string()
+    .uuid()
+    .nullable()
+    .openapi({
+      description:
+        "Null once this file's row has been hard-deleted (storage cleanup can remove a " +
+        'dangling_row or a checksum_mismatch outright) — the message still records that a file ' +
+        'was here even though there is nothing left to fetch it by',
+    }),
+  originalFilename: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        'The name at announcement time, kept even after the file row is gone. Null only for a ' +
+        'link written before this field existed, whose file has since also disappeared.',
+    }),
+  mimeType: z.string().nullable().openapi({ description: 'Null when id is null — see id' }),
+  sizeBytes: z.number().int().nullable().openapi({ description: 'Null when id is null — see id' }),
+  status: sessionFileStatusSchema
+    .nullable()
+    .openapi({ description: 'Null when id is null — see id' }),
+})
+export type MessageFileDto = z.infer<typeof messageFileSchema>
+
 export const sessionMessageSchema = z.object({
   id: z.string().uuid(),
   sessionId: z.string().uuid(),
@@ -113,6 +143,11 @@ export const sessionMessageSchema = z.object({
   title: z.string().nullable().openapi({ description: 'Heading for the collapsed row' }),
   pending: z.boolean(),
   payload: z.unknown().openapi({ description: 'The SDK message, verbatim' }),
+  files: z.array(messageFileSchema).openapi({
+    description:
+      "Attachments this prompt's announcement carried, empty for every message that is not " +
+      'the one that first announced a file — see message_files in db/schema.ts',
+  }),
   createdAt: z.string(),
 })
 export type SessionMessageDto = z.infer<typeof sessionMessageSchema>

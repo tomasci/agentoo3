@@ -1,5 +1,6 @@
 import { memo, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { formatBytes } from '@/features/system'
 import {
   Alert,
   Button,
@@ -7,13 +8,16 @@ import {
   Code,
   Collapsible,
   DefinitionList,
+  Dialog,
   EmptyState,
   Markdown,
 } from '@/shared/ui'
 import type { SessionMessage } from '../hooks/use-sessions'
+import { isInlineImage, sessionFileUrl } from '../lib/attachments'
 import { formatFullTime, formatTime } from '../lib/format'
 import {
   buildTranscript,
+  type MessageFile,
   type ToolResult,
   type TranscriptNode,
   textOf,
@@ -196,7 +200,115 @@ function Timestamp({ createdAt, className }: { createdAt: string; className?: st
   )
 }
 
-function Node({ node }: { node: TranscriptNode }) {
+/** A `MessageFile` entry once every field the wire lets go null is actually
+ * present — the shape `AttachmentItem` below needs to render something real. */
+interface ReadyAttachment {
+  id: string
+  originalFilename: string
+  mimeType: string
+  sizeBytes: number
+}
+
+/** Narrows one `message.files` entry to `ReadyAttachment`, or `null` for
+ * anything the "file removed" placeholder has to cover instead: a
+ * hard-deleted file (`id`/`mimeType`/`sizeBytes`/`status` all null together),
+ * or one merely flipped to `missing`/`unreadable` by a GC pass that has not
+ * (yet) deleted its row. */
+function readyAttachment(file: MessageFile): ReadyAttachment | null {
+  if (
+    file.status !== 'ready' ||
+    file.id === null ||
+    file.mimeType === null ||
+    file.sizeBytes === null
+  ) {
+    return null
+  }
+  // originalFilename is nullable on the wire independently of the rest, but
+  // the one case the schema names for that — a link written before the
+  // column existed, whose file has since also disappeared — already fails
+  // the `status !== 'ready'` check above, so this is a fallback for an
+  // invariant break, not a path this app expects to take.
+  return {
+    id: file.id,
+    originalFilename: file.originalFilename ?? file.id,
+    mimeType: file.mimeType,
+    sizeBytes: file.sizeBytes,
+  }
+}
+
+/**
+ * One file a prompt carried. An image gets a thumbnail that opens a `Dialog`
+ * lightbox; anything else is a chip linking at the hand-built download route
+ * (`lib/attachments.ts` — the OpenAPI router does not carry this one, see its
+ * own comment for why).
+ */
+function AttachmentItem({ sessionId, file }: { sessionId: string; file: ReadyAttachment }) {
+  const [open, setOpen] = useState(false)
+  // Flips true only if the browser itself fails to load the thumbnail — a
+  // GC race between the file list request and the download, say. Never
+  // trusted as the sole signal that a file is gone (see `readyAttachment`
+  // above); this only ever guards against a broken `<img>`, which the "never
+  // a broken image" acceptance criterion is explicitly about.
+  const [broken, setBroken] = useState(false)
+  const url = sessionFileUrl(sessionId, file.id)
+
+  if (isInlineImage(file.mimeType) && !broken) {
+    return (
+      <>
+        <button
+          type="button"
+          className={styles.attachmentThumbButton}
+          onClick={() => setOpen(true)}
+        >
+          <img
+            src={url}
+            alt={file.originalFilename}
+            className={styles.attachmentThumb}
+            onError={() => setBroken(true)}
+          />
+        </button>
+        <Dialog open={open} onOpenChange={setOpen} title={file.originalFilename} size="lg">
+          <img src={url} alt={file.originalFilename} className={styles.attachmentFull} />
+        </Dialog>
+      </>
+    )
+  }
+
+  return (
+    <a className={styles.attachmentChip} href={url} download={file.originalFilename}>
+      <span className={styles.attachmentName}>{file.originalFilename}</span>
+      <span className={styles.attachmentSize}>{formatBytes(file.sizeBytes)}</span>
+    </a>
+  )
+}
+
+/**
+ * The attachments a `prompt` node carried — read straight off `message.files`,
+ * resolved server-side from `message_files` (see `buildTranscript`). No
+ * in-memory pairing and no second fetch: a reload, a second tab and a prompt
+ * loaded from history all render from the exact same data a live send does.
+ */
+function PromptAttachments({ sessionId, files }: { sessionId: string; files: MessageFile[] }) {
+  const { t } = useTranslation()
+
+  return (
+    <div className={styles.attachments}>
+      {files.map((file, i) => {
+        const ready = readyAttachment(file)
+        if (!ready) {
+          return (
+            <span key={file.id ?? `removed-${i}`} className={styles.attachmentRemoved}>
+              {t('sessions.attachments.removed')}
+            </span>
+          )
+        }
+        return <AttachmentItem key={ready.id} sessionId={sessionId} file={ready} />
+      })}
+    </div>
+  )
+}
+
+function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) {
   const { t } = useTranslation()
 
   if (node.kind === 'prompt') {
@@ -207,6 +319,7 @@ function Node({ node }: { node: TranscriptNode }) {
           <Timestamp createdAt={node.createdAt} className={styles.promptTime} />
         </span>
         {node.text}
+        {node.files.length > 0 && <PromptAttachments sessionId={sessionId} files={node.files} />}
       </div>
     )
   }
@@ -266,7 +379,7 @@ function Node({ node }: { node: TranscriptNode }) {
       {node.children.length > 0 && (
         <div className={styles.children}>
           {node.children.map((child) => (
-            <Node key={child.id} node={child} />
+            <Node key={child.id} node={child} sessionId={sessionId} />
           ))}
         </div>
       )}
@@ -274,7 +387,13 @@ function Node({ node }: { node: TranscriptNode }) {
   )
 }
 
-function TranscriptView({ messages }: { messages: SessionMessage[] }) {
+function TranscriptView({
+  messages,
+  sessionId = '',
+}: {
+  messages: SessionMessage[]
+  sessionId?: string
+}) {
   const { t } = useTranslation()
   // Keyed on the array identity, which React Query keeps stable between
   // fetches: rebuilding the tree is O(every message in the session), and it was
@@ -304,7 +423,7 @@ function TranscriptView({ messages }: { messages: SessionMessage[] }) {
         // size containment freezes it at the 6rem placeholder, clipping
         // whatever the child actually renders.
         <div key={node.id} className={styles.row}>
-          <Node node={node} />
+          <Node node={node} sessionId={sessionId} />
         </div>
       ))}
     </div>

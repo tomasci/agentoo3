@@ -17,8 +17,22 @@ export interface ToolResult {
   isError: boolean
 }
 
+/** One entry of a `prompt` message's own `files` array — see `files` on
+ * `sessionMessageSchema` in openapi.json. `id`/`mimeType`/`sizeBytes`/`status`
+ * are null together once the file's row has been hard-deleted; the link row
+ * keeps `originalFilename` denormalised even then, so the transcript can still
+ * say *which* file was here. */
+export type MessageFile = SessionMessage['files'][number]
+
 export type TranscriptNode =
-  | { kind: 'prompt'; id: string; seq: number; text: string; createdAt: string }
+  | {
+      kind: 'prompt'
+      id: string
+      seq: number
+      text: string
+      files: MessageFile[]
+      createdAt: string
+    }
   | {
       kind: 'event'
       id: string
@@ -133,6 +147,16 @@ export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
         id: message.id,
         seq: message.seq,
         text: str(payload, 'text') ?? '',
+        // `?? []`: the REST page this hook's own history load reads always
+        // carries this (see the schema), but a prompt appended live over the
+        // stream is published from the raw `messages` row the moment it is
+        // written (session-run.worker.ts publishes `message: row`) — before
+        // the same worker links `message_files` a little later, and nothing
+        // re-publishes the message once it does. So a freshly sent prompt in
+        // *this* tab shows no attachments until the transcript is next
+        // fetched from the server (reload, another tab); this is what keeps
+        // that gap from crashing the row instead.
+        files: message.files ?? [],
         createdAt: message.createdAt,
       })
       continue

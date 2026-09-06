@@ -142,6 +142,9 @@ function rowsFor(table: string, aggregate: boolean, sortedBySeq: boolean): Row[]
       ? [...transcript].sort((a, b) => (a.seq as number) - (b.seq as number))
       : transcript
   }
+  // service.ts's filesForMessages() — nothing exported here carries an
+  // attachment, so an empty link table is enough to answer it honestly.
+  if (table === 'message_files') return []
   throw new Error(`fake db: unexpected table ${table}`)
 }
 
@@ -177,14 +180,23 @@ mock.module(`${B}/db/client.ts`, () => ({
 // there; the export path never touches it, so it is stubbed rather than pointed
 // at a server. Every export the service chain names has to be present, or the
 // import fails while loading.
+// Mocked with the full shape `@/queue/index.ts` actually exports (including
+// the attachments-gc queue), not just what this file's own code path needs —
+// an incomplete mock here poisons the shared module registry for *any* other
+// file whose import chain reaches the real module while this one is loaded
+// (see session-recovery.test.ts's identical mock for the same reason).
 mock.module(`${B}/queue/index.ts`, () => ({
   QUEUE_PROJECT_SETUP: 'project-setup',
   QUEUE_SESSION_RUN: 'session-run',
+  QUEUE_ATTACHMENTS_GC: 'attachments-gc',
   redisConnection: () => ({}),
   projectSetupQueue: {},
   sessionRunQueue: {},
+  attachmentsGcQueue: { getJobs: async () => [] },
   enqueueProjectSetup: async () => ({}),
   enqueueSessionRun: async () => ({}),
+  enqueueAttachmentsGc: async () => ({}),
+  ensureAttachmentsGcSchedule: async () => {},
 }))
 
 const { exportSession, getSession, sessionExportFileName } = await import(

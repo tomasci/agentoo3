@@ -34,6 +34,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   log_info "[dry-run] would run 'bun install' and migrations in $BACKEND_DIR"
   log_info "[dry-run] would create $PROJECTS_DIR, $SOURCES_DIR and $LIBRARY_DIR"
   log_info "[dry-run] would create $SSH_KEYS_DIR (0700) and adopt any keys from ~/.ssh/$APP_NAME"
+  log_info "[dry-run] would create $ATTACHMENTS_DIR (0700) for session-scoped file attachments"
   log_info "[dry-run] would install ${APP_NAME}-api and ${APP_NAME}-worker services"
   exit 0
 fi
@@ -45,7 +46,7 @@ run_as_app() { as_user "$APP_USER" env HOME="$app_home" PATH="/usr/local/bin:/us
 # a root-owned checkout and node_modules behind, and bun cannot relink into
 # those as another user.
 reconcile_ownership "$APP_USER" "$REPO_ROOT" "$PROJECTS_DIR" "$SOURCES_DIR" "$LIBRARY_DIR" \
-  "$SSH_KEYS_DIR"
+  "$SSH_KEYS_DIR" "$ATTACHMENTS_DIR"
 
 # --- dependencies -------------------------------------------------------------
 log_info "Installing dependencies (bun install)"
@@ -109,6 +110,34 @@ as_root chown -R "$APP_USER:$APP_USER" "$SSH_KEYS_DIR"
 as_root find "$SSH_KEYS_DIR" -type f ! -name '*.pub' -exec chmod 0600 {} + 2>/dev/null || true
 as_root find "$SSH_KEYS_DIR" -type f -name '*.pub' -exec chmod 0644 {} + 2>/dev/null || true
 
+# 0700, same as SSH_KEYS_DIR but for the opposite direction: this holds
+# user-uploaded session data, and nginx (which runs as www-data) has no
+# business reading another account's uploads.
+if [[ ! -d "$ATTACHMENTS_DIR" ]]; then
+  as_root install -d -o "$APP_USER" -g "$APP_USER" -m 0700 "$ATTACHMENTS_DIR"
+  log_ok "Created $ATTACHMENTS_DIR"
+else
+  as_root chmod 0700 "$ATTACHMENTS_DIR"
+fi
+
+# Advisory only: there is no separate volume and no quota tooling on this
+# host, and silently installing either would be a bigger decision than a setup
+# step gets to make. All this can safely do is say so when the risky default
+# is what actually happened, so the app-level caps (ATTACHMENT_MAX_BYTES and
+# friends) are the operator's only limit unless they act on the warning.
+attachments_mount="$(df -P "$ATTACHMENTS_DIR" 2>/dev/null | awk 'NR==2 {print $6}')"
+pg_datadir=""
+if have psql && id -u postgres >/dev/null 2>&1; then
+  pg_datadir="$(as_user postgres psql -X -tAc 'show data_directory' 2>/dev/null || true)"
+fi
+pg_mount="$(df -P "${pg_datadir:-/}" 2>/dev/null | awk 'NR==2 {print $6}')"
+if [[ -n "$attachments_mount" && "$attachments_mount" == "$pg_mount" ]]; then
+  log_warn "ATTACHMENTS_DIR shares a filesystem with Postgres's data directory (${pg_datadir:-/})."
+  log_warn "ATTACHMENT_MAX_BYTES / ATTACHMENTS_SESSION_MAX_BYTES / ATTACHMENTS_TOTAL_MAX_BYTES are"
+  log_warn "the only limit on a runaway upload here — mount attachments separately or set an"
+  log_warn "XFS/ext4 project quota if the database sharing that disk matters to you."
+fi
+
 # Seed example agents and skills, but only into an empty library — never
 # overwrite prompts the operator has written.
 if [[ -d "$REPO_ROOT/library.example" ]] \
@@ -138,6 +167,7 @@ env_set "$ENV_FILE" PROJECTS_DIR "$PROJECTS_DIR"
 env_set "$ENV_FILE" LIBRARY_DIR  "$LIBRARY_DIR"
 env_set "$ENV_FILE" SOURCES_DIR  "$SOURCES_DIR"
 env_set "$ENV_FILE" SSH_KEYS_DIR "$SSH_KEYS_DIR"
+env_set "$ENV_FILE" ATTACHMENTS_DIR "$ATTACHMENTS_DIR"
 env_set "$ENV_FILE" WORKER_CONCURRENCY "$WORKER_CONCURRENCY"
 env_fix_owner "$ENV_FILE"
 
