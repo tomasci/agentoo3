@@ -39,7 +39,7 @@ const STATUS_TONE = {
  * document: where the engine's own scroll anchoring has already compensated
  * for a prepend (Chrome, Firefox), this delta comes out zero and the caller's
  * write is a no-op. That is what makes reapplying it safe everywhere —
- * `settle`'s later passes, and `onScroll` re-recording it while a fetch is
+ * `hold`'s later passes, and `onScroll` re-recording it while a fetch is
  * still in flight — on both the browsers that anchor and the one that (as of
  * this writing) does not.
  */
@@ -126,7 +126,7 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // reader loses.
   const interacting = useRef(false)
   const interactionTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Frame ids `settle` (below) has scheduled and not yet run, so a later call
+  // Frame ids `hold` (below) has scheduled and not yet run, so a later call
   // can cancel them rather than pile a write from an earlier call on top of
   // a newer one.
   const pendingFrames = useRef<number[]>([])
@@ -138,22 +138,53 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
     }
   }
 
-  // Runs `fn` at commit, and again on each of the next two animation frames,
-  // cancelling whatever an earlier call left outstanding. A row inserted
-  // under `contain-intrinsic-size: auto none` (transcript.module.scss) has no
-  // remembered size until the engine's next lifecycle, so its real height is
-  // not knowable yet at commit time — but every write this is used for is
-  // idempotent (an offset delta that is zero once correct; a `scrollTop`
-  // already at the bottom), so re-running it once the real height lands
-  // costs nothing, which is what makes calling this unconditionally safe.
-  const settle = (fn: () => void) => {
+  // Re-asserts `correct` at commit and on every animation frame after, until
+  // it reports nothing left to correct for two frames running, or 500ms have
+  // passed since the hold started — whichever comes first, cancelling
+  // whatever an earlier call left outstanding. A row inserted under
+  // `content-visibility: auto` (transcript.module.scss) contributes its 6rem
+  // placeholder at commit and its real height only once the engine judges it
+  // relevant and renders it — which takes an unpredictable number of frames,
+  // because every correction moves the viewport, which changes which rows
+  // now fall inside the relevance margin. A fixed number of passes cannot
+  // bound that; only "keep going until it stops mattering" can. `correct`
+  // performs one write and reports how many pixels it actually moved the
+  // scroller by, 0 once there is nothing left to do, which is what lets both
+  // callers below share this without either one having to know how many
+  // passes the other needs.
+  const hold = (correct: () => number) => {
     for (const frame of pendingFrames.current) cancelAnimationFrame(frame)
-    fn()
-    const first = requestAnimationFrame(() => {
-      fn()
-      pendingFrames.current = [requestAnimationFrame(fn)]
+    const deadline = Date.now() + 500
+    let stableFrames = 0
+    const step = () => {
+      stableFrames = correct() === 0 ? stableFrames + 1 : 0
+      if (stableFrames >= 2 || Date.now() >= deadline) {
+        pendingFrames.current = []
+        return
+      }
+      pendingFrames.current = [requestAnimationFrame(step)]
+    }
+    step()
+  }
+
+  // Shared by both places that pin the transcript to the bottom — the effect
+  // below, and the interaction timer's own catch-up once a gesture ends —
+  // so the per-frame `interacting` re-check only has to be gotten right once.
+  const holdAtBottom = () => {
+    const el = scroller.current
+    if (!el) return
+    hold(() => {
+      // Checked every frame, not just before the hold starts: a finger can
+      // touch down while a hold from an earlier arrival is still running,
+      // and writing `scrollTop` under it is exactly what turns "content
+      // grew" into a fight the reader loses (see `interacting`'s comment
+      // above) — the gate this replaces used to check that once, at commit,
+      // which an unbounded hold can no longer get away with.
+      if (interacting.current) return 0
+      const before = el.scrollTop
+      el.scrollTop = el.scrollHeight - el.clientHeight
+      return el.scrollTop - before
     })
-    pendingFrames.current = [first]
   }
 
   // (Re)arms the 200ms window that closes a touch interaction. iOS keeps
@@ -169,14 +200,7 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
       // off-screen — applied once here, not resumed as an ongoing follow:
       // the pin effect below declined to run while this was armed, and
       // nothing re-arms it except a genuine new arrival.
-      if (pinned.current) {
-        const el = scroller.current
-        if (el) {
-          settle(() => {
-            el.scrollTop = el.scrollHeight - el.clientHeight
-          })
-        }
-      }
+      if (pinned.current) holdAtBottom()
     }, 200)
   }
 
@@ -287,19 +311,40 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
     // Inserting older messages above the viewport pushes everything already
     // on screen down; reassigning `scrollTop` here rather than trusting the
     // browser's own scroll anchoring, which iOS Safari does not implement at
-    // all. `offsetOf` is recomputed fresh on every `settle` pass, which is
-    // what makes this idempotent: once the delta below is applied, the
-    // anchor row's offset equals `picked.offset` again and every later pass
-    // adds zero.
-    settle(() => {
+    // all. `offsetOf` is recomputed fresh on every `hold` pass, which is what
+    // makes this idempotent: once the delta below is applied, the anchor
+    // row's offset equals `picked.offset` again and every later pass adds
+    // zero — until a placeholder resolves to its real height and throws the
+    // delta off again, which is exactly what `hold` keeps re-correcting for.
+    let lastWritten = el.scrollTop
+    hold(() => {
+      // The anchor row can itself be removed mid-hold — a second older page
+      // landing inside the same 500ms window, restructuring the tree again
+      // (see `pickAnchor` above). Nothing left to correct against, so this
+      // is where the hold gives up rather than measuring a detached node.
+      if (!picked.el.isConnected) return 0
+      // The reader moved the scrollbar themselves since the last write —
+      // under momentum, or simply reading on — so the delta below has to be
+      // measured against *their* position, not the one recorded when this
+      // hold started or last corrected. Reporting the drift itself as
+      // "moved" is what keeps a genuine rebase from ever reading as settled.
+      if (el.scrollTop !== lastWritten) {
+        const drift = el.scrollTop - lastWritten
+        picked.offset = offsetOf(picked.el, el)
+        lastWritten = el.scrollTop
+        return drift
+      }
+      const before = el.scrollTop
       el.scrollTop += offsetOf(picked.el, el) - picked.offset
+      lastWritten = el.scrollTop
+      return lastWritten - before
     })
   }, [oldestSeq])
 
   // Keeps the transcript pinned to the bottom while its content changes, not
   // only when a message arrives: `.row`'s `content-visibility: auto` (see
   // transcript.module.scss) makes `scrollHeight` an *estimate* for a row never
-  // yet rendered, so `settle`'s later passes are what catch a row settling
+  // yet rendered, so `hold`'s later passes are what catch a row settling
   // taller than its placeholder once markdown or code in it resolves.
   //
   // Keyed on `messages.messages`' own identity, not a ResizeObserver on the
@@ -312,13 +357,10 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // longer followed. Re-adding that would mean re-adding the write-triggers-
   // resize-triggers-write loop that made the phone case unreasonable in the
   // first place.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: settle is a fresh closure every render (it closes only over refs, so it is never stale); messages.messages is the one thing that should retrigger this
+  // biome-ignore lint/correctness/useExhaustiveDependencies: holdAtBottom is a fresh closure every render (it closes only over refs, so it is never stale); messages.messages is the one thing that should retrigger this
   useLayoutEffect(() => {
-    const el = scroller.current
-    if (!el || !pinned.current || interacting.current) return
-    settle(() => {
-      el.scrollTop = el.scrollHeight - el.clientHeight
-    })
+    if (!scroller.current || !pinned.current || interacting.current) return
+    holdAtBottom()
   }, [messages.messages])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: clearInteractionTimer is a fresh closure every render (it closes only over the interactionTimer ref); this runs once, on unmount, regardless

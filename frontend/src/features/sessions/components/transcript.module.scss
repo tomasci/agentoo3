@@ -34,16 +34,18 @@
 .row {
   content-visibility: auto;
 
-  // Two declarations on purpose — do not collapse them. `auto none` makes a
-  // row report its REAL height once it has been rendered even once, which is
-  // what stops the reader being shoved around as never-seen rows resolve from
-  // a 6rem guess into a 40rem answer (Safari has no scroll anchoring to
-  // absorb that, which is why it reads as fine on a laptop and broken on a
-  // phone). An engine that does not parse the `none` keyword drops the second
-  // declaration and keeps the guess above, so this is straight progressive
-  // enhancement.
+  // A skipped row must contribute a STABLE, NON-ZERO placeholder, and
+  // `auto <length>` is the only value that does. Do not "improve" this back
+  // to `auto none`: `auto` records a last remembered size only for an element
+  // that does *not* have size containment (css-sizing-4 §5.2.1), and a row
+  // that has never been on screen has never been rendered — relevance is
+  // decided in the same frame the row is created (css-contain-2 §4.3), so it
+  // is skipped from the outset and no size is ever recorded. With `none` as
+  // the fallback a freshly prepended page of 100 rows contributes 0px, the
+  // scroll compensation in session-page.tsx computes a delta of zero, and the
+  // rows then expand under the reader and throw them to the top of the page
+  // that just loaded. That shipped in 6bb68bb and is reverted here.
   contain-intrinsic-size: auto 6rem;
-  contain-intrinsic-size: auto none;
 }
 
 // --- the human's own messages -------------------------------------------------
