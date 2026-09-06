@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Provider as JotaiProvider } from 'jotai'
 import type { ReactNode } from 'react'
+import { VersionSkewAlert } from '@/features/health'
 import { configureApiClient } from '@/shared/api/client'
 import { Toaster } from '@/shared/ui'
 import '@/shared/i18n'
@@ -23,6 +24,7 @@ export function Providers({ children }: { children: ReactNode }) {
       <QueryClientProvider client={queryClient}>
         {children}
         <Toaster />
+        <VersionSkewAlert />
       </QueryClientProvider>
     </JotaiProvider>
   )

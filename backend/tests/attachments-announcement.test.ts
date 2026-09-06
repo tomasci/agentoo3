@@ -10,6 +10,7 @@
 import { afterAll, beforeEach, expect, mock, test } from 'bun:test'
 import './setup-env'
 import { getTableColumns, getTableName } from 'drizzle-orm'
+import { sessionMessageSchema } from '../src/features/sessions/schema'
 
 const B = new URL('../src', import.meta.url).pathname
 
@@ -199,6 +200,15 @@ const db = {
             fileId: String(row.fileId),
             originalFilename: (row.originalFilename as string | null | undefined) ?? null,
           })
+        }
+      }
+      // Real Postgres fills these in on INSERT (defaultRandom/defaultNow); a
+      // row this fake merely echoes back is missing them, which toMessageDto
+      // (now the one place a published message is built — see service.ts) needs.
+      if (table(t) === 'messages') {
+        for (const row of rows) {
+          row.id ??= crypto.randomUUID()
+          row.createdAt ??= new Date()
         }
       }
       return {
@@ -399,6 +409,17 @@ test('a turn with nothing new to say prepends nothing at all', async () => {
 // until something republishes it. runTurn does that itself, right after the
 // transaction above commits, using messageDto() (service.ts) to fetch exactly
 // the shape listMessages/listMessagePage already return for the same row.
+//
+// This is the third of the three SSE "message" publish sites (the other two,
+// sendMessage and appendMessage, are pinned against the same schema in
+// session-message-shape.test.ts) — driven here rather than there because it
+// only exists inside runTurn's announcement transaction, which needs this
+// file's heavier fixture (session_files, the SDK query mock) to reach at all.
+// session-message-shape.test.ts's own header explains why it does not import
+// service.ts's `messageDto` directly to shortcut that: this module is also
+// mocked, process-wide, by session-messages.test.ts and session-stream.test.ts,
+// so a direct call from a file that does not itself register that mock could
+// silently resolve to whichever of those happened to still be active.
 
 test('a turn that links files republishes the prompt with files populated', async () => {
   files = [file({ id: 'f1', createdAt: new Date('2026-09-01T10:00:00Z') })]
@@ -427,6 +448,26 @@ test('a turn that links files republishes the prompt with files populated', asyn
       status: 'ready',
     },
   ])
+})
+
+test('the republished message satisfies the same contract, same key set', async () => {
+  // Key-set check, same convention as session-message-shape.test.ts's own two
+  // (against `sessionMessageSchema.shape` rather than a second call into
+  // service.ts — see this file's header comment on why): this is the
+  // historical bug restated for the third publish site, a raw row published
+  // instead of messageDto()'s DTO. Not the fuller `.safeParse` those two also
+  // do: this file's ids ('f1', 'msg-7') are deliberately readable rather than
+  // real UUIDs, which `sessionMessageSchema`'s `.uuid()` fields would reject
+  // for a reason unrelated to what this test is pinning.
+  files = [file({ id: 'f1', createdAt: new Date('2026-09-01T10:00:00Z') })]
+
+  await turn(7)
+
+  const republished = publishedEvents.filter((e) => e.kind === 'message')
+  expect(republished).toHaveLength(1)
+  expect(Object.keys(republished[0]?.message as object).sort()).toEqual(
+    Object.keys(sessionMessageSchema.shape).sort(),
+  )
 })
 
 test('a turn that links nothing new publishes no extra message event', async () => {

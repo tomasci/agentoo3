@@ -381,9 +381,16 @@ test('a link written before originalFilename existed still renders a placeholder
 const pageCalls: { id: string; opts: unknown }[] = []
 const FAKE_PAGE = { messages: [{ seq: 9 }], hasOlder: true }
 
-// Every export routes.ts imports from service.ts has to be present, or the
-// import fails while the module is still loading — see session-stream.test.ts.
+// Forwarded, not hand-rolled, for the same reason as session-stream.test.ts's
+// identical-in-spirit registration: mock.module swaps the whole namespace for
+// this specifier process-wide, so a hand-picked subset here would silently
+// starve any other file whose import of service.ts resolves to this
+// registration of whatever export it needed that this list left out — exactly
+// what happened once toMessageDto gained a caller outside this file (the
+// worker) and this mock had never heard of it.
+const realService = await import(`${B}/features/sessions/service.ts`)
 mock.module(`${B}/features/sessions/service.ts`, () => ({
+  ...realService,
   listMessagePage: async (id: string, opts: unknown) => {
     pageCalls.push({ id, opts })
     return FAKE_PAGE

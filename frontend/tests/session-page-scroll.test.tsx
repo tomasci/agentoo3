@@ -34,10 +34,11 @@
 // node the component handed it.
 
 import { plugin } from 'bun'
-import { afterAll, beforeEach, expect, mock, test } from 'bun:test'
+import { afterAll, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { mockModule } from './mock-module'
 
 // Same identity-proxy loader, same allowlist, as tests/ui-core.test.tsx,
 // tests/transcript-time.test.tsx and tests/transcript-row.test.tsx: this file
@@ -112,15 +113,13 @@ const SESSION_CLIENT = '@/shared/api/generated/clients/getApiSessionsId'
 // in this file fires a real request the test process has no backend for.
 const FILES_CLIENT = '@/shared/api/generated/clients/getApiSessionsIdFiles'
 
-// Saved before mocking so `afterAll` can restore them: `mock.module` replaces a
-// specifier for every future importer in the process, and `session-page.tsx`
-// is on the router's static import graph that tests/workspace.test.tsx mounts.
-const realMessages = await import('../src/shared/api/generated/clients/getApiSessionsIdMessages')
-const realSend = await import('../src/shared/api/generated/clients/postApiSessionsIdMessages')
-const realSession = await import('../src/shared/api/generated/clients/getApiSessionsId')
-const realFiles = await import('../src/shared/api/generated/clients/getApiSessionsIdFiles')
-
-await mock.module(MESSAGES_CLIENT, () => ({
+// Registered through tests/mock-module.ts rather than `mock.module` directly:
+// a bare `mock.module` here would hand these four fakes to every file `bun
+// test` loads afterwards, and `session-page.tsx` is on the router's static
+// import graph that tests/workspace.test.tsx mounts. See that helper for why
+// the undo this file used to do — saving the namespace and putting it back in
+// `afterAll` — restored nothing.
+await mockModule(MESSAGES_CLIENT, () => ({
   getApiSessionsIdMessages: async (opts: { query?: Query }) => {
     calls.push(opts.query)
     if (delay > 0) await new Promise((r) => setTimeout(r, delay))
@@ -129,7 +128,7 @@ await mock.module(MESSAGES_CLIENT, () => ({
   },
 }))
 
-await mock.module(SEND_CLIENT, () => ({
+await mockModule(SEND_CLIENT, () => ({
   postApiSessionsIdMessages: async (opts: { body?: unknown }) => {
     sends.push(opts.body)
     // The real page inserts nothing on success — the message comes back over
@@ -138,22 +137,15 @@ await mock.module(SEND_CLIENT, () => ({
   },
 }))
 
-await mock.module(SESSION_CLIENT, () => ({
+await mockModule(SESSION_CLIENT, () => ({
   getApiSessionsId: async () => ({ data: session() }),
 }))
 
-await mock.module(FILES_CLIENT, () => ({
+await mockModule(FILES_CLIENT, () => ({
   getApiSessionsIdFiles: async () => ({
     data: { files: [], usage: { fileCount: 0, sizeBytes: 0, maxFiles: 20, maxSessionBytes: 0 } },
   }),
 }))
-
-afterAll(() => {
-  mock.module(MESSAGES_CLIENT, () => realMessages)
-  mock.module(SEND_CLIENT, () => realSend)
-  mock.module(SESSION_CLIENT, () => realSession)
-  mock.module(FILES_CLIENT, () => realFiles)
-})
 
 /** happy-dom ships no EventSource, and the stream is not what this file is
  *  about: an inert stand-in, so `useSessionStream` has something to construct.

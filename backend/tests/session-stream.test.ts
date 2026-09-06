@@ -72,9 +72,22 @@ test('unsubscribing stops delivery', async () => {
 
 // --- the stream on top of it --------------------------------------------------
 
+// A real UUID, not the short hand-picked ids the bus tests above use: /events
+// now validates :id against the same schema /messages does (see
+// sessions/routes.ts), so exercising it over HTTP needs an id that schema
+// actually accepts.
+const SESSION_ID = '11111111-1111-4111-8111-111111111111'
+
 const backlog = [
-  { id: 'm1', sessionId: 's1', seq: 0, type: 'prompt', title: null, payload: { text: 'hi' } },
-  { id: 'm2', sessionId: 's1', seq: 1, type: 'assistant', title: 'orchestrator: on it', payload: {} },
+  { id: 'm1', sessionId: SESSION_ID, seq: 0, type: 'prompt', title: null, payload: { text: 'hi' } },
+  {
+    id: 'm2',
+    sessionId: SESSION_ID,
+    seq: 1,
+    type: 'assistant',
+    title: 'orchestrator: on it',
+    payload: {},
+  },
 ]
 // Forwarded, not hand-rolled: resolving the real module *before* mock.module
 // runs is what keeps this registration from racing another file's real
@@ -131,7 +144,7 @@ async function readFrames(body: ReadableStream<Uint8Array>, want: number, ms = 3
 }
 
 test('the stream replays history before going live', async () => {
-  const res = await fetch(`${base}/sessions/s1/events`)
+  const res = await fetch(`${base}/sessions/${SESSION_ID}/events`)
   expect(res.status).toBe(200)
   expect(res.headers.get('content-type')).toBe('text/event-stream')
   // Without this nginx buffers the whole stream and the browser sees nothing.
@@ -144,19 +157,19 @@ test('the stream replays history before going live', async () => {
 })
 
 test('after= skips what the client already has', async () => {
-  const res = await fetch(`${base}/sessions/s1/events?after=0`)
+  const res = await fetch(`${base}/sessions/${SESSION_ID}/events?after=0`)
   const frames = await readFrames(res.body!, 1)
   expect(frames.length).toBe(1)
   expect((frames[0]!.data as { message: { seq: number } }).message.seq).toBe(1)
 })
 
 test('an event published after connecting arrives live', async () => {
-  const res = await fetch(`${base}/sessions/s1/events?after=1`)
+  const res = await fetch(`${base}/sessions/${SESSION_ID}/events?after=1`)
   const pending = readFrames(res.body!, 1)
   // Let the subscription land before publishing into it.
   await new Promise((r) => setTimeout(r, 300))
   await events.publishSessionEvent({
-    kind: 'message', sessionId: 's1', seq: 2, message: { id: 'm3', seq: 2, title: 'live' },
+    kind: 'message', sessionId: SESSION_ID, seq: 2, message: { id: 'm3', seq: 2, title: 'live' },
   })
   const frames = await pending
   expect(frames.length).toBe(1)
@@ -165,22 +178,57 @@ test('an event published after connecting arrives live', async () => {
 })
 
 test('status changes come through as their own event type', async () => {
-  const res = await fetch(`${base}/sessions/s1/events?after=1`)
+  const res = await fetch(`${base}/sessions/${SESSION_ID}/events?after=1`)
   const pending = readFrames(res.body!, 1)
   await new Promise((r) => setTimeout(r, 300))
-  await events.publishSessionEvent({ kind: 'status', sessionId: 's1', status: 'running' })
+  await events.publishSessionEvent({ kind: 'status', sessionId: SESSION_ID, status: 'running' })
   const frames = await pending
   expect(frames[0]!.event).toBe('status')
   expect((frames[0]!.data as { status: string }).status).toBe('running')
 })
 
 test('one session does not receive another session events', async () => {
-  const res = await fetch(`${base}/sessions/s1/events?after=1`)
+  const res = await fetch(`${base}/sessions/${SESSION_ID}/events?after=1`)
   const pending = readFrames(res.body!, 1, 1200)
   await new Promise((r) => setTimeout(r, 300))
   await events.publishSessionEvent({ kind: 'status', sessionId: 'other', status: 'running' })
   const frames = await pending
   expect(frames.length).toBe(0)
+})
+
+// --- validation -----------------------------------------------------------------
+//
+// :id and after used to reach listMessages/the database unchecked — a
+// malformed id surfaced as a 500 (see api-error-envelope.test.ts for the 400
+// this now is, and that it matches /messages' own body), and a non-finite
+// after silently replayed the whole transcript instead of being rejected.
+
+test('a malformed session id is a 400, not a 500', async () => {
+  const res = await fetch(`${base}/sessions/not-a-uuid/events`)
+  expect(res.status).toBe(400)
+  const body = (await res.json()) as { error: string; issues?: unknown }
+  expect(body.error).toBe('Validation failed')
+  expect(body.issues).toEqual([{ path: 'id', message: 'Invalid UUID' }])
+})
+
+test('after=-1 is the legitimate "replay everything" case a reconnecting client with an empty cache relies on', async () => {
+  const res = await fetch(`${base}/sessions/${SESSION_ID}/events?after=-1`)
+  expect(res.status).toBe(200)
+  const frames = await readFrames(res.body!, 2)
+  expect(frames.map((f) => f.event)).toEqual(['message', 'message'])
+})
+
+test('after=NaN is rejected with a 400 rather than silently replaying everything', async () => {
+  const res = await fetch(`${base}/sessions/${SESSION_ID}/events?after=NaN`)
+  expect(res.status).toBe(400)
+  const body = (await res.json()) as { error: string; issues?: { path: string }[] }
+  expect(body.error).toBe('Validation failed')
+  expect(body.issues?.[0]?.path).toBe('after')
+})
+
+test('an after so large it parses to Infinity is rejected, not treated as -1', async () => {
+  const res = await fetch(`${base}/sessions/${SESSION_ID}/events?after=1e999`)
+  expect(res.status).toBe(400)
 })
 
 // --- failure ------------------------------------------------------------------

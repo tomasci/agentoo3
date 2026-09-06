@@ -34,7 +34,14 @@ import type {
 
 type MessageRow = typeof messages.$inferSelect
 
-function toMessageDto(row: MessageRow, files: MessageFileDto[] = []): SessionMessageDto {
+/**
+ * The one place a Drizzle `messages` row becomes the shape that crosses the
+ * wire. Every publish site (here, the worker's `appendMessage`) and every
+ * read path (`listMessages`, `listMessagePage`, `messageDto`) goes through
+ * this, so a live SSE frame and a replayed one are never distinguishable by
+ * which keys they happen to carry — see `SessionEvent.message` in lib/events.ts.
+ */
+export function toMessageDto(row: MessageRow, files: MessageFileDto[] = []): SessionMessageDto {
   return {
     id: row.id,
     sessionId: row.sessionId,
@@ -408,7 +415,14 @@ export async function sendMessage(sessionId: string, text: string): Promise<Sess
     .returning()
   if (!row) throw new Error('Insert returned no row')
 
-  await publishSessionEvent({ kind: 'message', sessionId, seq: row.seq, message: row })
+  // toMessageDto's default files=[] is correct here, not a shortcut: this row has just been
+  // inserted and nothing has linked an attachment to it yet, same as the prompt case below.
+  await publishSessionEvent({
+    kind: 'message',
+    sessionId,
+    seq: row.seq,
+    message: toMessageDto(row),
+  })
 
   // Start a turn only if nothing is already running. The running turn drains
   // whatever accumulated behind it.

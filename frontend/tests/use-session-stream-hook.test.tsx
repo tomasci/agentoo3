@@ -370,17 +370,22 @@ test('unmounting after an error leaves no reconnect behind', async () => {
   expect(FakeEventSource.opened).toHaveLength(1)
 })
 
-test('a malformed frame is not silently swallowed into the cache', async () => {
-  // JSON.parse throws inside the listener; what must not happen is a partial
-  // or garbage row reaching the transcript.
+test('a malformed (non-JSON) frame is dropped and logged, not thrown, and writes nothing', async () => {
+  // JSON.parse used to throw straight out of the listener here; streamed-
+  // message.ts (see tests/streamed-message.test.ts) now catches that and
+  // drops the frame instead, the same as any other validation failure. What
+  // must not happen, either way, is a partial or garbage row reaching the
+  // transcript.
   client.setQueryData(MESSAGES_KEY, page([msg(0)]))
+  writes = []
   await mount({ id: 's1', enabled: true })
 
   expect(() =>
     source().emit('message', new MessageEvent('message', { data: 'not json' })),
-  ).toThrow()
+  ).not.toThrow()
   await frames(() => false, 8)
 
+  expect(writes).toHaveLength(0)
   expect(cached()?.map((m) => m.seq)).toEqual([0])
   await unmount()
 })

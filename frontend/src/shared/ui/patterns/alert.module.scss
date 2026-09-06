@@ -1,3 +1,5 @@
+@use '@/shared/ui/mixins' as ui;
+
 .root {
   display: flex;
   align-items: flex-start;
@@ -30,6 +32,28 @@
 
 .action {
   flex-shrink: 0;
+}
+
+// Square, matching the tab bar's own close button (tab-bar.module.scss)
+// rather than the full Button component, whose horizontal label padding
+// makes a lone "✕" sit off-centre in a non-square box.
+.dismiss {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font-size: var(--text-sm);
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover { background: var(--color-surface-hover); }
+
+  @include ui.focus-ring;
 }
 
 // Text and title are deliberately not tinted per-tone (see alert.tsx): the

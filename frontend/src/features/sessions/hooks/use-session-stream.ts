@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { getApiSessionsIdQueryKey } from '@/shared/api/generated/hooks/useGetApiSessionsId'
 import { appendStreamedMessage, isFetchingOlderPage, newestCachedSeq } from '../lib/message-cache'
+import { parseStreamedMessage } from '../lib/streamed-message'
 import type { SessionMessage } from './use-sessions'
 
 /**
@@ -90,10 +91,13 @@ export function useSessionStream(sessionId: string, enabled = true) {
       source.addEventListener('open', () => setConnected(true))
 
       source.addEventListener('message', (event) => {
-        const parsed = JSON.parse((event as MessageEvent<string>).data) as {
-          message?: SessionMessage
-        }
-        if (parsed.message) append(parsed.message)
+        // Validated at the boundary (streamed-message.ts), not cast: an
+        // arrival that fails — not JSON, or missing what `seq` needs to stay
+        // a real number — is dropped and logged there rather than reaching
+        // `append` and poisoning `lastSeq` with a `NaN` this reconnect cursor
+        // can never recover from on its own.
+        const message = parseStreamedMessage((event as MessageEvent<string>).data)
+        if (message) append(message)
       })
 
       source.addEventListener('status', () => {

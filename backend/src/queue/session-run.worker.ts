@@ -17,7 +17,7 @@ import { env, hasClaudeCredential } from '@/env'
 import { announcementFor } from '@/features/attachments/manifest'
 import { toManifestFile } from '@/features/attachments/service'
 import { optionsFor } from '@/features/sessions/runner-options'
-import { messageDto } from '@/features/sessions/service'
+import { messageDto, toMessageDto } from '@/features/sessions/service'
 import { type TranscriptMessage, titleFor } from '@/features/sessions/titles'
 import { publishSessionEvent, subscribeControl } from '@/lib/events'
 import { logger } from '@/lib/logger'
@@ -68,8 +68,13 @@ export async function appendMessage(
       }),
     )
     .returning()
+  if (!row) throw new Error(`Session ${sessionId} disappeared mid-turn`)
 
-  await publishSessionEvent({ kind: 'message', sessionId, seq, message: row })
+  // toMessageDto's default files=[] is right, not assumed: only a 'prompt' row
+  // ever carries an attachment link, and appendMessage is never called with
+  // one — see sendMessage/messageDto in service.ts for where that row's
+  // `files` actually gets resolved and republished.
+  await publishSessionEvent({ kind: 'message', sessionId, seq, message: toMessageDto(row) })
 }
 
 async function setStatus(sessionId: string, status: string, lastError?: string | null) {

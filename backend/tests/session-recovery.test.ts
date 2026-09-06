@@ -131,8 +131,13 @@ const db = {
     values: (row: Row) => ({
       returning: async () => {
         if (insertFails) throw new Error(DB_DOWN)
-        written.push(row)
-        return [row]
+        // Real Postgres fills these in on INSERT (defaultRandom/defaultNow);
+        // toMessageDto (the one place a published message is built — see
+        // service.ts) needs a real createdAt now that appendMessage publishes
+        // through it rather than the bare row.
+        const stamped = { id: `msg-${written.length}`, createdAt: new Date(), ...row }
+        written.push(stamped)
+        return [stamped]
       },
     }),
   }),
