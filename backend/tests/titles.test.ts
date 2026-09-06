@@ -80,6 +80,35 @@ test('results say whether the turn worked', () => {
   expect(titleFor(m({ type: 'result', subtype: 'error_during_execution', is_error: true }), 'x')).toBe('Turn failed')
 })
 
+test('an errored task-notification result still gets a row', () => {
+  // The zero-turn notification check exists to stop confirming work that
+  // never ran; it must not also hide a turn that ran and failed. The killed
+  // background push behind this whole change is one kind of "nothing to
+  // report" — an error is not, and still needs the reader told.
+  expect(titleFor(m({ type: 'result', subtype: 'error_during_execution', is_error: true,
+    num_turns: 0, origin: { kind: 'task-notification' } }), 'x')).toBe('Turn failed')
+  expect(titleFor(m({ type: 'result', subtype: 'error_max_budget_usd', is_error: true,
+    num_turns: 0, origin: { kind: 'task-notification' } }), 'x')).toBe('Turn failed')
+})
+
+test('an empty task-notification result gets no row', () => {
+  // A background job killed at the turn boundary: zero turns ran, so there is
+  // nothing to confirm as "complete".
+  expect(
+    titleFor(m({ type: 'result', subtype: 'success', num_turns: 0,
+      origin: { kind: 'task-notification' } }), 'x'),
+  ).toBeNull()
+  // Both conditions are required. A task-notification that actually ran turns
+  // still gets the normal wording.
+  expect(
+    titleFor(m({ type: 'result', subtype: 'success', num_turns: 2,
+      origin: { kind: 'task-notification' } }), 'x'),
+  ).toBe('Turn complete')
+  // And a zero-turn result with no task-notification origin — an ordinary
+  // turn, not a stray notification — is untouched too.
+  expect(titleFor(m({ type: 'result', subtype: 'success', num_turns: 0 }), 'x')).toBe('Turn complete')
+})
+
 test('whitespace in a title is collapsed to one line', () => {
   expect(titleFor(m({ type: 'assistant', message: { content: [
     { type: 'text', text: '  Reading\n\n  the   schema now.' },
@@ -98,4 +127,34 @@ test('a turn that threw before producing a result still gets a row', () => {
   expect(titleFor(m({ type: 'error', message: 'Claude Code process exited with code 1' }), 'lead'))
     .toBe('Turn failed: Claude Code process exited with code 1')
   expect(titleFor(m({ type: 'error', message: '' }), 'lead')).toBe('Turn failed: unknown error')
+})
+
+test('the untitled-result predicate stays narrow enough to leave real turns alone', () => {
+  // Blast radius: the frontend drops rows the backend declined to title, and
+  // markAnswers closes a turn on the result node to promote the reply above it.
+  // A predicate that widened by one field would stop promoting answers
+  // session-wide, so every neighbouring shape is pinned here.
+  expect(titleFor(m({ type: 'result', subtype: 'success', num_turns: 0,
+    origin: { kind: 'human' } }), 'x')).toBe('Turn complete')
+  expect(titleFor(m({ type: 'result', subtype: 'success', num_turns: 0,
+    origin: { kind: 'auto-continuation' } }), 'x')).toBe('Turn complete')
+  expect(titleFor(m({ type: 'result', subtype: 'success', num_turns: 1,
+    origin: { kind: 'task-notification' } }), 'x')).toBe('Turn complete')
+  expect(titleFor(m({ type: 'result', subtype: 'success',
+    origin: { kind: 'task-notification' } }), 'x')).toBe('Turn complete')
+})
+
+test('a malformed origin or num_turns degrades to titling, never to a dropped row', () => {
+  // Losing a row is the expensive direction: it takes the answer promotion with
+  // it. Anything the reader cannot make sense of has to keep its heading.
+  expect(titleFor(m({ type: 'result', subtype: 'success', num_turns: 0,
+    origin: 'task-notification' }), 'x')).toBe('Turn complete')
+  expect(titleFor(m({ type: 'result', subtype: 'success', num_turns: 0,
+    origin: null }), 'x')).toBe('Turn complete')
+  expect(titleFor(m({ type: 'result', subtype: 'success', num_turns: 0,
+    origin: [{ kind: 'task-notification' }] }), 'x')).toBe('Turn complete')
+  expect(titleFor(m({ type: 'result', subtype: 'success', num_turns: '0',
+    origin: { kind: 'task-notification' } }), 'x')).toBe('Turn complete')
+  expect(titleFor(m({ type: 'result', subtype: 'success', num_turns: null,
+    origin: { kind: 'task-notification' } }), 'x')).toBe('Turn complete')
 })

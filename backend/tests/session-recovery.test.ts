@@ -503,3 +503,544 @@ test('a clean turn completes and queues nothing', async () => {
   expect(queued).toEqual([])
   expect(rowsOfType('prompt')).toHaveLength(0)
 })
+
+// --- a command backgrounded past the turn boundary -----------------------------
+//
+// The incident this covers, reproduced end to end: an agentoo session
+// backgrounded a `git push` behind a multi-minute pre-push hook, ended its
+// turn, and the SDK's kill for that task arrived roughly five seconds *after*
+// the turn's own `result` had already streamed by. agentoo marked the turn
+// `completed` anyway, because the only signal it read was `lastResult`.
+
+test('a command killed after the result is still caught, because the ledger — not lastResult — is what is read', async () => {
+  transcript = [spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 't1',
+        task_type: 'local_bash',
+        is_backgrounded: true,
+      }
+      // The result the old code would have stopped at, and read as clean.
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+      // The kill, arriving after it — this is the whole point of the test.
+      yield { type: 'system', subtype: 'task_updated', task_id: 't1', patch: { status: 'killed' } }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('queued')
+  expect(queued).toEqual(['sess-1'])
+  expect(String((rowsOfType('notice')[0]?.payload as Row)?.message)).toContain('background')
+})
+
+// --- a tool the harness cancelled, misread as a refusal ------------------------
+
+test('a tool cancelled by the harness is nudged, not treated as a user refusal', async () => {
+  transcript = [spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'user',
+        message: { role: 'user', content: [] },
+        parent_tool_use_id: null,
+        tool_result_meta: [{ id: 'toolu_01', non_execution_kind: 'cancelled' }],
+      }
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('queued')
+  expect(queued).toEqual(['sess-1'])
+  expect(String((rowsOfType('notice')[0]?.payload as Row)?.message)).toContain('cancelled')
+})
+
+// --- a message queued behind a turn that later gets interrupted or drained -----
+
+test('a message that arrived mid-turn still drains normally, without recover', async () => {
+  // The plain drain path, unrelated to the interrupt notice below: no new
+  // notice, no recover — just queued for the pending message to run next.
+  arrivedDuringTurn = [{ id: 'msg-2' }]
+  turnBehaviour = () =>
+    (async function* () {
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('queued')
+  expect(queued).toEqual(['sess-1'])
+  expect(rowsOfType('notice')).toHaveLength(0)
+})
+
+test('an interrupted turn says so when a message is left stranded behind it', async () => {
+  // Both interrupt exits return before the drain check, so without the notice
+  // a message sent mid-turn would sit `pending` with nothing telling anyone.
+  // It is not lost — sendMessage moves the session out of `interrupted` on the
+  // next send and runTurn takes the oldest pending row first — but that is
+  // exactly the fact worth saying rather than leaving to be discovered.
+  transcript = [spoken]
+  arrivedDuringTurn = [{ id: 'msg-2' }]
+  turnBehaviour = () =>
+    (async function* () {
+      for (const interrupt of interrupters) interrupt({ kind: 'interrupt' })
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('interrupted')
+  expect(queued).toEqual([])
+  expect(rowsOfType('prompt')).toHaveLength(0)
+  expect(rowsOfType('notice')).toHaveLength(1)
+})
+
+// --- the healthy turns that must not be nudged --------------------------------
+//
+// `recover` spends one of three auto-continuations and then fails the session,
+// so a false positive here does not merely add a row: it degrades every session
+// that runs shell commands. The ledger enrols every local_bash task, foreground
+// included, which makes these the load-bearing cases.
+
+test('a foreground command the turn never settled completes cleanly', () => {
+  // The exact shape a turn cut short leaves behind: task_started arrives and
+  // nothing else ever does — no task_notification, no task_updated. The entry
+  // sits unsettled to the end of the stream and must still not nudge, because
+  // `is_backgrounded` was false.
+  transcript = [spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 't1',
+        task_type: 'local_bash',
+        is_backgrounded: false,
+        description: 'bun test tests/',
+      }
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+    })()
+
+  return runTurn({ sessionId: 'sess-1' }).then(() => {
+    expect(statuses.at(-1)?.status).toBe('completed')
+    expect(queued).toEqual([])
+    expect(rowsOfType('notice')).toHaveLength(0)
+    expect(rowsOfType('prompt')).toHaveLength(0)
+  })
+})
+
+test('a foreground command with no is_backgrounded field at all completes cleanly', async () => {
+  // The field is optional on SDKTaskStartedMessage, so absence has to read as
+  // foreground. Reading it the other way would nudge — then fail — every
+  // session whose CLI stopped sending it.
+  transcript = [spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      yield { type: 'system', subtype: 'task_started', task_id: 't1', task_type: 'local_bash' }
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('completed')
+  expect(queued).toEqual([])
+  expect(rowsOfType('notice')).toHaveLength(0)
+})
+
+test('a turn that ends before any result at all does not nudge over a foreground command', async () => {
+  transcript = [spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 't1',
+        task_type: 'local_bash',
+        is_backgrounded: false,
+      }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('completed')
+  expect(rowsOfType('notice')).toHaveLength(0)
+})
+
+test('a backgrounded command that settles after the result completes cleanly', async () => {
+  // The mirror of the kill-after-the-result case above, and the reason the
+  // ledger is read after the loop rather than at the result: the settle lands
+  // late too, so an implementation that decided at the `result` message would
+  // report a command that finished as lost.
+  transcript = [spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 't1',
+        task_type: 'local_bash',
+        is_backgrounded: true,
+      }
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+      yield { type: 'system', subtype: 'task_notification', task_id: 't1', status: 'completed' }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('completed')
+  expect(queued).toEqual([])
+  expect(rowsOfType('notice')).toHaveLength(0)
+})
+
+// --- one loss, one notice -----------------------------------------------------
+
+test('a killed background subagent is reported once, by lostSubagents alone', async () => {
+  // Both ledgers see this turn: subagent_stats reports the destroyed subagent,
+  // and its task_id also flows past foldBackgroundCommand as task_started and
+  // task_updated. Counting it twice would put two contradictory notices on one
+  // turn — and the background-command wording ("run it in the foreground") is
+  // the wrong advice for delegated work.
+  transcript = [spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 'agent-1',
+        task_type: 'local_agent',
+        subagent_type: 'agentoo:tester',
+        is_backgrounded: true,
+      }
+      yield {
+        type: 'result',
+        subtype: 'success',
+        total_cost_usd: 0,
+        subagent_stats: { spawned: 1, completed: 0, killed: { system: 1 }, started_in_background: 1 },
+      }
+      yield { type: 'system', subtype: 'task_updated', task_id: 'agent-1', patch: { status: 'killed' } }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('queued')
+  expect(rowsOfType('notice')).toHaveLength(1)
+  expect(String((rowsOfType('notice')[0]?.payload as Row)?.message)).toContain('1 delegated task')
+  expect(rowsOfType('prompt')).toHaveLength(1)
+})
+
+test('a turn that both loses a command and reports a cancellation nudges once', async () => {
+  transcript = [spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 't1',
+        task_type: 'local_bash',
+        is_backgrounded: true,
+      }
+      yield {
+        type: 'user',
+        message: { role: 'user', content: [] },
+        parent_tool_use_id: null,
+        tool_result_meta: [{ id: 'toolu_01', non_execution_kind: 'cancelled' }],
+      }
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(rowsOfType('notice')).toHaveLength(1)
+  expect(rowsOfType('prompt')).toHaveLength(1)
+})
+
+// --- what outranks what -------------------------------------------------------
+//
+// Both new branches sit after the pending-message drain and the budget stop. A
+// test that only exercises one of them at a time passes whatever the order is,
+// so each of these puts two triggers on one turn and asserts which one won.
+
+test('a message the operator sent mid-turn outranks the cancellation nudge', async () => {
+  // If the cancellation branch moved above the drain, this turn would append an
+  // auto-continuation and run *that* before the operator's own message.
+  transcript = [spoken]
+  arrivedDuringTurn = [{ id: 'msg-2' }]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'user',
+        message: { role: 'user', content: [] },
+        parent_tool_use_id: null,
+        tool_result_meta: [{ id: 'toolu_01', non_execution_kind: 'cancelled' }],
+      }
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('queued')
+  expect(queued).toEqual(['sess-1'])
+  expect(rowsOfType('prompt')).toHaveLength(0)
+  expect(rowsOfType('notice')).toHaveLength(0)
+})
+
+test('a message the operator sent mid-turn outranks the lost-command nudge', async () => {
+  transcript = [spoken]
+  arrivedDuringTurn = [{ id: 'msg-2' }]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 't1',
+        task_type: 'local_bash',
+        is_backgrounded: true,
+      }
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+      yield { type: 'system', subtype: 'task_updated', task_id: 't1', patch: { status: 'killed' } }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('queued')
+  expect(queued).toEqual(['sess-1'])
+  expect(rowsOfType('prompt')).toHaveLength(0)
+  expect(rowsOfType('notice')).toHaveLength(0)
+})
+
+test('the budget stop outranks the cancellation nudge', async () => {
+  // Running out of money cancels whatever was outstanding. Nudging there would
+  // spend continuations fighting a limit that is working.
+  transcript = [spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'user',
+        message: { role: 'user', content: [] },
+        parent_tool_use_id: null,
+        tool_result_meta: [{ id: 'toolu_01', non_execution_kind: 'cancelled' }],
+      }
+      yield { type: 'result', subtype: 'error_max_budget_usd', is_error: true, total_cost_usd: 0 }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('failed')
+  expect(String(statuses.at(-1)?.lastError)).toContain('budget')
+  expect(queued).toEqual([])
+  expect(rowsOfType('prompt')).toHaveLength(0)
+})
+
+test('a maxTurns stop is not read as a harness cancellation', async () => {
+  // error_* means the turn stopped for a stated reason, and stopping cancels
+  // whatever tool calls were still outstanding. That cancellation is a
+  // consequence of the limit, not evidence of the bug this branch exists for.
+  transcript = [spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'user',
+        message: { role: 'user', content: [] },
+        parent_tool_use_id: null,
+        tool_result_meta: [{ id: 'toolu_01', non_execution_kind: 'cancelled' }],
+      }
+      yield { type: 'result', subtype: 'error_max_turns', is_error: true, total_cost_usd: 0 }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('completed')
+  expect(queued).toEqual([])
+  expect(rowsOfType('notice')).toHaveLength(0)
+  expect(rowsOfType('prompt')).toHaveLength(0)
+})
+
+// --- the stranded-prompt notice may never throw out of an interrupt -----------
+
+test('an interrupt with nothing pending behind it says nothing', async () => {
+  transcript = [spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      for (const interrupt of interrupters) interrupt({ kind: 'interrupt' })
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('interrupted')
+  expect(rowsOfType('notice')).toHaveLength(0)
+})
+
+test('a database that cannot answer the stranded-prompt read still interrupts cleanly', async () => {
+  // The read is the first thing the notice does, and an interrupt is exactly
+  // when the machine may be in trouble. A throw escaping here would leave the
+  // session at `running` with no worker holding it.
+  transcript = [spoken]
+  arrivedDuringTurn = [{ id: 'msg-2' }]
+  selectFails = true
+  turnBehaviour = () =>
+    (async function* () {
+      for (const interrupt of interrupters) interrupt({ kind: 'interrupt' })
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('interrupted')
+  expect(rowsOfType('notice')).toHaveLength(0)
+})
+
+test('a database that cannot write the stranded-prompt notice still interrupts cleanly', async () => {
+  // The other call site, inside runTurn's catch block — an abort surfaces there
+  // as a thrown error — with the insert failing under it.
+  transcript = [spoken]
+  arrivedDuringTurn = [{ id: 'msg-2' }]
+  insertFails = true
+  turnBehaviour = () =>
+    (async function* () {
+      for (const interrupt of interrupters) interrupt({ kind: 'interrupt' })
+      await Promise.resolve()
+      throw new Error(KILLED)
+      // biome-ignore lint/correctness/noUnreachable: shapes the generator's type
+      yield undefined
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('interrupted')
+  expect(queued).toEqual([])
+  expect(rowsOfType('notice')).toHaveLength(0)
+})
+
+test('the interrupt notice is written from the catch path too, not only the clean one', async () => {
+  transcript = [spoken]
+  arrivedDuringTurn = [{ id: 'msg-2' }]
+  turnBehaviour = () =>
+    (async function* () {
+      for (const interrupt of interrupters) interrupt({ kind: 'interrupt' })
+      await Promise.resolve()
+      throw new Error(KILLED)
+      // biome-ignore lint/correctness/noUnreachable: shapes the generator's type
+      yield undefined
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('interrupted')
+  expect(rowsOfType('notice')).toHaveLength(1)
+  expect(String((rowsOfType('notice')[0]?.payload as Row)?.message)).toContain('still waiting')
+  // Still not auto-drained: the interrupt is honoured, not worked around.
+  expect(queued).toEqual([])
+  expect(rowsOfType('prompt')).toHaveLength(0)
+})
+
+// --- two fixes from an independent review -------------------------------------
+//
+// Confirmed with concrete inputs against the first version of this file.
+
+test('a maxTurns stop is not read as a lost background command either', async () => {
+  // The same rationale as 'a maxTurns stop is not read as a harness
+  // cancellation' above, for the sibling branch: error_* means the SDK itself
+  // stopped the turn, and that stop legitimately kills whatever was still
+  // backgrounded. This is not a new loss to hide behind the guard — before
+  // the background-command ledger existed at all, a turn shaped like this
+  // already fell through to `completed`, so the guard restores that status
+  // quo rather than creating one.
+  transcript = [spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 't1',
+        task_type: 'local_bash',
+        is_backgrounded: true,
+      }
+      yield { type: 'result', subtype: 'error_max_turns', is_error: true, total_cost_usd: 0 }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('completed')
+  expect(queued).toEqual([])
+  expect(rowsOfType('notice')).toHaveLength(0)
+  expect(rowsOfType('prompt')).toHaveLength(0)
+})
+
+test('two commands lost in one turn are both named, in the plural', async () => {
+  transcript = [spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 't1',
+        task_type: 'local_bash',
+        is_backgrounded: true,
+      }
+      yield {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 't2',
+        task_type: 'local_bash',
+        is_backgrounded: true,
+      }
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+      yield { type: 'system', subtype: 'task_updated', task_id: 't1', patch: { status: 'killed' } }
+      yield { type: 'system', subtype: 'task_updated', task_id: 't2', patch: { status: 'killed' } }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('queued')
+  expect(queued).toEqual(['sess-1'])
+  const message = String((rowsOfType('notice')[0]?.payload as Row)?.message)
+  expect(message).toContain('2 commands')
+  expect(message).toContain('were')
+  expect(message).not.toContain('undefined')
+})
+
+test('giving up on a repeatedly cancelled tool says so in the transcript', async () => {
+  transcript = [...auto(3), spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'user',
+        message: { role: 'user', content: [] },
+        parent_tool_use_id: null,
+        tool_result_meta: [{ id: 'toolu_01', non_execution_kind: 'cancelled' }],
+      }
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('failed')
+  expect(String(statuses.at(-1)?.lastError)).toContain('keeps coming back cancelled by the harness')
+  expect(queued).toEqual([])
+})
+
+test('giving up on a repeatedly lost background command says so in the transcript', async () => {
+  transcript = [...auto(3), spoken]
+  turnBehaviour = () =>
+    (async function* () {
+      yield {
+        type: 'system',
+        subtype: 'task_started',
+        task_id: 't1',
+        task_type: 'local_bash',
+        is_backgrounded: true,
+      }
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+      yield { type: 'system', subtype: 'task_updated', task_id: 't1', patch: { status: 'killed' } }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('failed')
+  expect(String(statuses.at(-1)?.lastError)).toContain(
+    'every turn ended with a command still running in the background',
+  )
+  expect(queued).toEqual([])
+})
+

@@ -156,6 +156,167 @@ export function lostSubagents(message: TranscriptMessage | undefined): number {
 }
 
 /**
+ * Whether a `user` message reports a tool call the SDK cancelled on its own,
+ * not one an operator declined.
+ *
+ * `tool_result_meta[].non_execution_kind` is not in the SDK's published
+ * types — grepping the installed `.d.ts` files for either name returns
+ * nothing — so this is read exactly as defensively as `lostSubagents` reads
+ * `subagent_stats`: a shape change has to degrade to `false`, never to a
+ * false alarm.
+ *
+ * This only reports what the message says; it does not know whether *this*
+ * turn asked for the cancellation. That is what `interrupted` is for, set in
+ * one place below by `abortController.abort()` — agentoo's only cancel
+ * source. So a caller seeing this true while `interrupted` is still false
+ * knows something other than agentoo cancelled that tool — and in this
+ * configuration (`permissionMode: 'bypassPermissions'`, no `canUseTool`
+ * registered anywhere in `src`) it cannot have been the operator either:
+ * there was no prompt for one to have answered. A turn read exactly this
+ * shape (`tool_result_meta: [{ non_execution_kind: "cancelled" }]`,
+ * `permission_denials: []` on every result in the session) as a refusal and
+ * told the model to stop and ask; nobody had refused anything, twice.
+ *
+ * Exported for the tests, like the other decisions in this file worth
+ * pinning: nothing else imports it.
+ */
+export function cancelledWithoutInterrupt(message: TranscriptMessage | undefined): boolean {
+  if (message?.type !== 'user') return false
+  const meta = (message as { tool_result_meta?: unknown }).tool_result_meta
+  if (!Array.isArray(meta)) return false
+  return meta.some(
+    (entry) =>
+      !!entry &&
+      typeof entry === 'object' &&
+      (entry as { non_execution_kind?: unknown }).non_execution_kind === 'cancelled',
+  )
+}
+
+/**
+ * One backgrounded shell command's state, pieced together from whatever this
+ * turn saw about it. `background` is not fixed at start: the CLI can
+ * auto-background a foreground Bash call that overruns its timeout, and that
+ * transition shows up later as `task_updated`'s `patch.is_backgrounded`, with
+ * nothing else marking it.
+ */
+interface BackgroundCommandTask {
+  background: boolean
+  status: 'running' | 'settled' | 'destroyed'
+}
+
+/** Turn-local memory `foldBackgroundCommand` builds and `lostBackgroundCommands` reads. */
+export type BackgroundCommandLedger = Map<string, BackgroundCommandTask>
+
+/**
+ * Fold one SDK message into what this turn knows about backgrounded shell
+ * commands, keyed by `task_id`.
+ *
+ * A fold, not a lookup, because `SDKTaskUpdatedMessage` carries only
+ * `task_id` and `patch` — no `task_type`, no `tool_use_id` — so the only way
+ * to know a later `killed` patch belongs to a shell command rather than a
+ * subagent is to have remembered it from `task_started`. That is forced, not
+ * one design among several: nothing in the settle or notification messages
+ * says what kind of task settled.
+ *
+ * Every `local_bash` task is remembered here, foreground or backgrounded,
+ * because a command that starts in the foreground can still end up
+ * backgrounded later with no `task_started` ever having said so — only the
+ * later `patch.is_backgrounded` does, which is why it is honoured here too.
+ * `local_agent` is excluded at the door on purpose: `lostSubagents` already
+ * owns delegated work, read off `subagent_stats` on the final result, and
+ * remembering `local_agent` tasks here too would make one turn emit two
+ * contradictory notices about the same loss. That exclusion also means a
+ * stray `task_updated`/`task_notification` for a subagent's `task_id` finds
+ * no entry here and is silently ignored — which is exactly what should
+ * happen to it. `local_bash` is deliberately inclusive rather than narrow: it
+ * is what the `Monitor` tool registers as too (verified against the exported
+ * incident log), and a command Monitor is watching is exactly as abandoned by
+ * a turn boundary as one Bash started directly.
+ *
+ * `ambient`/`skip_transcript` tasks are the CLI's own housekeeping — a
+ * live-update watcher, a cache warm (`titles.ts` already keeps these off the
+ * transcript for the same reason) — and a nudge because one of those was
+ * still going at turn end would be the same class of false alarm that
+ * `started_in_background` exists to prevent for subagents.
+ */
+export function foldBackgroundCommand(
+  ledger: BackgroundCommandLedger,
+  message: TranscriptMessage | undefined,
+): void {
+  if (message?.type !== 'system') return
+  const sys = message as {
+    subtype?: unknown
+    task_id?: unknown
+    task_type?: unknown
+    is_backgrounded?: unknown
+    ambient?: unknown
+    skip_transcript?: unknown
+    status?: unknown
+    patch?: { status?: unknown; is_backgrounded?: unknown }
+  }
+
+  if (sys.subtype === 'task_started') {
+    if (sys.ambient || sys.skip_transcript) return
+    if (sys.task_type !== 'local_bash' || typeof sys.task_id !== 'string') return
+    ledger.set(sys.task_id, { background: sys.is_backgrounded === true, status: 'running' })
+    return
+  }
+
+  if (sys.subtype === 'task_updated') {
+    if (typeof sys.task_id !== 'string') return
+    const task = ledger.get(sys.task_id)
+    if (!task) return
+    if (sys.patch?.is_backgrounded === true) task.background = true
+    const status = sys.patch?.status
+    if (status === 'completed' || status === 'failed') task.status = 'settled'
+    else if (status === 'killed') task.status = 'destroyed'
+    // 'paused' is deliberately left alone: paused leaves it unsettled, not
+    // settled — the command has not ended, it is merely not moving right now.
+    return
+  }
+
+  if (sys.subtype === 'task_notification') {
+    // No ambient/skip_transcript guard here on purpose, unlike task_started
+    // above: an ambient task never gets an entry in the first place (it is
+    // filtered at enrolment), so the lookup below already misses it and a
+    // second filter here is a no-op for that case. The one case where it is
+    // *not* a no-op is a real, already-enrolled local_bash task whose own
+    // task_notification happens to carry ambient/skip_transcript — and
+    // returning early there dropped a `completed` settle on the floor,
+    // leaving a healthy entry looking unsettled and nudging a clean turn.
+    // The filter belongs only at the door (task_started), not at every later
+    // sighting of a task already let in.
+    if (typeof sys.task_id !== 'string') return
+    const task = ledger.get(sys.task_id)
+    if (!task) return
+    if (sys.status === 'completed' || sys.status === 'failed') task.status = 'settled'
+    // 'stopped' is the SDK's word for cut off rather than finished — the
+    // frontend (transcript.ts) already folds it into 'killed' for the same
+    // reason.
+    else if (sys.status === 'stopped') task.status = 'destroyed'
+  }
+}
+
+/**
+ * Background commands this turn destroyed or abandoned: destroyed on
+ * `killed`/`stopped`, and anything merely still running — or `paused` — when
+ * the loop ends counts too, because this turn is the last chance to hear
+ * about it before the CLI process exits.
+ *
+ * Read after the `for await` loop, never off `lastResult`. That is the whole
+ * point of this pair of functions: the kill for a backgrounded `git push`
+ * arrived roughly five seconds *after* the result a `lastResult`-only read
+ * would already have treated as "the turn finished cleanly."
+ */
+export function lostBackgroundCommands(ledger: BackgroundCommandLedger): number {
+  let lost = 0
+  for (const task of ledger.values()) {
+    if (task.background && task.status !== 'settled') lost++
+  }
+  return lost
+}
+
+/**
  * The ways something *outside* a process ends it.
  *
  * Deliberately not every signal. A turn that died because the machine, systemd
@@ -421,6 +582,50 @@ async function unstampAnnouncement(
   await db.delete(messageFiles).where(eq(messageFiles.messageId, messageId))
 }
 
+/**
+ * Say so when an interrupt leaves a message waiting behind it.
+ *
+ * Both interrupt exits in `runTurn` return before the drain check further
+ * down that would otherwise notice a message queued mid-turn, so without this
+ * the session goes quiet at `interrupted` with a prompt sitting behind it
+ * that nobody was told about. It is not lost: `sendMessage` moves an
+ * `interrupted` session back to `queued` on the next send
+ * (features/sessions/service.ts) and re-enqueues, and `runTurn` picks up the
+ * *oldest* pending row — so the stranded prompt runs before whatever the
+ * operator types next. Deliberately not auto-drained: see
+ * session-recovery.test.ts's pending-during-an-interrupt case for why an
+ * interrupted turn draining itself is the wrong fix.
+ *
+ * Both the read and the write are guarded, because the second call site is
+ * inside `runTurn`'s `catch` block — see `recover`'s comment above for why
+ * that is exactly where the database is least likely to be healthy. Neither
+ * may throw out of an already-interrupted turn.
+ */
+async function noticeStrandedPrompt(sessionId: string, who: string): Promise<void> {
+  try {
+    const [stillPending] = await db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(and(eq(messages.sessionId, sessionId), eq(messages.pending, true)))
+      .limit(1)
+    if (!stillPending) return
+    await appendMessage(
+      sessionId,
+      {
+        type: 'notice',
+        message:
+          'A message arrived while this turn was running and is still waiting. It was not dropped: sending another message picks it up first, before whatever you type next.',
+      },
+      who,
+    )
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    logger.error(
+      `Session ${sessionId}: could not check for a message stranded by the interrupt: ${detail}`,
+    )
+  }
+}
+
 /** Exported for the tests; the worker below is the only real caller. */
 export async function runTurn(job: SessionRunJob): Promise<void> {
   const { sessionId } = job
@@ -559,10 +764,19 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
   // task's tool_use_id as parent_tool_use_id.
   const tasks = new Map<string, string>()
   const orchestratorName = claimed.orchestrator ?? 'orchestrator'
+  // Turn-local, like `tasks` above and for the same reason: the worker holds
+  // no state between turns, and this is rebuilt from the stream every time.
+  // Named unambiguously on purpose — a local farther down this function is
+  // already called `tasks` for an unrelated string, and shadowing that with
+  // this Map would be the same mistake twice.
+  const backgroundCommands: BackgroundCommandLedger = new Map()
   // Cumulative-so-far, to charge only what each result adds. See the result
   // branch below for why the naive sum was wrong by a factor of seven.
   let chargedUsd = 0
   let lastResult: TranscriptMessage | undefined
+  // Latched inside the loop below, read after it. See cancelledWithoutInterrupt
+  // for what this does and does not mean.
+  let cancelledOutsideInterrupt = false
 
   try {
     const options = await optionsFor(claimed, project.slug, abortController, project.sshKeyId)
@@ -587,9 +801,21 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
             tasks.set(started.tool_use_id, started.subagent_type ?? 'subagent')
           }
         }
+        // Folded for every system message with a subtype, not only
+        // task_started: task_updated and task_notification are how a
+        // background command later reports settling, being killed, or (the
+        // CLI's own auto-backgrounding) only now turning out to be
+        // backgrounded at all.
+        foldBackgroundCommand(backgroundCommands, message)
       }
 
       await appendMessage(sessionId, message, attribution(message, tasks, orchestratorName))
+
+      // The kill for a cancelled tool call can arrive well after this loop
+      // has moved on — the incident this covers saw one land seconds after
+      // the turn's own result — so this only latches the fact; interrupted
+      // is read together with it after the loop, not here.
+      if (cancelledWithoutInterrupt(message)) cancelledOutsideInterrupt = true
 
       if (message.type === 'result') {
         lastResult = message
@@ -607,6 +833,7 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
 
     if (interrupted) {
       if (announcement) await unstampAnnouncement(sessionId, userRow.seq, userRow.id)
+      await noticeStrandedPrompt(sessionId, orchestratorName)
       await setStatus(sessionId, 'interrupted', null)
       return
     }
@@ -638,6 +865,56 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
       return
     }
 
+    // The SDK cancelled a tool call on its own, and the model reading that as
+    // a user refusal is how a session went passive and started asking a human
+    // to pick from a menu — twice — over a `git push` nobody had said no to.
+    // Placed here on purpose: after the drain check, so a real message the
+    // operator sent mid-turn always outranks this auto-nudge rather than
+    // racing it; and skipped whenever the result itself says the turn stopped
+    // for a reason (`error_*`, including the budget subtype just handled
+    // above), because a `maxTurns` or budget stop legitimately cancels
+    // whatever tool calls were still outstanding and nudging there would just
+    // fight a limit that is working correctly.
+    if (cancelledOutsideInterrupt && !resultSubtype?.startsWith('error_')) {
+      await recover(sessionId, orchestratorName, {
+        notice: (attempt, of) =>
+          `A tool call in this turn came back cancelled by the harness, not refused by the operator — nobody declined it. Re-running it (${attempt} of ${of}).`,
+        instruction: `A tool call in your previous turn was reported as cancelled. That was not the operator saying no: nobody was asked, and this session runs with permissions bypassed, so there was no confirmation to refuse in the first place. The harness cancelled it on its own — most likely because the turn ended while it was still running. There is no menu to offer and no decision to wait for: re-run whatever that call was doing and carry on.`,
+        giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: a tool call keeps coming back cancelled by the harness, not refused by the operator.`,
+      })
+      return
+    }
+
+    // A background *command*, not a delegated task: the operator asked for
+    // something — a `git push` behind a multi-minute pre-push hook, backgrounded
+    // with `run_in_background: true` — and it never got to finish, because this
+    // session cannot outlive its turn either. The count comes from the ledger
+    // the loop above just built, not from `lastResult`: the kill for exactly
+    // this kind of command arrived roughly five seconds after the result that
+    // otherwise reads as "the turn finished cleanly."
+    //
+    // Guarded by the same `!resultSubtype?.startsWith('error_')` as the
+    // cancellation branch above, for the same reason: a `maxTurns` or budget
+    // stop (or any other `error_*` the SDK reports) legitimately kills
+    // whatever commands were still backgrounded when it stopped, so this is
+    // not a second, independent loss to nudge over. This is not a behaviour
+    // regression either — before this ledger existed, a turn like that already
+    // fell through to `completed` — so the guard restores the status quo
+    // rather than hiding a newly-discovered one. Do not remove it to "catch"
+    // that case: it is the budget/turn limit doing its job.
+    const lostCommands = lostBackgroundCommands(backgroundCommands)
+    if (lostCommands > 0 && !resultSubtype?.startsWith('error_')) {
+      const oneCommand = lostCommands === 1
+      const commands = oneCommand ? 'a command' : `${lostCommands} commands`
+      await recover(sessionId, orchestratorName, {
+        notice: (attempt, of) =>
+          `The turn ended while ${commands} you left running in the background ${oneCommand ? 'was' : 'were'} still going, so ${oneCommand ? 'it was' : 'they were'} stopped — this session cannot outlive its turn. Picking the work back up (${attempt} of ${of}).`,
+        instruction: `Your previous turn ended while ${commands} you left running in the background ${oneCommand ? 'was' : 'were'} still going, so ${oneCommand ? 'it was' : 'they were'} stopped when the turn closed. No report is coming for ${oneCommand ? 'it' : 'them'}, and any claim that ${oneCommand ? 'it' : 'they'} finished is unsafe — check what actually happened (did it land, did it finish) before you trust it, then carry on. Backgrounding a command does not outlive your turn: run it in the foreground if you need to see it through, or check back on it again before the turn ends.`,
+        giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: every turn ended with a command still running in the background. Check whether it actually finished.`,
+      })
+      return
+    }
+
     // A turn that ends having lost delegated work has not finished, whatever
     // its result says. Saying so in the transcript and picking the thread back
     // up is the whole difference between this and the session that sat dead for
@@ -660,6 +937,7 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
     // An abort surfaces here as a thrown error, but it was asked for.
     if (interrupted) {
       if (announcement) await unstampAnnouncement(sessionId, userRow.seq, userRow.id)
+      await noticeStrandedPrompt(sessionId, orchestratorName)
       await setStatus(sessionId, 'interrupted', null)
       return
     }

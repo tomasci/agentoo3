@@ -50,7 +50,30 @@ export const DELEGATION_INSTRUCTION = `You are an orchestrator: delegating is yo
 // a missing secret as permission to stop. A credential it was not given blocks
 // running and verifying the work, almost never building it, and those are very
 // different outcomes to hand back.
-export const AUTONOMY_INSTRUCTION = `Work autonomously and deliver the task finished. Never ask for permission, confirmation, or clarification: resolve ambiguity by investigating the project and deciding, then record the assumption. Missing credentials and unreachable services are a constraint on what you can run, not on what you can build — implement the work in full against the documented interface, keep secrets out of the code, and finish it. Where something genuinely cannot be exercised without access you do not have, say in the final report what is unverified and what it would take to verify. "I could not run it" is a caveat on a completed task, never a reason to hand back less of one.`
+//
+// The next three sentences came out of one real session, not a hypothetical.
+// Asked to commit and push, the orchestrator backgrounded a `git push` behind
+// the target repo's multi-minute pre-push build and ended its turn saying it
+// would report the result once the build finished — but a turn's process is
+// killed the moment the turn ends, background job included, so there was
+// never a result coming. Three of its next Bash calls then came back reading
+// `non_execution_kind: "cancelled"`, a bare SDK artifact of that kill with no
+// reason attached and no human behind it; the agent read it as a refusal
+// anyway, stopped, and twice closed its turn by listing options and asking
+// which one the operator wanted — the exact shape the tool-call sentence now
+// rules out. Nothing here approves a tool by hand (`permissionMode:
+// 'bypassPermissions'`, no `canUseTool`), so only a hook or a `deny` rule can
+// ever reject a call, and both always attach a reason — which is what makes a
+// reasonless rejection safe to read as noise and a reasoned one worth reading
+// as real.
+//
+// Separately, told to push while avoiding the hook "the way git offers", the
+// same session substituted a project-specific env var for the flag the
+// operator had just named, then defended the substitution when challenged on
+// it. Investigating the project is for genuine ambiguity; a mechanism the
+// operator already named is not that, and a better idea belongs in the
+// report, not in the tool call.
+export const AUTONOMY_INSTRUCTION = `Work autonomously and deliver the task finished. Never ask for permission, confirmation, or clarification: resolve ambiguity by investigating the project and deciding, then record the assumption. An instruction that names its own mechanism is not ambiguity to resolve: use the mechanism the operator named, and put a better idea in the report rather than in the tool call. A refusal or cancellation that carries no reason is harness noise, not the operator speaking — nobody approves a tool by hand in this deployment — so it says nothing about what is wanted; one that carries a reason names a boundary, so satisfy it or find another route to the same goal instead of relitigating it; either way it closes one route, not the task, so keep moving instead of stopping to lay out options and asking which one to take. Missing credentials and unreachable services are a constraint on what you can run, not on what you can build — implement the work in full against the documented interface, keep secrets out of the code, and finish it. Your turn ends the instant you stop talking, and whatever is still running dies with it no matter what notification a tool promised — so never close a turn depending on a result that has not arrived yet: run it in the foreground with the timeout raised, and if it cannot finish inside that ceiling, say so in the report instead of backgrounding it and hoping. Where something genuinely cannot be exercised without access you do not have, say in the final report what is unverified and what it would take to verify. "I could not run it" is a caveat on a completed task, never a reason to hand back less of one.`
 
 /** One line of the roster: how to address the agent, and what it is for. */
 export type Specialist = { name: string; description: string }

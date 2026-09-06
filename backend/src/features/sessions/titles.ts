@@ -144,8 +144,25 @@ export function titleFor(message: TranscriptMessage, rawWho: string): string | n
   }
 
   if (message.type === 'result') {
-    const result = message as typeof message & { subtype?: string; is_error?: boolean }
+    const result = message as typeof message & {
+      subtype?: string
+      is_error?: boolean
+      num_turns?: number
+      origin?: { kind?: string }
+    }
+    // A failed turn always gets its row, checked first: a killed background
+    // push is one thing, but a background turn that errored out (a bad
+    // credential, a budget cutoff) is exactly the kind of thing this file
+    // exists to surface, and it must not be swallowed by the notification
+    // check below just because it also happened to run zero turns.
     if (result.is_error || result.subtype !== 'success') return 'Turn failed'
+    // A background task can be killed at the turn boundary before it does
+    // anything: the SDK still emits a result, but it is an empty notification
+    // turn, not a turn a human typed into and waited on. Titling it "Turn
+    // complete" reads as confirmation of work (e.g. a push) that in fact
+    // never happened. Both fields read defensively — either can be absent on
+    // a message that legitimately is a completed turn.
+    if (result.origin?.kind === 'task-notification' && result.num_turns === 0) return null
     return 'Turn complete'
   }
 
