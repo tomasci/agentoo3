@@ -51,6 +51,7 @@ export function toManifestFile(row: SessionFileRow): ManifestFile {
   return {
     id: row.id,
     originalFilename: row.originalFilename,
+    storedName: row.storedName,
     mimeType: row.mimeType,
     sizeBytes: row.sizeBytes,
     checksum: row.checksum,
@@ -90,7 +91,10 @@ async function readyFiles(sessionId: string): Promise<SessionFileRow[]> {
  */
 export async function regenerateManifest(sessionId: string): Promise<void> {
   const rows = await readyFiles(sessionId)
-  await writeManifest(sessionId, renderManifest(rows.map(toManifestFile)))
+  await writeManifest(
+    sessionId,
+    renderManifest(sessionUploadsDir(sessionId), rows.map(toManifestFile)),
+  )
 }
 
 interface Usage {

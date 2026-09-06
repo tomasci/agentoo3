@@ -40,7 +40,7 @@ async function* throwing(message: string): AsyncIterable<unknown> {
 const file = (over: Partial<Row> & { id: string; createdAt: Date }): Row => ({
   sessionId: SESSION_ID,
   originalFilename: 'error.log',
-  storedName: `${over.id}-error.log`,
+  storedName: `${over.id}-${(over.originalFilename as string | undefined) ?? 'error.log'}`,
   mimeType: 'text/plain',
   sizeBytes: 2048,
   checksum: 'a'.repeat(64),
@@ -330,7 +330,7 @@ test('a file attached before a turn is announced on that turn, with its uploads 
 
   expect(prompt).toContain('[attachments added] 1 file is now available')
   expect(prompt).toContain(UPLOADS)
-  expect(prompt).toContain('- error.log — text/plain, 40 lines, 2.0 KB')
+  expect(prompt).toContain(`- ${UPLOADS}/f1-error.log — error.log, text/plain, 40 lines, 2.0 KB`)
   expect(prompt.endsWith('do the thing')).toBe(true)
 })
 
@@ -381,7 +381,7 @@ test('a file attached mid-session is announced on the very next turn, alone', as
   const second = await turn(5, 'now look at the spec')
 
   expect(second).toContain('[attachments added] 1 file is now available')
-  expect(second).toContain('- spec.pdf — application/pdf, 14 pages, 2.0 KB')
+  expect(second).toContain(`- ${UPLOADS}/f2-spec.pdf — spec.pdf, application/pdf, 14 pages, 2.0 KB`)
   expect(second).not.toContain('error.log')
   expect(files.map((f) => f.announcedSeq)).toEqual([4, 5])
 })
