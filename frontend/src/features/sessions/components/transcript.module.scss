@@ -1,4 +1,24 @@
-.transcript { display: grid; gap: var(--space-2); align-content: start; }
+// A grid's implicit single column defaults to an `auto` track, which is
+// sized to fit its widest item's content — including a nested
+// `overflow-x: auto` box (a `<pre>`, a `.tableWrap`) that never gets to
+// scroll, because the track widens to its content instead of ever handing it
+// less room than it wants. `minmax(0, 1fr)` pins the column to the
+// container's own width regardless of what a row contains; every nested
+// `display: grid` below (.children, .tool, .result, .answer) needs the same
+// fix for the same reason, one level further in.
+//
+// This is only equivalent to `min-width: 0` on every item while the grid
+// stays single-column and no item spans more than one track (CSS Grid 2
+// §6.6's automatic-minimum-size rule): add a second column an item spans
+// across — `grid-template-columns: auto minmax(0, 1fr)`, say — and that item
+// is back under an `auto` track, so the content-based minimum this fix
+// removes comes back with it.
+.transcript {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+  align-content: start;
+}
 
 // One `.row` per top-level node — never per nested one, those are already
 // gated by Collapsible's own unmount-on-exit. `content-visibility: auto`
@@ -11,7 +31,20 @@
 // rows are discovered; the `auto` keyword remembers a row's real rendered
 // size the next time it goes off screen, so the `6rem` fallback only matters
 // before a row has ever been on screen once.
-.row { content-visibility: auto; contain-intrinsic-size: auto 6rem; }
+.row {
+  content-visibility: auto;
+
+  // Two declarations on purpose — do not collapse them. `auto none` makes a
+  // row report its REAL height once it has been rendered even once, which is
+  // what stops the reader being shoved around as never-seen rows resolve from
+  // a 6rem guess into a 40rem answer (Safari has no scroll anchoring to
+  // absorb that, which is why it reads as fine on a laptop and broken on a
+  // phone). An engine that does not parse the `none` keyword drops the second
+  // declaration and keeps the guess above, so this is straight progressive
+  // enhancement.
+  contain-intrinsic-size: auto 6rem;
+  contain-intrinsic-size: auto none;
+}
 
 // --- the human's own messages -------------------------------------------------
 
@@ -142,6 +175,11 @@
 
 .children {
   display: grid;
+
+  // Same column-widening trap as `.transcript` (see its comment) — a nested
+  // task's own `<pre>` or table would otherwise widen this track before ever
+  // reaching its own scrollbar.
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-2);
   padding-left: var(--space-3);
   border-left: 2px solid var(--color-border);
@@ -188,13 +226,22 @@
 
 // --- tool calls ---------------------------------------------------------------
 
-.tool { display: grid; gap: var(--space-2); }
+// Same column-widening trap as `.transcript` (see its comment) — a tool's
+// own input/result can hold a `<pre>` wide enough to widen this track.
+.tool { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); }
 
 .toolName {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   line-height: var(--leading-sm);
   color: var(--color-accent);
+
+  // Not model prose, so `.markdown`'s blanket `overflow-wrap: anywhere` never
+  // covers it — but an MCP tool name (`mcp__server__tool`) is a single
+  // unbroken token up to 128 characters, and the tool's own `<pre>` below
+  // already shrinks to fit, so this is the one label left that could still
+  // push the row wider than the viewport.
+  overflow-wrap: anywhere;
 }
 
 // A tool that genuinely takes no arguments, e.g. ListAgents — distinct from
@@ -208,7 +255,8 @@
   color: var(--color-text-muted);
 }
 
-.result { display: grid; gap: var(--space-1); }
+// Same column-widening trap as `.transcript` (see its comment).
+.result { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-1); }
 
 .resultLabel {
   font-size: var(--text-2xs);
@@ -239,6 +287,11 @@
 // is working, this is the result of it.
 .answer {
   display: grid;
+
+  // Same column-widening trap as `.transcript` (see its comment) — the reply
+  // is markdown, and a wide table or code block inside it would otherwise
+  // widen this track instead of scrolling inside its own box.
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-1);
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border);

@@ -421,8 +421,11 @@ function TranscriptView({
         // group is already gated by Collapsible's own unmount-on-exit, and
         // wrapping one there anyway does not just duplicate that work: the
         // size containment freezes it at the 6rem placeholder, clipping
-        // whatever the child actually renders.
-        <div key={node.id} className={styles.row}>
+        // whatever the child actually renders. `data-transcript-row` is the
+        // contract session-page.tsx's scroll-position compensation selects
+        // on inside the scroll container: every top-level row carries it, in
+        // document order, and only a top-level row ever does.
+        <div key={node.id} className={styles.row} data-transcript-row="">
           <Node node={node} sessionId={sessionId} />
         </div>
       ))}
