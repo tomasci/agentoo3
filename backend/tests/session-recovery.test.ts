@@ -31,9 +31,28 @@ let statuses: { status: string; lastError?: unknown }[] = []
 /** Turns queued to run. */
 let queued: string[] = []
 
-/** Failure switches, each standing for a database or queue dying mid-recovery. */
+/**
+ * Failure switches, each standing for a database or queue dying mid-recovery.
+ *
+ * `insertFails` needs no scope of its own: every insert on these paths is a
+ * transcript write through `appendMessage`, and the claim writes none.
+ * `messageReadFails` does need one — see below.
+ */
 let insertFails = false
-let selectFails = false
+/**
+ * Reads of the `messages` table fail, and only those: the continuation count,
+ * the mid-turn drain check, and the stranded-prompt read. Those three are what
+ * every test below that sets this flag is about.
+ *
+ * The scope is the point. This used to fail every projected select the fake was
+ * asked for, which quietly included the session row a claim read about itself
+ * while `claimTurn` was briefly a transaction rather than one statement — so
+ * 'a database that cannot answer the stranded-prompt read' threw out of the
+ * claim before the turn had begun, and stopped covering the read it is named
+ * for while still passing as a test of it. What the claim reads about the
+ * session is answered whatever this says.
+ */
+let messageReadFails = false
 let statusWriteFails = false
 let enqueueFails = false
 
@@ -61,6 +80,18 @@ async function* throwing(message: string): AsyncIterable<unknown> {
 // is the sequence allocation.
 const table = (t: unknown) => getTableName(t as Parameters<typeof getTableName>[0])
 
+/** The session row this fake hands back, whether it is claimed or merely read. */
+const claimedRow: Row = {
+  id: 'sess-1',
+  projectId: 'proj-1',
+  orchestrator: 'orchestrator',
+  worktreePath: '/tmp/worktree',
+  sdkSessionId: null,
+  maxBudgetUsd: null,
+  totalCostUsd: 0,
+  status: 'running',
+}
+
 const db = {
   select: (fields?: unknown) => ({
     from: (t: unknown) => {
@@ -72,8 +103,15 @@ const db = {
         // The attachments announcement's own select — nothing here uploads a
         // file, so there is never anything new to announce.
         if (table(t) === 'session_files') return []
+        // Anything the claim reads about the session itself. `running` is the
+        // coherent answer here because this fake's claim always succeeds, so
+        // runTurn's blocked-vs-lost re-read — the only other reader of this row
+        // — would find the turn taken. A refused claim cannot be reached
+        // through this fake at all; session-claim-db.test.ts covers that
+        // against a real Postgres.
+        if (table(t) === 'sessions') return [claimedRow]
         if (fields === undefined) return pending
-        if (selectFails) throw new Error(DB_DOWN)
+        if (messageReadFails) throw new Error(DB_DOWN)
         // Ordered means `autoContinuationsSincePrompt` reading prompts back;
         // unordered is the turn checking whether anything arrived while it ran.
         return ordered ? transcript : arrivedDuringTurn
@@ -100,17 +138,7 @@ const db = {
         if (fields !== undefined) return [{ seq: seq++ }]
         // The turn's claim: whatever the conditional UPDATE returns is the
         // session it owns.
-        return [
-          {
-            id: 'sess-1',
-            projectId: 'proj-1',
-            orchestrator: 'orchestrator',
-            worktreePath: '/tmp/worktree',
-            sdkSessionId: null,
-            maxBudgetUsd: null,
-            totalCostUsd: 0,
-          },
-        ]
+        return [claimedRow]
       },
       then: (ok?: (r: unknown) => unknown, err?: (e: unknown) => unknown) => {
         if (table(t) === 'sessions' && 'status' in payload) {
@@ -247,7 +275,7 @@ afterEach(() => {
   statuses = []
   queued = []
   insertFails = false
-  selectFails = false
+  messageReadFails = false
   statusWriteFails = false
   enqueueFails = false
   turnBehaviour = () => empty()
@@ -351,7 +379,7 @@ test('a read that fails before anything is decided still fails the session', asy
   // The continuation count is the *first* thing the recovery does, and it is a
   // database read. Leaving it outside the guard meant the commonest failure of
   // all — Postgres unreachable — escaped before the guard could see it.
-  selectFails = true
+  messageReadFails = true
 
   await recover('sess-1', 'orchestrator', RECOVERY)
 
@@ -883,7 +911,7 @@ test('a database that cannot answer the stranded-prompt read still interrupts cl
   // session at `running` with no worker holding it.
   transcript = [spoken]
   arrivedDuringTurn = [{ id: 'msg-2' }]
-  selectFails = true
+  messageReadFails = true
   turnBehaviour = () =>
     (async function* () {
       for (const interrupt of interrupters) interrupt({ kind: 'interrupt' })

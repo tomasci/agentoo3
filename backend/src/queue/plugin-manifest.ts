@@ -1,4 +1,6 @@
-import { mkdir, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { projectPlugin } from '@/lib/paths'
 
 /**
@@ -18,22 +20,46 @@ export const PLUGIN_NAME = 'agentoo'
  * there are ignored, silently, at session time. Written at project setup and
  * again when a session starts, so projects created before this existed pick it
  * up on their next run rather than needing a repair step.
+ *
+ * Publishes by write-then-rename rather than a plain `writeFile`: this now
+ * runs at the start of every turn (runner-options.ts), so once two turns in
+ * the same project can be in flight together, a plain in-place write is a
+ * window where a concurrent reader opens the file mid-write and gets
+ * truncated JSON — the whole plugin then fails to load, silently, since the
+ * caller downgrades that failure to a warning (see the try/catch around
+ * `ensurePluginManifest` in library/service.ts). The temp file sits in the
+ * same `.claude-plugin/` directory as its target, not `/tmp`, because
+ * `rename()` is only atomic within a filesystem. Unlike the skill directories
+ * `materialise` publishes, this target is a single file, so rename can
+ * replace it outright — no ENOTEMPTY, no serialization needed here.
  */
 export async function ensurePluginManifest(slug: string): Promise<string> {
   const root = projectPlugin(slug)
-  await mkdir(`${root}/.claude-plugin`, { recursive: true })
-  await writeFile(
-    `${root}/.claude-plugin/plugin.json`,
-    `${JSON.stringify(
-      {
-        // Kebab-case and no spaces: the loader rejects anything else.
-        name: PLUGIN_NAME,
-        version: '1.0.0',
-        description: 'Agents and skills selected for this project.',
-      },
-      null,
-      2,
-    )}\n`,
-  )
+  const dir = `${root}/.claude-plugin`
+  await mkdir(dir, { recursive: true })
+
+  const finalPath = join(dir, 'plugin.json')
+  const tempPath = join(dir, `.tmp-plugin-${randomUUID()}.json`)
+  const content = `${JSON.stringify(
+    {
+      // Kebab-case and no spaces: the loader rejects anything else.
+      name: PLUGIN_NAME,
+      version: '1.0.0',
+      description: 'Agents and skills selected for this project.',
+    },
+    null,
+    2,
+  )}\n`
+
+  try {
+    await writeFile(tempPath, content)
+    await rename(tempPath, finalPath)
+  } catch (error) {
+    // A crashed or failed sync must not leave litter behind for the next one
+    // to trip over.
+    await rm(tempPath, { force: true })
+    throw error
+  }
+
   return root
 }

@@ -9,7 +9,8 @@
 
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { Worker } from 'bullmq'
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull, ne, notExists, or, sql } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import { db } from '@/db/client'
 import { sanitizeForDb } from '@/db/sanitize'
 import { messageFiles, messages, projects, sessionFiles, sessions } from '@/db/schema'
@@ -92,6 +93,19 @@ async function setStatus(sessionId: string, status: string, lastError?: string |
 
 /** How many continuations one stall may be nudged through before it stops. */
 const MAX_AUTO_CONTINUATIONS = 3
+
+/**
+ * How long a turn waits before re-trying a claim blocked behind a sibling
+ * non-isolated session in the same project (see the claim in `runTurn`).
+ *
+ * Polling rather than being woken is deliberate: nothing publishes an event
+ * when the blocking session's turn ends — it might complete, fail, or be
+ * interrupted, and all three already have their own status-setting paths that
+ * would each need to know to nudge a waiter. A short re-enqueue is one cheap
+ * Redis job per interval for however long the blocking turn runs, not a leak:
+ * it stops the moment the claim succeeds or the session is deleted.
+ */
+const BLOCKED_CLAIM_RETRY_MS = 5_000
 
 /**
  * What a result adds to the bill, given what this turn has already charged.
@@ -631,19 +645,194 @@ async function noticeStrandedPrompt(sessionId: string, who: string): Promise<voi
   }
 }
 
+type SessionRow = typeof sessions.$inferSelect
+
+/** The SQLSTATE Postgres reports for `FOR UPDATE NOWAIT` hitting a row someone else already has locked. */
+const LOCK_NOT_AVAILABLE = '55P03'
+
+/**
+ * The driver's own error carries the SQLSTATE; drizzle wraps it in a
+ * `DrizzleQueryError` whose `cause` is that original error, so both have to
+ * be checked — the code is never on the outer error itself.
+ */
+function isLockConflict(error: unknown): boolean {
+  const code = (candidate: unknown) =>
+    candidate && typeof candidate === 'object' && 'code' in candidate
+      ? (candidate as { code?: unknown }).code
+      : undefined
+  return (
+    code(error) === LOCK_NOT_AVAILABLE ||
+    code((error as { cause?: unknown })?.cause) === LOCK_NOT_AVAILABLE
+  )
+}
+
+/**
+ * Claim the turn. A conditional update is the mutex: whichever worker moves
+ * the row out of 'queued' owns it, and a duplicate delivery finds nothing.
+ * Returns the claimed row, or `undefined` if the claim was refused — by
+ * another worker, or by the lock below.
+ *
+ * A project need not be a git repo — an adopted plain folder is a supported
+ * case (project-setup.worker.ts's `isRepo` check) — and such a project's
+ * sessions get no per-session worktree at all, so they fall back to running
+ * straight in the shared repo checkout (`workingDir: row.worktreePath ??
+ * repoPath` in features/sessions/service.ts). At WORKER_CONCURRENCY 1 that
+ * could never bite; above it, two non-isolated turns in the same project
+ * would edit that one working tree and git index at the same time and
+ * silently stomp each other's work. So a non-isolated session (no worktree)
+ * additionally requires that no *other* non-isolated session in the same
+ * project is already `running` — isolated sessions, each with their own
+ * worktree, are unaffected and stay fully parallel, including several in the
+ * same project: the lock below is only ever reached on the non-isolated path,
+ * inside the `OR`'s second arm, which a row with a worktree never evaluates.
+ * Do not read the predicate as redundant with the `status = 'queued'` check:
+ * that guards a single row against a duplicate delivery, the predicate guards
+ * a shared directory against two different rows.
+ *
+ * A plain `NOT EXISTS` reading `sibling.status = 'running'` is not enough by
+ * itself: it is one autocommit read under READ COMMITTED, so a sibling claim
+ * whose UPDATE has already run but not yet committed is invisible to it —
+ * both claims read "nothing running" and both succeed in the one working
+ * tree the predicate exists to protect. Measured against the real code path,
+ * that hit 1-5 times in 20 pairs with no help at all. So the `lockScope` arm
+ * runs first and takes `SELECT ... FOR UPDATE NOWAIT` over every non-isolated
+ * row in the project — deliberately not filtered by status, because a row
+ * that is still `queued` in this statement's own snapshot is exactly the row
+ * a concurrent, not-yet-committed claim is about to change, and a filtered
+ * scan would never consider it a candidate worth locking in the first place.
+ * `NOWAIT` rather than a plain wait, because a claim that is genuinely mid
+ * flight (its row lock held, not yet committed) would otherwise block this
+ * one for as long as that transaction stays open — and the claim ahead of it
+ * can legitimately take a while under real load. A lock conflict is caught
+ * below and treated exactly like `sibling`'s `NOT EXISTS` finding one already
+ * running: refuse the claim and let the caller's blocked-vs-lost re-read
+ * decide what happens next, rather than actually waiting for the lock.
+ *
+ * Both subqueries correlate against `sessions` itself — the row this UPDATE
+ * is about to touch — rather than taking the project id as a separate
+ * parameter, because the project row has not been loaded yet at this point in
+ * the turn and this avoids a round trip just to fetch it. That also keeps the
+ * whole claim to the one statement it always was: no explicit transaction, no
+ * separate read before it:  the lock and the update it guards have to be one
+ * atomic statement anyway for the lock to mean anything, and Postgres already
+ * treats a single statement as its own transaction.
+ */
+async function claimTurn(sessionId: string): Promise<SessionRow | undefined> {
+  const lockScope = alias(sessions, 'lock_scope')
+  const sibling = alias(sessions, 'sibling_session')
+  // `FOR UPDATE NOWAIT` has no query-builder method that the fake `db` in
+  // session-recovery.test.ts implements — that fake exists to test everything
+  // *around* the claim without a real Postgres underneath it, and cannot
+  // execute a real lock — so this one condition is a raw `sql` fragment
+  // rather than `db.select(...).for(...)`, built from the same typed column
+  // references as `sibling` below so a column rename still breaks this at
+  // compile time. Only the alias name itself ("lock_scope") is bare text, and
+  // it only has to agree with itself between the two places it appears here.
+  // Not `exists (... for update nowait)`: EXISTS only has to prove one row
+  // matches, so the planner may lock a single row and stop there — and two
+  // concurrent claims have no guarantee of stopping at the *same* row rather
+  // than each locking a different sibling and never conflicting with each
+  // other at all. That version measured a real double-claim roughly 1 time in
+  // 20 pairs. `count(*)` instead forces the inner query to visit and lock
+  // every matching row before this condition can even be evaluated, so two
+  // overlapping claims are always contending on the same set of rows rather
+  // than possibly disjoint ones.
+  const lockCondition = sql`(select count(*) from (
+    select 1 from ${sessions} as lock_scope
+    where ${and(eq(lockScope.projectId, sessions.projectId), isNull(lockScope.worktreePath))}
+    for update nowait
+  ) as locked_scope) >= 0`
+  try {
+    const [row] = await db
+      .update(sessions)
+      .set({ status: 'running', lastError: null, updatedAt: new Date() })
+      .where(
+        and(
+          eq(sessions.id, sessionId),
+          eq(sessions.status, 'queued'),
+          or(
+            isNotNull(sessions.worktreePath),
+            and(
+              lockCondition,
+              notExists(
+                db
+                  .select({ id: sibling.id })
+                  .from(sibling)
+                  .where(
+                    and(
+                      eq(sibling.projectId, sessions.projectId),
+                      ne(sibling.id, sessions.id),
+                      isNull(sibling.worktreePath),
+                      eq(sibling.status, 'running'),
+                    ),
+                  ),
+              ),
+            ),
+          ),
+        ),
+      )
+      .returning()
+    return row
+  } catch (error) {
+    if (isLockConflict(error)) return undefined
+    throw error
+  }
+}
+
 /** Exported for the tests; the worker below is the only real caller. */
 export async function runTurn(job: SessionRunJob): Promise<void> {
   const { sessionId } = job
 
-  // Claim the turn. A conditional update is the mutex: whichever worker moves
-  // the row out of 'queued' owns it, and a duplicate delivery finds nothing.
-  const [claimed] = await db
-    .update(sessions)
-    .set({ status: 'running', lastError: null, updatedAt: new Date() })
-    .where(and(eq(sessions.id, sessionId), eq(sessions.status, 'queued')))
-    .returning()
+  const claimed = await claimTurn(sessionId)
 
   if (!claimed) {
+    // A failed claim used to mean one thing only: another worker already has
+    // this turn, and logging it was the end of the story. It can now also mean
+    // this turn is blocked behind a sibling non-isolated session, and that case
+    // must not fall into the same branch — returning here without re-queuing
+    // would strand the session at `queued` with a message waiting behind it
+    // and nothing left to ever run it, which is the bug this predicate exists
+    // to fix, in a new shape. Re-reading the row is what tells the two apart:
+    // gone, or moved off `queued`, means the claim was genuinely lost and
+    // someone else has it; still `queued` means nobody has it, it is only
+    // waiting.
+    const [row] = await db
+      .select({ status: sessions.status })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId))
+      .limit(1)
+
+    if (row?.status === 'queued') {
+      logger.info(
+        `Session ${sessionId} is queued but blocked behind another running turn in its project; retrying in ${BLOCKED_CLAIM_RETRY_MS}ms`,
+      )
+      try {
+        await enqueueSessionRun({ sessionId }, { delayMs: BLOCKED_CLAIM_RETRY_MS })
+      } catch (error) {
+        // The retry just above is the only thing that will ever run this
+        // session again — nothing else is watching for the sibling to finish.
+        // Losing it silently would leave the session `queued` forever with its
+        // message still pending: the same bug this predicate exists to fix,
+        // wearing a third costume. Surfaced the way `recover` surfaces an
+        // equivalent queue failure, not swallowed into a log line.
+        const detail = error instanceof Error ? error.message : String(error)
+        logger.error(`Session ${sessionId} could not be re-queued after being blocked: ${detail}`)
+        try {
+          await setStatus(
+            sessionId,
+            'failed',
+            `Blocked behind another turn in its project, and the retry could not be queued: ${detail}`,
+          )
+        } catch (fatal) {
+          const why = fatal instanceof Error ? fatal.message : String(fatal)
+          logger.error(
+            `Session ${sessionId} is stranded: it still reads as 'queued' with a message pending and could not be marked failed (${why}). Reset it by hand once the database is back.`,
+          )
+        }
+      }
+      return
+    }
+
     logger.warn(`Session ${sessionId} was not queued; another worker has the turn`)
     return
   }
