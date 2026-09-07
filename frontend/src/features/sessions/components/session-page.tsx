@@ -447,8 +447,13 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // Queue state that matters when you are about to type, not when you glance
   // at the title (that's why it moved out of the header): whether sending now
   // would just join a queue, and how many prompts are already waiting in it.
+  //
+  // Worded per status rather than off `busy` alone: 'queued' has no turn
+  // running yet (saying so was the old bug — it read as a machine-wide block
+  // rather than this session's own queue), and both wordings lead with "this
+  // session" so neither can be misread as a global stall.
   const queueLine = [
-    busy && t('sessions.willQueue'),
+    busy && t(data.status === 'running' ? 'sessions.willQueueRunning' : 'sessions.willQueueQueued'),
     data.pendingPrompts > 0 && t('sessions.pendingPrompts', { count: data.pendingPrompts }),
   ]
     .filter(Boolean)

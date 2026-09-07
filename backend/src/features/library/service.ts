@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { cp, mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { and, eq } from 'drizzle-orm'
@@ -175,12 +176,47 @@ const librarySource = (kind: 'agent' | 'skill', name: string) =>
  * are rebuilt from the library by syncProjectPlugin, which runs when the
  * selection changes and again as a session starts, so a centrally edited agent
  * reaches every project on its next run.
+ *
+ * An agent publishes by rename, a skill by rm-then-cp, because the two
+ * targets are different kinds of filesystem object and only one of them can
+ * be replaced atomically:
+ *
+ * - An agent target is a single file, so it copies to a temp name in the same
+ *   `agents/` directory and rename()s over the target. rename() replaces an
+ *   existing file atomically, so a concurrent reader — another session's turn
+ *   whose own syncProjectPlugin call lands mid-write — sees either the whole
+ *   old file or the whole new one, never a moment with none at all. That gap
+ *   is exactly what plain rm-then-cp used to expose, harmlessly while at most
+ *   one turn ever ran at a time, live now that turns in one project can
+ *   overlap.
+ * - A skill target is a directory, and rename(2) fails with ENOTEMPTY over an
+ *   existing non-empty directory, so there is no equivalent atomic swap here.
+ *   This keeps rm-then-cp; syncProjectPlugin below serializes calls per slug
+ *   so at least two overlapping syncs in this process cannot interleave their
+ *   rm and cp against the same directory. See the comment there for what that
+ *   does and does not cover.
  */
 async function materialise(slug: string, kind: 'agent' | 'skill', name: string) {
   const target = pluginTarget(slug, kind, name)
-  await ensureDir(join(projectPlugin(slug), kind === 'agent' ? 'agents' : 'skills'))
-  await rm(target, { force: true, recursive: true })
-  await cp(librarySource(kind, name), target, { recursive: kind === 'skill' })
+  const dir = join(projectPlugin(slug), kind === 'agent' ? 'agents' : 'skills')
+  await ensureDir(dir)
+
+  if (kind === 'skill') {
+    await rm(target, { force: true, recursive: true })
+    await cp(librarySource(kind, name), target, { recursive: true })
+    return
+  }
+
+  const tempPath = join(dir, `.tmp-${randomUUID()}-${name}.md`)
+  try {
+    await cp(librarySource(kind, name), tempPath)
+    await rename(tempPath, target)
+  } catch (error) {
+    // A failed copy must not leave a stray temp file for the next sync — or a
+    // person browsing the plugin directory by hand — to trip over.
+    await rm(tempPath, { force: true })
+    throw error
+  }
 }
 
 async function unlinkItem(slug: string, kind: 'agent' | 'skill', name: string) {
@@ -196,7 +232,7 @@ async function unlinkItem(slug: string, kind: 'agent' | 'skill', name: string) {
  * drifted (a failed copy, a hand-edited file, an item renamed underneath us)
  * is corrected on the next run rather than persisting.
  */
-export async function syncProjectPlugin(slug: string, projectId: string): Promise<void> {
+async function runProjectPluginSync(slug: string, projectId: string): Promise<void> {
   await ensurePluginManifest(slug)
 
   const rows = await db
@@ -227,6 +263,14 @@ export async function syncProjectPlugin(slug: string, projectId: string): Promis
     const present = await readdir(dir).catch(() => [] as string[])
 
     for (const entry of present) {
+      // A `.tmp-` name is another materialise() call's in-flight publish —
+      // this sync's own next loop, below, or a concurrent setProjectLibrary /
+      // renameItem call that (unlike syncProjectPlugin itself) is not queued
+      // against this one — never a stale item to prune. Sweeping it here
+      // would delete that write's source out from under its own rename(),
+      // turning the crash-safety materialise() relies on into a spurious
+      // ENOENT instead.
+      if (entry.startsWith('.tmp-')) continue
       const name = kind === 'agent' ? entry.replace(/\.md$/, '') : entry
       if (!wanted.has(name)) await rm(join(dir, entry), { force: true, recursive: true })
     }
@@ -241,6 +285,58 @@ export async function syncProjectPlugin(slug: string, projectId: string): Promis
       }
     }
   }
+}
+
+/**
+ * In-flight syncs, keyed by project slug, each chained onto the previous
+ * rather than left to run alongside it.
+ *
+ * `runProjectPluginSync` is now called at the start of every turn
+ * (runner-options.ts), and its plugin directory is shared by every session in
+ * the project — raising the machine-wide concurrency cap above 1 means two
+ * turns in the same project can call it at the same time. Chaining here
+ * closes that for the skill-directory case, where `materialise` above cannot
+ * publish atomically and two overlapping rm-then-cp passes on the same
+ * directory could otherwise interleave.
+ *
+ * This closes only the window between two syncs racing *in this process* —
+ * the chain lives in memory, so a second worker process running the same
+ * project's sync at the same time is not covered (there is exactly one
+ * worker process today).
+ *
+ * It does not touch a different window at all: turn A's sync rewriting a
+ * skill directory while turn B's Claude Code process, already running and
+ * having read that directory when its own turn started, lazily reads a skill
+ * file out of it minutes later. Nothing here serializes a sync against a
+ * session that is mid-turn, only against another sync — and a per-process
+ * lock could not fix that even if it tried, since the reader on the other
+ * side is a live CLI subprocess with no sync of its own to queue behind. The
+ * structural fix is a plugin directory per session instead of per project, so
+ * there is no directory left for a sync to rewrite out from under a running
+ * one — a path-contract change with a real per-session disk cost, deliberately
+ * deferred until there is a concrete reason to pay it: evidence of an agent or
+ * skill actually going missing mid-turn, not just this analysis.
+ */
+const pluginSyncChains = new Map<string, Promise<void>>()
+
+export function syncProjectPlugin(slug: string, projectId: string): Promise<void> {
+  const previous = pluginSyncChains.get(slug) ?? Promise.resolve()
+  // The previous call's own failure is swallowed here so it cannot stop this
+  // one from running — this is a serialization queue, not a shared outcome.
+  // The caller of *this* call still observes its own failure, through the
+  // rejection of `next` returned below.
+  const next = previous.catch(() => {}).then(() => runProjectPluginSync(slug, projectId))
+  pluginSyncChains.set(slug, next)
+  // Drop the entry once this call settles, but only if it is still the tail —
+  // a call already chained onto `next` owns the map slot now, and clearing it
+  // out from under that call would let a later, unrelated caller start a
+  // fresh chain and run alongside the queued one instead of after it.
+  next
+    .catch(() => {})
+    .finally(() => {
+      if (pluginSyncChains.get(slug) === next) pluginSyncChains.delete(slug)
+    })
+  return next
 }
 
 export async function getProjectLibrary(projectId: string): Promise<ProjectLibraryDto> {

@@ -63,18 +63,35 @@ ATTACHMENTS_DIR="${ATTACHMENTS_DIR:-$REPO_ROOT/attachments}"
 # denied (publickey)", which looks like a rejected key rather than an unreadable
 # one. Pinned here and written into .env so it never depends on $HOME again.
 SSH_KEYS_DIR="${SSH_KEYS_DIR:-$REPO_ROOT/keys}"
-# Each Claude Code instance wants ~4GB, so concurrency is deliberately low.
-WORKER_CONCURRENCY="${WORKER_CONCURRENCY:-1}"
 
-# Optional soft memory ceiling for the worker's cgroup — the worker, its agents
-# and every command they run. Empty means no ceiling, which is systemd's own
-# default. Accepts systemd's syntax: '3G', '80%'.
+# A machine-wide cap on how many session turns run at once, across every
+# project on the box — not the rule that keeps one session's own turns from
+# overlapping. That rule is a conditional UPDATE in the database and does not
+# read this value at all. Pinning this at 1 conflated the two: it also
+# serialised every *other* project's sessions behind whichever one happened to
+# be running, so a second project's session sat at "1 message waiting" with no
+# visible cause until the first one's turn finished.
 #
-# MemoryHigh throttles and reclaims rather than killing, so the worst it can do
-# is make an agent slow. Worth setting on a small box, where the alternative is
-# the kernel picking an OOM victim across the whole machine and possibly landing
-# on postgres.
-WORKER_MEMORY_HIGH="${WORKER_MEMORY_HIGH:-}"
+# Empty means "decide from RAM", the same shape SWAP_SIZE_MB uses below:
+# derived in scripts/68-setup-backend.sh from CLAUDE_CODE_MIN_RAM_MB, floored
+# at 2 and capped at 8 — see that script for why those particular bounds.
+WORKER_CONCURRENCY_EXPLICIT="${WORKER_CONCURRENCY+1}"   # set by the operator this run?
+WORKER_CONCURRENCY="${WORKER_CONCURRENCY:-}"
+
+# Soft memory ceiling for the worker's cgroup — the worker, its agents and
+# every command they run. Accepts systemd's syntax: '3G', '80%', 'infinity'.
+#
+# Used to be optional (empty = no ceiling, systemd's own default) back when
+# WORKER_CONCURRENCY was pinned at 1: one session at a time left headroom by
+# construction, so the bytes guard had nothing urgent to do. Now that the count
+# guard is derived and can go as high as 8, the bytes guard can no longer sit
+# out — '80%' needs no arithmetic, scales with whatever box this lands on, and
+# still leaves room for postgres, redis, nginx and the frontend, none of which
+# live inside the worker's cgroup and all of which have to survive an agent's
+# test suite. MemoryHigh only throttles and reclaims — it never kills — so the
+# worst this does on a small box is slow an agent down.
+WORKER_MEMORY_HIGH_EXPLICIT="${WORKER_MEMORY_HIGH+1}"   # set by the operator this run?
+WORKER_MEMORY_HIGH="${WORKER_MEMORY_HIGH:-80%}"
 # Generated credentials and connection strings are written here.
 ENV_FILE="${ENV_FILE:-$REPO_ROOT/.env}"
 

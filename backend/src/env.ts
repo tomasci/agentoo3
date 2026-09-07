@@ -27,8 +27,14 @@ const schema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   CLAUDE_CODE_OAUTH_TOKEN: z.string().optional(),
 
-  // How many sessions may run at once. Each Claude Code instance wants ~4GB.
-  WORKER_CONCURRENCY: z.coerce.number().int().positive().default(1),
+  // Machine-wide cap on how many turns may run at once — not a per-session
+  // rule. Per-session serialization is enforced separately, by the conditional
+  // claim in session-run.worker.ts's runTurn (a turn is only ever taken out of
+  // 'queued'), and stays enforced regardless of what this number is. The
+  // installer derives the real value from host RAM (each Claude Code instance
+  // wants ~4GB) and pins it in .env; this default is only the fallback for
+  // running without the installer.
+  WORKER_CONCURRENCY: z.coerce.number().int().positive().default(2),
 
   // Where generated ssh keys live. Empty falls back to ~/.ssh/agentoo.
   SSH_KEYS_DIR: z.string().default(''),

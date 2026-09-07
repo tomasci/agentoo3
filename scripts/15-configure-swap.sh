@@ -194,8 +194,9 @@ if ! enable_swapfile; then
     as_root rm -f "$SWAP_FILE"
     log_warn "Could not enable swap on this host — most container runtimes forbid it."
     log_warn "Not fatal, but the machine now has no headroom: a heavy test run or"
-    log_warn "build can get OOM-killed. Give the box more RAM, or run fewer sessions"
-    log_warn "at once (WORKER_CONCURRENCY)."
+    log_warn "build can get OOM-killed. Give the box more RAM, or lower the derived"
+    log_warn "session cap: WORKER_CONCURRENCY=2 $INSTALL_SH --only backend (sticky —"
+    log_warn "it survives the next upgrade)."
     exit 0
   fi
 fi

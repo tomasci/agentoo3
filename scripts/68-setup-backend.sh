@@ -18,6 +18,25 @@ have bun || die "bun is not installed. Run: $INSTALL_SH --only bun"
 
 require_root
 
+# Sticky, the same way NGINX_DOMAIN and UFW_TAILSCALE_ONLY already are: without
+# this, a deliberate
+#   WORKER_CONCURRENCY=6 sudo /opt/agentoo/install.sh --only backend
+# would be undone by the next plain re-run — which derives a fresh value from
+# RAM on every run where the operator did not set one — silently handing the
+# operator back a number they had already moved away from.
+#
+# Remembered right here, before the RAM-derivation below ever runs, and not
+# after: WORKER_CONCURRENCY is still either an operator's explicit value or
+# still empty at this point, never yet a derived one. That is what keeps a
+# plain re-run's derived guess from calcifying into a value later runs treat
+# as sticky — only a value a human actually typed becomes durable. A first run
+# after this change has nothing remembered yet, so it derives cleanly for
+# everyone.
+sticky_recall WORKER_CONCURRENCY
+sticky_recall WORKER_MEMORY_HIGH
+setting_remember WORKER_CONCURRENCY "$WORKER_CONCURRENCY"
+setting_remember WORKER_MEMORY_HIGH "$WORKER_MEMORY_HIGH"
+
 # Services must not run as root: Claude Code refuses to bypass permissions as
 # uid 0, so every session would fail. config.sh picks a dedicated account in
 # that case; create it here if it is not there yet.
@@ -168,6 +187,41 @@ env_set "$ENV_FILE" LIBRARY_DIR  "$LIBRARY_DIR"
 env_set "$ENV_FILE" SOURCES_DIR  "$SOURCES_DIR"
 env_set "$ENV_FILE" SSH_KEYS_DIR "$SSH_KEYS_DIR"
 env_set "$ENV_FILE" ATTACHMENTS_DIR "$ATTACHMENTS_DIR"
+
+# WORKER_CONCURRENCY is empty by default now (config.sh) — derive it from RAM
+# rather than write nothing. Nothing is not a fallback: an empty value here
+# becomes `WORKER_CONCURRENCY=` in .env, z.coerce.number() in backend/src/env.ts
+# turns that into 0, `.positive()` rejects it, and the backend refuses to boot.
+#
+# clamp(floor(MemTotal_MB / CLAUDE_CODE_MIN_RAM_MB), 2, 8):
+#   floor 2, not 1 — the raw arithmetic gives 1 on a 4GB box, and 1 is the bug
+#   this whole change exists to fix. Two sessions competing for RAM on a small
+#   box degrade to throttling, or at worst a SIGKILL the worker already
+#   detects and resumes from (see the kill/recover path in
+#   session-run.worker.ts around the `processKill` check); a session silently
+#   blocked behind another project's turn is indistinguishable from a hang.
+#   The recoverable failure wins.
+#   cap 8 — backend/src/db/client.ts opens the worker's Postgres pool at
+#   `max: 10`, shared with the project-setup worker (concurrency 2) and the gc
+#   worker (concurrency 1). Past ~8 the pool, not RAM, is what actually caps
+#   concurrent turns; raise the pool before raising this further.
+if [[ -z "$WORKER_CONCURRENCY" ]]; then
+  ram_mb=0
+  [[ -r /proc/meminfo ]] && ram_mb=$(( $(awk '/MemTotal/ {print $2; exit}' /proc/meminfo) / 1024 ))
+  if (( ram_mb > 0 )); then
+    WORKER_CONCURRENCY=$(( ram_mb / CLAUDE_CODE_MIN_RAM_MB ))
+    (( WORKER_CONCURRENCY < 2 )) && WORKER_CONCURRENCY=2
+    (( WORKER_CONCURRENCY > 8 )) && WORKER_CONCURRENCY=8
+    log_info "Worker concurrency: ${WORKER_CONCURRENCY} (from ${ram_mb}MB RAM, ${CLAUDE_CODE_MIN_RAM_MB}MB/session, floor 2 / cap 8)"
+  else
+    # /proc/meminfo could not be read — some sandboxes hide it. Land on the
+    # floor rather than leave this empty: a conservative concurrency throttles
+    # under load, an empty one stops the backend from starting at all.
+    WORKER_CONCURRENCY=2
+    log_warn "Could not read /proc/meminfo; defaulting WORKER_CONCURRENCY=2"
+  fi
+fi
+
 env_set "$ENV_FILE" WORKER_CONCURRENCY "$WORKER_CONCURRENCY"
 env_fix_owner "$ENV_FILE"
 
@@ -244,12 +298,14 @@ bun_bin="$(command -v bun)"
 
 write_unit "${APP_NAME}-api" "${APP_NAME} API (Hono)" "$bun_bin src/index.ts"
 
-# Optional, and off unless the operator asks: a soft ceiling on everything the
-# worker's cgroup uses, agents and their commands included. MemoryHigh does not
-# kill — over it the kernel throttles the cgroup and reclaims from it — so on a
-# box with swap the agent slows down instead of the OOM killer choosing a victim
-# elsewhere on the machine. postgres is a plausible victim, and losing it costs
-# far more than a slow test run.
+# A soft ceiling on everything the worker's cgroup uses, agents and their
+# commands included. Defaults to 80% (config.sh), not off: WORKER_CONCURRENCY
+# is now derived and can run up to 8 sessions at once instead of the pinned 1
+# that used to make this guard mostly academic, so there is real headroom to
+# protect. MemoryHigh does not kill — over it the kernel throttles the cgroup
+# and reclaims from it — so on a box with swap the agent slows down instead of
+# the OOM killer choosing a victim elsewhere on the machine. postgres is a
+# plausible victim, and losing it costs far more than a slow test run.
 #
 # Validated here rather than left to systemd. An unparseable value is not an
 # error to systemd: it logs "Invalid memory limit, ignoring" into the journal

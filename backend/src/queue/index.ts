@@ -51,11 +51,20 @@ export const sessionRunQueue = new Queue<SessionRunJob>(QUEUE_SESSION_RUN, {
   },
 })
 
-export async function enqueueSessionRun(job: SessionRunJob) {
+export async function enqueueSessionRun(job: SessionRunJob, opts?: { delayMs?: number }) {
   // One BullMQ group per session would be neater, but that is a Pro feature.
   // Ordering is enforced instead by the session's own status: a turn is only
-  // claimed out of 'queued', and the claim is a conditional UPDATE.
-  return sessionRunQueue.add('turn', job)
+  // claimed out of 'queued', and the claim is a conditional UPDATE. `delayMs`
+  // exists for the one case that claim cannot resolve by itself: a
+  // non-isolated session blocked behind a same-project sibling that already
+  // holds the shared working tree (see the claim in session-run.worker.ts) has
+  // nothing that wakes it when that sibling finishes, so it re-enqueues itself
+  // after a short delay instead of spinning immediately.
+  return sessionRunQueue.add(
+    'turn',
+    job,
+    opts?.delayMs !== undefined ? { delay: opts.delayMs } : undefined,
+  )
 }
 
 // A third queue rather than a second job type on session-run: gc walks the
