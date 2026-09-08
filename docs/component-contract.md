@@ -221,7 +221,7 @@ message are already three reds for one fact.
 Helper text is not rendered when invalid; `Field` drops `hint` when `error` is
 set. Stacked hint-then-error is where the eye stops reading.
 
-## z-index — declare on `Content`, never on `Positioner`
+## z-index and portal containers
 
 Verified in `@zag-js/popper`: the positioner gets **inline**
 `z-index: var(--z-index)`, and Zag sets that property from the *Content's*
@@ -236,6 +236,55 @@ has never applied; the menu paints on top only because the portal appends last.
 
 Dialog is different: it emits no inline z-index, so declare `var(--z-modal)` on
 `.backdrop`, `.positioner` and `.content` in SCSS as today.
+
+### Portal containers: why a flat z-index scale cannot win this
+
+The scale above only decides an ordering between **siblings under
+`document.body`** — it has no vocabulary for "beat a modal", because modality
+is a nesting relation, not a rank on a shared axis. `Dialog` therefore
+publishes its `Content` element through `PortalContainerProvider`
+(`shared/ui/lib/portal-container.ts`), and **every portalled overlay
+primitive must pass `container={usePortalContainer()}`** to Ark's own
+`<Portal>` — `Select`, `Menu` and `Tooltip` today, anything portalled added
+later. That makes the popup a DOM *descendant* of `Content` rather than a
+sibling under `document.body`, so it inherits `Content`'s stacking context and
+wins at any nesting depth without a z-index ever being consulted. The hook
+returns `undefined` outside a `Dialog`, which is exactly Ark's own "portal to
+`document.body`" default, so the non-modal path is unchanged.
+
+Do not "fix" a popup rendering under a modal by raising `--z-dropdown` above
+`--z-modal` — a flat scale has one slot per component *type*, and any reorder
+that fixes one pair breaks another nobody was looking at: push the dropdown
+above the modal and a tooltip opened from inside a menu now loses to the menu;
+a second dialog opened from an action inside the first now loses to the
+first dialog's own dropdown. Containment, not rank, is what generalises.
+
+The same fix closes an accessibility bug no z-index value could touch.
+`@zag-js/dialog` defaults to `modal: true`, which one `requestAnimationFrame`
+after open runs a **one-shot** `hideContentBelow` walk (`@zag-js/aria-hidden`)
+over `document.body`'s children and stamps everything outside the dialog's own
+subtree `aria-hidden="true"` — there is no `MutationObserver`, so nothing that
+opens afterwards is ever un-hidden. Ark's presence keeps a *closed* Select's
+positioner mounted on `document.body` (so a future exit animation has
+somewhere to play), which means it already exists at walk time and gets
+caught; the walk's own rescue path (`findControlledElements`) only spares
+elements with `aria-expanded="true"` at that moment, and a select nobody has
+opened yet never qualifies. Parenting the popup inside `Dialog.Content`
+removes it from `document.body`'s children entirely, so the walk never reaches
+it — the popup is simply never a candidate.
+
+The container must be `Dialog.Content`, **never** `Dialog.Positioner`: in
+Ark's anatomy the positioner is a plain sibling of the content, so a popup
+parented to it is still a `document.body`-adjacent sibling as far as the
+`aria-hidden` walk is concerned — that would fix the paint order and leave the
+a11y bug exactly as it was.
+
+`Toaster` (`overlay/toast.tsx`) is the one deliberate exception — do not
+"finish the job" by giving it a container too. It mounts once in the app
+shell, is never itself rendered inside a `Dialog`, and a toast raised by a
+dialog action must survive that dialog closing; parenting it to
+`Dialog.Content` would unmount the toast the instant the dialog does. It stays
+on `document.body`.
 
 Toast cannot be won: `@zag-js/toast` puts inline `zIndex: 2147483647` on the
 viewport and it is not configurable. Do not fight it with `!important`;
@@ -257,6 +306,15 @@ viewport and it is not configurable. Do not fight it with `!important`;
 - **`@zag-js/presence`** unmounts immediately when `animationName === "none"` or
   `animationDuration === "0s"`, so the global reduced-motion kill cannot strand
   an exit animation.
+- **Ark's `Portal` `container` prop takes a `RefObject`, not a node**
+  (`portal.d.ts:4`), and `portal.js:10-15` only re-reads `.current` inside a
+  `useEffect` keyed on the **ref object's identity**, not its contents — a
+  plain `useRef` populated after mount is the same object forever, so that
+  effect fires once, reads a still-`null` `.current`, and never fires again:
+  silently falls back to `document.body` while looking wired up correctly.
+  Publish a `useMemo`'d `{ current: node }` keyed on a `node` held in state
+  (`usePortalHost` in `shared/ui/lib/portal-container.ts`), so a fresh ref
+  object arrives — and the effect re-reads it — the moment the node mounts.
 
 ## The escape hatch working as designed
 

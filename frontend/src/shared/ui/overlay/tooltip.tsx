@@ -1,5 +1,6 @@
 import { Tooltip as ArkTooltip, Portal } from '@ark-ui/react'
 import type { ReactElement, ReactNode } from 'react'
+import { usePortalContainer } from '../lib/portal-container'
 import styles from './tooltip.module.scss'
 
 type Placement = 'top' | 'bottom' | 'left' | 'right'
@@ -30,10 +31,16 @@ export function Tooltip({
   openDelay = 300,
   closeDelay = 100,
 }: TooltipProps) {
+  // undefined outside a Dialog: Ark's own "portal to document.body" fallback.
+  // Included even though today's only failure mode (1400 > 1200) already
+  // worked by accident: the rule is every portalled overlay passes
+  // container, with no exceptions to remember.
+  const portalContainer = usePortalContainer()
+
   return (
     <ArkTooltip.Root positioning={{ placement }} openDelay={openDelay} closeDelay={closeDelay}>
       <ArkTooltip.Trigger asChild>{children}</ArkTooltip.Trigger>
-      <Portal>
+      <Portal container={portalContainer}>
         <ArkTooltip.Positioner>
           <ArkTooltip.Content className={styles.content}>{content}</ArkTooltip.Content>
         </ArkTooltip.Positioner>
