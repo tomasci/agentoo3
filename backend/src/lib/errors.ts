@@ -58,3 +58,35 @@ export const errorBody = (error: AppError) => ({
   ...(error.recoveryCommands && { recoveryCommands: error.recoveryCommands }),
   ...(error.issues && { issues: error.issues }),
 })
+
+/** The SQLSTATE Postgres reports for a unique-constraint violation. */
+const UNIQUE_VIOLATION = '23505'
+
+/**
+ * Whether `error` is a Postgres unique-constraint violation — optionally
+ * scoped to one constraint by name, so a caller with more than one unique
+ * index in play (or one shared with an unrelated table) does not treat a
+ * violation of the *wrong* index as the specific race it is checking for.
+ *
+ * The driver's own error carries the SQLSTATE and, for a unique violation,
+ * `constraint_name`; drizzle wraps it in a `DrizzleQueryError` whose `cause`
+ * is that original error, so both have to be checked — the identical shape
+ * session-run.worker.ts's own `isLockConflict` already documents for a
+ * different SQLSTATE (lock-not-available rather than unique-violation).
+ *
+ * This is the "map that violation to a clean skip, not a crash" a
+ * claim-by-insert needs: attempting the insert and catching this is a single
+ * round trip that lets the database itself be the mutex, rather than a
+ * check-then-insert race with a window between the two.
+ */
+export function isUniqueViolation(error: unknown, constraint?: string): boolean {
+  const info = (candidate: unknown) =>
+    candidate && typeof candidate === 'object'
+      ? (candidate as { code?: unknown; constraint_name?: unknown })
+      : undefined
+  const matches = (candidate: ReturnType<typeof info>) =>
+    !!candidate &&
+    candidate.code === UNIQUE_VIOLATION &&
+    (constraint === undefined || candidate.constraint_name === constraint)
+  return matches(info(error)) || matches(info((error as { cause?: unknown } | undefined)?.cause))
+}

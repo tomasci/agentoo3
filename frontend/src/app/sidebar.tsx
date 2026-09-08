@@ -74,6 +74,17 @@ export function SystemSidebar() {
       <Link to="/storage" className={styles.navItem} activeProps={{ 'aria-current': 'page' }}>
         {t('nav.storage')}
       </Link>
+      {/* The one known prompt today (KNOWN_PROMPTS, features/system/prompts.ts
+          on the backend); a second one would just be a second Link here, not a
+          new route — see the comment on promptRoute in app/router.tsx. */}
+      <Link
+        to="/prompts/$name"
+        params={{ name: 'idea-to-prompt' }}
+        className={styles.navItem}
+        activeProps={{ 'aria-current': 'page' }}
+      >
+        {t('nav.prompts')}
+      </Link>
       <Link to="/settings" className={styles.navItem} activeProps={{ 'aria-current': 'page' }}>
         {t('nav.configuration')}
       </Link>
@@ -119,6 +130,18 @@ export function ProjectSidebar({ projectId }: { projectId: string }) {
         activeProps={{ 'aria-current': 'page' }}
       >
         {t('nav.sessions')}
+      </Link>
+      {/* Non-exact: the detail route (`/ideas/$ideaId`) is a child page of
+          the same section, and should keep this link current rather than
+          going dark the moment a card is opened. */}
+      <Link
+        to="/projects/$projectId/ideas"
+        params={{ projectId }}
+        className={styles.navItem}
+        activeProps={{ 'aria-current': 'page' }}
+        activeOptions={{ exact: false }}
+      >
+        {t('nav.ideas')}
       </Link>
       <Link
         to="/projects/$projectId/library"

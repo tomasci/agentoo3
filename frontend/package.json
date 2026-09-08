@@ -2,7 +2,7 @@
   "name": "agentoo-frontend",
   "private": true,
   "type": "module",
-  "version": "0.1.83",
+  "version": "0.1.84",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -23,6 +23,7 @@
     "@tanstack/react-query": "5.102.8",
     "@tanstack/react-router": "1.170.32",
     "@tanstack/react-table": "8.9.9",
+    "@xyflow/react": "12.11.6",
     "axios": "1.20.0",
     "consola": "3.4.2",
     "i18next": "26.4.1",

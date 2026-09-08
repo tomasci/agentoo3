@@ -4,11 +4,14 @@ import { AgentEditorPage, LibraryPage, SkillEditorPage } from '@/features/librar
 import { SettingsPage } from '@/features/settings'
 import { SshKeysPage } from '@/features/ssh-keys'
 import { StoragePage } from '@/features/storage'
+import { PromptEditorPage } from '@/features/system'
 import { SYSTEM_HOME } from '@/shared/store/tabs'
 import { Button, EmptyState } from '@/shared/ui'
 import { ProjectLayout } from './project-layout'
 import {
+  IdeaDetailRoute,
   NewTabRoute,
+  ProjectIdeasRoute,
   ProjectLibraryRoute,
   ProjectOverviewRoute,
   ProjectSessionsRoute,
@@ -73,6 +76,22 @@ const projectLibraryRoute = createRoute({
   component: ProjectLibraryRoute,
 })
 
+// The Idea Manager's board: six fixed columns, one project's worth of ideas.
+const projectIdeasRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/ideas',
+  component: ProjectIdeasRoute,
+})
+
+// One idea's canvas, comments, generated prompt and run history. A child of
+// the project layout for the same reason `sessionRoute` is — the sidebar
+// keeps showing which project this idea belongs to.
+const ideaDetailRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/ideas/$ideaId',
+  component: IdeaDetailRoute,
+})
+
 // The global library. Editors are their own pages rather than dialogs: a prompt
 // is the length of a document, and a document deserves an address.
 const libraryRoute = createRoute({
@@ -133,6 +152,20 @@ const storageRoute = createRoute({
   component: StoragePage,
 })
 
+// An operator-editable instruction, addressed by the backend's own fixed name
+// for it (KNOWN_PROMPTS in features/system/prompts.ts) rather than by
+// anything a user picks — there is no "new prompt" route, unlike the library's
+// agents and skills, because this is not a collection. System-tab, not
+// project-tab: the instruction is installation-wide.
+const promptRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/prompts/$name',
+  component: function PromptRoute() {
+    const { name } = promptRoute.useParams()
+    return <PromptEditorPage name={name} />
+  },
+})
+
 // Exported so a test can build its own router over the same tree, with a
 // history it controls, rather than the browser one this module's router uses.
 export const routeTree = rootRoute.addChildren([
@@ -143,6 +176,8 @@ export const routeTree = rootRoute.addChildren([
     projectSessionsRoute,
     sessionRoute,
     projectLibraryRoute,
+    projectIdeasRoute,
+    ideaDetailRoute,
   ]),
   // `new` before `$name`, or "new" would be read as a name.
   newAgentRoute,
@@ -153,6 +188,7 @@ export const routeTree = rootRoute.addChildren([
   sshKeysRoute,
   settingsRoute,
   storageRoute,
+  promptRoute,
 ])
 
 /** An unknown URL should say so, not render an empty layout. */

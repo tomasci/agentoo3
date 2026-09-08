@@ -5,7 +5,7 @@
 
 import { and, desc, eq, inArray, isNotNull, isNull, sql, sum } from 'drizzle-orm'
 import { db } from '@/db/client'
-import { sessionFiles, sessions, storageAnomalies } from '@/db/schema'
+import { ideaFiles, sessionFiles, sessions, storageAnomalies } from '@/db/schema'
 import { env } from '@/env'
 import { badRequest, conflict, notFound } from '@/lib/errors'
 import { attachmentsManifestPath, sessionUploadsDir } from '@/lib/paths'
@@ -97,12 +97,15 @@ export async function regenerateManifest(sessionId: string): Promise<void> {
   )
 }
 
-interface Usage {
+export interface Usage {
   fileCount: number
   sizeBytes: number
 }
 
-async function usageFor(sessionId: string): Promise<Usage> {
+/** Exported for features/ideas/files.ts's handoff, which needs a session's
+ * current usage to pre-check the whole set of copies against its caps before
+ * touching a single byte — see attachIdeaAssetsToSession. */
+export async function usageFor(sessionId: string): Promise<Usage> {
   const [row] = await db
     .select({ n: sql<number>`count(*)`, bytes: sum(sessionFiles.sizeBytes) })
     .from(sessionFiles)
@@ -110,15 +113,37 @@ async function usageFor(sessionId: string): Promise<Usage> {
   return { fileCount: Number(row?.n ?? 0), sizeBytes: Number(row?.bytes ?? 0) }
 }
 
-async function totalUsage(): Promise<number> {
-  const [row] = await db
-    .select({ bytes: sum(sessionFiles.sizeBytes) })
-    .from(sessionFiles)
-    .where(isNull(sessionFiles.deletedAt))
-  return Number(row?.bytes ?? 0)
+/**
+ * Every root's byte usage combined, not session_files alone. Exported so
+ * features/ideas/files.ts's own upload and handoff paths enforce the same
+ * deployment-wide cap this does, from the same query.
+ *
+ * A handed-off asset lives on disk twice once handoff has run — once under
+ * its idea, once copied into its session (see attachIdeaAssetsToSession) —
+ * and legitimately occupies two blocks of real disk, so counting it twice
+ * here is correct, not a bug: this cap guards actual disk space, not a count
+ * of logical files. Left summing session_files alone, a brand-new idea store
+ * would be invisible to this cap and would silently stop protecting a
+ * growing fraction of the disk — a worse failure than double-counting ever
+ * could be.
+ */
+export async function totalUsage(): Promise<number> {
+  const [[sessionTotal], [ideaTotal]] = await Promise.all([
+    db
+      .select({ bytes: sum(sessionFiles.sizeBytes) })
+      .from(sessionFiles)
+      .where(isNull(sessionFiles.deletedAt)),
+    db
+      .select({ bytes: sum(ideaFiles.sizeBytes) })
+      .from(ideaFiles)
+      .where(isNull(ideaFiles.deletedAt)),
+  ])
+  return Number(sessionTotal?.bytes ?? 0) + Number(ideaTotal?.bytes ?? 0)
 }
 
-function uploadErrorMessage(error: AttachmentUploadError): string {
+/** Exported so features/ideas/files.ts's own upload path renders the same
+ * message for the same error, rather than a second copy of this mapping. */
+export function uploadErrorMessage(error: AttachmentUploadError): string {
   return error.code === 'too_large'
     ? error.message
     : `Rejected: ${error.message}. Allowed types are png, jpeg, webp, gif, pdf, and plain-text formats ` +
@@ -398,10 +423,19 @@ async function nextScheduledCheckAt(): Promise<string | null> {
 }
 
 export async function storageSummary(): Promise<StorageSummaryDto> {
-  const [totals] = await db
+  const [sessionTotals] = await db
     .select({ n: sql<number>`count(*)`, bytes: sum(sessionFiles.sizeBytes) })
     .from(sessionFiles)
     .where(isNull(sessionFiles.deletedAt))
+  // Idea assets feed the same total the Storage page's cap is measured
+  // against — see totalUsage's own comment on why a handed-off asset
+  // legitimately counts on both roots at once. Left out, `totalBytes` here
+  // would silently stop matching `maxTotalBytes`'s own denominator the
+  // moment an idea store existed at all.
+  const [ideaTotals] = await db
+    .select({ n: sql<number>`count(*)`, bytes: sum(ideaFiles.sizeBytes) })
+    .from(ideaFiles)
+    .where(isNull(ideaFiles.deletedAt))
   const [sessionsAgg] = await db
     .select({ n: sql<number>`count(distinct ${sessionFiles.sessionId})` })
     .from(sessionFiles)
@@ -417,9 +451,18 @@ export async function storageSummary(): Promise<StorageSummaryDto> {
     nextScheduledCheckAt(),
   ])
 
+  const sessionBytes = Number(sessionTotals?.bytes ?? 0)
+  const sessionFileCount = Number(sessionTotals?.n ?? 0)
+  const ideaBytes = Number(ideaTotals?.bytes ?? 0)
+  const ideaFileCount = Number(ideaTotals?.n ?? 0)
+
   return {
-    totalBytes: Number(totals?.bytes ?? 0),
-    totalFiles: Number(totals?.n ?? 0),
+    totalBytes: sessionBytes + ideaBytes,
+    totalFiles: sessionFileCount + ideaFileCount,
+    sessionBytes,
+    sessionFiles: sessionFileCount,
+    ideaBytes,
+    ideaFiles: ideaFileCount,
     sessionCount: Number(sessionsAgg?.n ?? 0),
     maxTotalBytes: env.ATTACHMENTS_TOTAL_MAX_BYTES,
     openAnomalies: Number(openAgg?.n ?? 0),

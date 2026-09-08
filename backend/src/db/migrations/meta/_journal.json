@@ -50,6 +50,13 @@
       "when": 1788660843061,
       "tag": "0006_amused_tarantula",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788801329541,
+      "tag": "0007_nasty_jean_grey",
+      "breakpoints": true
     }
   ]
 }

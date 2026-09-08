@@ -1,5 +1,6 @@
 import { relations, sql } from 'drizzle-orm'
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   doublePrecision,
@@ -164,13 +165,45 @@ export const sessions = pgTable(
     // a max(seq) scan, and so gaps never appear after a failed insert.
     nextSeq: integer('next_seq').notNull().default(0),
 
+    // Touched by a timer inside a running turn. Proves the *worker process* is
+    // alive and holding the turn — not that the agent itself is making
+    // progress. Exists because updatedAt freezes the moment the turn is
+    // claimed, so a healthy 40-minute turn and a worker that died mid-turn
+    // are otherwise indistinguishable from the row alone.
+    heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('sessions_project_idx').on(t.projectId), index('sessions_status_idx').on(t.status)],
+  (t) => [
+    index('sessions_project_idx').on(t.projectId),
+    index('sessions_status_idx').on(t.status),
+    // Only 'running' sessions have a heartbeat worth scanning for — a stalled
+    // watchdog query over every idle/completed session would be pure waste.
+    index('sessions_heartbeat_idx').on(t.heartbeatAt).where(sql`${t.status} = 'running'`),
+  ],
 )
 
 // --- messages -----------------------------------------------------------------
+
+// A board switches on this exhaustively, so it is a pgEnum rather than text: an
+// unconstrained column that silently gained a fourteenth value is how a card
+// ends up stuck in a column forever instead of the switch failing loudly.
+export const turnOutcomeEnum = pgEnum('turn_outcome', [
+  'completed',
+  'stopped_turn_limit',
+  'stopped_api_error',
+  'stopped_execution_error',
+  'stopped_over_budget',
+  'failed',
+  'stalled',
+  'continuing',
+  'drained',
+  'interrupted',
+  'unknown',
+  'abandoned',
+  'stranded',
+])
 
 // Every SDK message, verbatim. This is the source of truth for history, not the
 // JSONL files Claude Code writes to disk: those are keyed to filesystem paths
@@ -199,9 +232,42 @@ export const messages = pgTable(
     // stored so history renders identically without re-deriving it.
     title: text('title'),
     payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+
+    // The five columns below are meaningful only on a 'prompt' row — the same
+    // "nullable and only meaningful for one type" shape `pending` above and
+    // session_files.announcedSeq already have.
+    //
+    // Stamped when a turn claims this prompt.
+    turnStartedAt: timestamp('turn_started_at', { withTimezone: true }),
+    // Null means no verdict has been rendered yet — that null-ness *is* the
+    // state machine. Nothing derives a turn's state from timestamp
+    // arithmetic against turnStartedAt; it is read as present-or-absent only.
+    turnEndedAt: timestamp('turn_ended_at', { withTimezone: true }),
+    turnOutcome: turnOutcomeEnum('turn_outcome'),
+    // The human-readable sentence. Its own column rather than a read of
+    // sessions.lastError, because the next turn's claim resets lastError to
+    // null — exactly the trap sessions.baseNote already documents above, and
+    // for the same reason.
+    turnDetail: text('turn_detail'),
+    // Set on an auto-continuation prompt to point at the prompt whose turn
+    // spawned it, so a continuation chain is reconstructible from the
+    // transcript alone, with no live observer required.
+    continuesMessageId: uuid('continues_message_id').references((): AnyPgColumn => messages.id, {
+      onDelete: 'set null',
+    }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('messages_session_seq_key').on(t.sessionId, t.seq)],
+  (t) => [
+    uniqueIndex('messages_session_seq_key').on(t.sessionId, t.seq),
+    // Finding turns that were claimed but never rendered a verdict.
+    index('messages_turn_open_idx')
+      .on(t.sessionId)
+      .where(sql`${t.turnStartedAt} is not null and ${t.turnEndedAt} is null`),
+    // Finding abandoned prompts. Also helps the existing pendingFor query,
+    // which scans today.
+    index('messages_pending_idx').on(t.sessionId).where(sql`${t.pending}`),
+  ],
 )
 
 // --- session files --------------------------------------------------------
@@ -316,17 +382,35 @@ export const messageFiles = pgTable(
 
 // --- storage anomalies -----------------------------------------------------
 
-// Exactly four classes, by design — see features/attachments/gc.ts:
-//   orphan_blob        bytes on disk with no DB row
-//   dangling_row       a DB row whose blob is missing (breaks a turn)
-//   orphan_session_dir a storage-root directory whose session_id has no
-//                       matching session row
-//   checksum_mismatch  a row's size/checksum disagrees with the file on disk
+// Two storage roots now feed this table (sessions, ideas), each producing
+// anomalies keyed either by path or by row:
+//   orphan_blob             bytes on disk with no DB row, either root
+//   dangling_row            a session_files row whose blob is missing
+//   orphan_session_dir      a session storage-root dir with no matching
+//                           session row
+//   checksum_mismatch       a session_files row's size/checksum disagrees
+//                           with the file on disk
+//   orphan_idea_dir         an idea storage-root dir with no matching idea row
+//   idea_dangling_row       an idea_files row whose blob is missing
+//   idea_checksum_mismatch  an idea_files row's size/checksum disagrees with
+//                           the file on disk
+//
+// orphan_blob generalises across both roots unchanged, because it is keyed on
+// `path` and paths are globally unique regardless of which root they live
+// under. The two row-keyed classes per root cannot generalise the same way:
+// they are keyed on (class, fileId) and remediation deletes from a specific
+// table (session_files vs idea_files), so each root needs its own class to
+// discriminate. Carrying that in `class` rather than in a new column is the
+// cheapest place to put it — class is already half of both unique keys below
+// and half of every remediation branch in gc.ts.
 export const storageAnomalyClassEnum = pgEnum('storage_anomaly_class', [
   'orphan_blob',
   'dangling_row',
   'orphan_session_dir',
   'checksum_mismatch',
+  'orphan_idea_dir',
+  'idea_dangling_row',
+  'idea_checksum_mismatch',
 ])
 
 // Persisted rather than computed on page load, so the page is instant and so
@@ -334,10 +418,10 @@ export const storageAnomalyClassEnum = pgEnum('storage_anomaly_class', [
 // once mid-upload. Not deleted when it disappears — resolvedAt is set instead
 // — so a flapping problem stays visible in history.
 //
-// sessionId and fileId carry no foreign key on purpose: for two of the four
-// classes (orphan_blob, orphan_session_dir) the whole point is that the
-// session or file they'd reference may not exist any more, or never matched
-// one to begin with.
+// sessionId and fileId carry no foreign key on purpose: for the orphan
+// classes (orphan_blob, orphan_session_dir, orphan_idea_dir) the whole point
+// is that the session, idea or file they'd reference may not exist any more,
+// or never matched one to begin with.
 export const storageAnomalies = pgTable(
   'storage_anomalies',
   {
@@ -360,11 +444,271 @@ export const storageAnomalies = pgTable(
     // orphan_session_dir are filesystem-keyed (no row, so path is what
     // repeats across runs); dangling_row and checksum_mismatch are row-keyed
     // (path may be absent or wrong, so fileId is what repeats). Postgres
-    // never treats two NULLs as colliding in a unique index, so the classes
-    // that leave the other column NULL never spuriously conflict with each
-    // other here.
+    // never treats two NULLs as colliding in a unique index, so a class that
+    // truly always leaves the other column NULL can never spuriously conflict
+    // on it. That does NOT cover orphan_blob: gc.ts fills fileId in for every
+    // blob whose on-disk name carries a uuid prefix, which is the normal
+    // case, not the NULL one — so two orphan blobs that share a file id under
+    // different paths satisfy this index and collide on class_file_key. See
+    // upsertAnomaly in gc.ts for how that collision is arbitrated.
     uniqueIndex('storage_anomalies_class_path_key').on(t.class, t.path),
     uniqueIndex('storage_anomalies_class_file_key').on(t.class, t.fileId),
+  ],
+)
+
+// --- ideas ----------------------------------------------------------------------
+
+// A per-project kanban board. Dropping a card into 'selected_for_development'
+// is what a background sweep watches for to start a handoff; every other
+// status is either not yet ready for that (backlog, todo) or already past it
+// (in_progress_dev, verification, done).
+export const ideaStatusEnum = pgEnum('idea_status', [
+  'backlog',
+  'todo',
+  'selected_for_development',
+  'in_progress_dev',
+  'verification',
+  'done',
+])
+
+export const ideas = pgTable(
+  'ideas',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    status: ideaStatusEnum('status').notNull().default('backlog'),
+    // Where this card sits within its column — board placement, nothing to do
+    // with block reading order (see idea_blocks.seq below). A plain float so
+    // a drag lands between its new neighbours at their midpoint, and moving
+    // one card never has to renumber the rest of the column.
+    boardPosition: doublePrecision('board_position').notNull(),
+    // Set at handoff, when the idea is picked off 'selected_for_development'
+    // and a session is created for it; null before that. ON DELETE SET NULL:
+    // deleting the session must not delete the idea — the card keeps its
+    // history (its runs, prompts, comments) even once the session backing it
+    // is gone.
+    sessionId: uuid('session_id').references(() => sessions.id, { onDelete: 'set null' }),
+    // These three mirror what createSession accepts, because the session is
+    // created lazily at handoff rather than when the idea is — they have to
+    // be chosen up front, on the card, before there is a session to hold them.
+    orchestrator: text('orchestrator'),
+    baseBranch: text('base_branch'),
+    maxBudgetUsd: integer('max_budget_usd'),
+    // Next seq to hand out for this idea's blocks. Modelled deliberately on
+    // sessions.nextSeq above, for the identical reason: kept on the row so an
+    // insert can allocate without a max(seq) scan, and so a failed insert
+    // never leaves a gap that a reader would mistake for a missing block.
+    nextSeq: integer('next_seq').notNull().default(0),
+    // Why a handoff could not proceed (prompt generation failed, no session
+    // could be created, ...) — surfaced on the card so the user knows why it
+    // is stuck rather than it silently not advancing.
+    lastError: text('last_error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ideas_project_idx').on(t.projectId),
+    // The board's only read shape: every idea for a project, grouped by
+    // column and ordered within it.
+    index('ideas_project_status_idx').on(t.projectId, t.status, t.boardPosition),
+  ],
+)
+
+// A container the user drops blocks into on the canvas; it becomes a heading
+// when the canvas is serialized into a prompt.
+export const ideaGroups = pgTable(
+  'idea_groups',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ideaId: uuid('idea_id')
+      .notNull()
+      .references(() => ideas.id, { onDelete: 'cascade' }),
+    seq: integer('seq').notNull(),
+    title: text('title').notNull(),
+    x: doublePrecision('x').notNull().default(0),
+    y: doublePrecision('y').notNull().default(0),
+    w: doublePrecision('w'),
+    h: doublePrecision('h'),
+  },
+  (t) => [index('idea_groups_idea_idx').on(t.ideaId)],
+)
+
+export const ideaBlockKindEnum = pgEnum('idea_block_kind', [
+  'note',
+  'requirement',
+  'example',
+  'link',
+  'image',
+])
+
+// `seq` is reading order, and is what the prompt serializer sorts by; `x`/`y`
+// are presentation only, and the serializer never sees them. A single column
+// cannot be both a place on a plane and a place in a sequence — if it tried,
+// nudging a card four pixels would silently reorder the generated prompt.
+export const ideaBlocks = pgTable(
+  'idea_blocks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ideaId: uuid('idea_id')
+      .notNull()
+      .references(() => ideas.id, { onDelete: 'cascade' }),
+    // ON DELETE SET NULL: deleting a group must not delete the blocks it
+    // contains — they fall back to ungrouped rather than disappearing.
+    groupId: uuid('group_id').references(() => ideaGroups.id, { onDelete: 'set null' }),
+    seq: integer('seq').notNull(),
+    kind: ideaBlockKindEnum('kind').notNull(),
+    body: text('body').notNull(),
+    meta: jsonb('meta').$type<Record<string, unknown>>(),
+    x: doublePrecision('x').notNull().default(0),
+    y: doublePrecision('y').notNull().default(0),
+    w: doublePrecision('w'),
+    h: doublePrecision('h'),
+  },
+  (t) => [
+    // Mirrors messages_session_seq_key above: one reading-order slot per idea.
+    uniqueIndex('idea_blocks_idea_seq_key').on(t.ideaId, t.seq),
+    index('idea_blocks_idea_idx').on(t.ideaId),
+  ],
+)
+
+export const ideaComments = pgTable(
+  'idea_comments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ideaId: uuid('idea_id')
+      .notNull()
+      .references(() => ideas.id, { onDelete: 'cascade' }),
+    body: text('body').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // Set when a follow-up prompt has folded this comment in — stamped at
+    // enqueue time, in the same transaction that computes that prompt's
+    // digest, so a comment can never be folded-in-but-unmarked or
+    // marked-but-unfolded.
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+  },
+  (t) => [index('idea_comments_idea_idx').on(t.ideaId)],
+)
+
+export const ideaPromptKindEnum = pgEnum('idea_prompt_kind', ['initial', 'followup'])
+
+export const ideaPromptStatusEnum = pgEnum('idea_prompt_status', ['pending', 'ready', 'failed'])
+
+export const ideaPrompts = pgTable(
+  'idea_prompts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ideaId: uuid('idea_id')
+      .notNull()
+      .references(() => ideas.id, { onDelete: 'cascade' }),
+    kind: ideaPromptKindEnum('kind').notNull(),
+    // The exact deterministic serialization of the canvas the model was
+    // given — stored so a regeneration is reproducible, and so the worker
+    // never has to re-read the canvas to know what a past prompt was built
+    // from.
+    sourceDigest: text('source_digest').notNull(),
+    generatedTitle: text('generated_title'),
+    generatedText: text('generated_text'),
+    // Decisions the generator made on the user's behalf. Agents in this
+    // system cannot stop mid-turn to ask, so whatever the canvas left
+    // underspecified gets recorded here instead of silently guessed.
+    assumptions: jsonb('assumptions').$type<string[]>(),
+    model: text('model'),
+    costUsd: doublePrecision('cost_usd'),
+    status: ideaPromptStatusEnum('status').notNull().default('pending'),
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [index('idea_prompts_idea_idx').on(t.ideaId)],
+)
+
+export const ideaRunStatusEnum = pgEnum('idea_run_status', [
+  'generating',
+  'dispatching',
+  'running',
+  'closed',
+])
+
+export const ideaRunOutcomeEnum = pgEnum('idea_run_outcome', [
+  'finished',
+  'needs_attention',
+  'interrupted',
+  'superseded',
+  'session_deleted',
+])
+
+// One row per handoff of an idea into a session — the durable record that
+// answers "has the work for this idea stopped, and how".
+export const ideaRuns = pgTable(
+  'idea_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ideaId: uuid('idea_id')
+      .notNull()
+      .references(() => ideas.id, { onDelete: 'cascade' }),
+    sessionId: uuid('session_id').references(() => sessions.id, { onDelete: 'set null' }),
+    promptId: uuid('prompt_id').references(() => ideaPrompts.id, { onDelete: 'set null' }),
+    // messages cascade-deletes with its session, so cascading here too would
+    // erase this attribution record whenever a session is deleted — the same
+    // reasoning already written on message_files.fileId above.
+    promptMessageId: uuid('prompt_message_id').references(() => messages.id, {
+      onDelete: 'set null',
+    }),
+    kind: ideaPromptKindEnum('kind').notNull(),
+    status: ideaRunStatusEnum('status').notNull().default('generating'),
+    outcome: ideaRunOutcomeEnum('outcome'),
+    detail: text('detail'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('idea_runs_idea_idx').on(t.ideaId),
+    index('idea_runs_session_idx').on(t.sessionId),
+    // Makes two concurrent handoffs of one idea impossible in the database,
+    // rather than in a check-then-insert race: at most one row per idea may
+    // have a null endedAt at a time. The same pattern as
+    // session_files_session_checksum_key and message_files_message_file_key
+    // above — a partial unique index encoding "only while this is still the
+    // live one".
+    uniqueIndex('idea_runs_open_key').on(t.ideaId).where(sql`${t.endedAt} is null`),
+  ],
+)
+
+// Idea-owned uploaded assets — structurally a mirror of session_files above;
+// read its comments first, since the same reasoning applies field for field
+// with ideaId standing in for sessionId. Deliberately no announcedSeq:
+// announcement is a session concept, and an idea's files are copied into the
+// session created at handoff and announced from there, not from this table.
+export const ideaFiles = pgTable(
+  'idea_files',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ideaId: uuid('idea_id')
+      .notNull()
+      .references(() => ideas.id, { onDelete: 'cascade' }),
+    originalFilename: text('original_filename').notNull(),
+    storedName: text('stored_name').notNull(),
+    mimeType: text('mime_type').notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    checksum: text('checksum').notNull(),
+    // Reuses session_file_status rather than a near-identical second enum:
+    // the three states mean exactly the same thing here, and a duplicate
+    // enum would just be two vocabularies for one concept.
+    status: sessionFileStatusEnum('status').notNull().default('ready'),
+    lineCount: integer('line_count'),
+    pageCount: integer('page_count'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('idea_files_idea_idx').on(t.ideaId),
+    // Mirrors session_files_session_checksum_key above.
+    uniqueIndex('idea_files_idea_checksum_key')
+      .on(t.ideaId, t.checksum)
+      .where(sql`${t.deletedAt} is null`),
   ],
 )
 
@@ -374,6 +718,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   sessions: many(sessions),
   libraryItems: many(projectLibraryItems),
   sshKey: one(sshKeys, { fields: [projects.sshKeyId], references: [sshKeys.id] }),
+  ideas: many(ideas),
 }))
 
 export const sshKeysRelations = relations(sshKeys, ({ many }) => ({
@@ -388,6 +733,7 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   project: one(projects, { fields: [sessions.projectId], references: [projects.id] }),
   messages: many(messages),
   files: many(sessionFiles),
+  ideas: many(ideas),
 }))
 
 export const messagesRelations = relations(messages, ({ one, many }) => ({
@@ -403,4 +749,45 @@ export const sessionFilesRelations = relations(sessionFiles, ({ one, many }) => 
 export const messageFilesRelations = relations(messageFiles, ({ one }) => ({
   message: one(messages, { fields: [messageFiles.messageId], references: [messages.id] }),
   file: one(sessionFiles, { fields: [messageFiles.fileId], references: [sessionFiles.id] }),
+}))
+
+export const ideasRelations = relations(ideas, ({ one, many }) => ({
+  project: one(projects, { fields: [ideas.projectId], references: [projects.id] }),
+  session: one(sessions, { fields: [ideas.sessionId], references: [sessions.id] }),
+  groups: many(ideaGroups),
+  blocks: many(ideaBlocks),
+  comments: many(ideaComments),
+  prompts: many(ideaPrompts),
+  runs: many(ideaRuns),
+  files: many(ideaFiles),
+}))
+
+export const ideaGroupsRelations = relations(ideaGroups, ({ one, many }) => ({
+  idea: one(ideas, { fields: [ideaGroups.ideaId], references: [ideas.id] }),
+  blocks: many(ideaBlocks),
+}))
+
+export const ideaBlocksRelations = relations(ideaBlocks, ({ one }) => ({
+  idea: one(ideas, { fields: [ideaBlocks.ideaId], references: [ideas.id] }),
+  group: one(ideaGroups, { fields: [ideaBlocks.groupId], references: [ideaGroups.id] }),
+}))
+
+export const ideaCommentsRelations = relations(ideaComments, ({ one }) => ({
+  idea: one(ideas, { fields: [ideaComments.ideaId], references: [ideas.id] }),
+}))
+
+export const ideaPromptsRelations = relations(ideaPrompts, ({ one, many }) => ({
+  idea: one(ideas, { fields: [ideaPrompts.ideaId], references: [ideas.id] }),
+  runs: many(ideaRuns),
+}))
+
+export const ideaRunsRelations = relations(ideaRuns, ({ one }) => ({
+  idea: one(ideas, { fields: [ideaRuns.ideaId], references: [ideas.id] }),
+  session: one(sessions, { fields: [ideaRuns.sessionId], references: [sessions.id] }),
+  prompt: one(ideaPrompts, { fields: [ideaRuns.promptId], references: [ideaPrompts.id] }),
+  promptMessage: one(messages, { fields: [ideaRuns.promptMessageId], references: [messages.id] }),
+}))
+
+export const ideaFilesRelations = relations(ideaFiles, ({ one }) => ({
+  idea: one(ideas, { fields: [ideaFiles.ideaId], references: [ideas.id] }),
 }))
