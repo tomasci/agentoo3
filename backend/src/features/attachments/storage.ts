@@ -1,11 +1,22 @@
-// Filesystem storage for session attachments. Postgres holds metadata only —
-// this module is the only place that ever touches the storage root or builds
-// a path inside it, so a bug in a caller cannot become a path-traversal write
-// (see lib/paths.ts's session-id validation for the choke point this relies
-// on, and library/index.ts:18 for why that discipline exists at all here).
+// Filesystem storage for attachments — both storage roots. Postgres holds
+// metadata only — this module is the only place that ever touches either
+// storage root or builds a path inside one, so a bug in a caller cannot
+// become a path-traversal write (see lib/paths.ts's session/idea-id
+// validation for the choke point this relies on, and library/index.ts:18 for
+// why that discipline exists at all here).
 //
-// Everything below resolves by (sessionId, fileId), never by fileId alone —
-// a file id from one session must not be reachable through another.
+// Two roots, one writer: sessions/ and ideas/ are laid out identically (see
+// lib/paths.ts), and every function below that resolves, writes or lists a
+// blob is a directory-based implementation shared by both, wrapped in a
+// thin, id-flavoured export for each root. The session-flavoured wrappers
+// keep their original (sessionId, fileId) signatures exactly — callers and
+// the existing test suite depend on that shape — while the idea-flavoured
+// siblings (putIdeaFile, openIdeaFile, ...) give features/ideas/files.ts the
+// same guarantees on the second root without a second copy of the ~90-line
+// writer or the path-resolution logic behind it.
+//
+// Everything below resolves by (ownerId, fileId), never by fileId alone — a
+// file id from one session (or idea) must not be reachable through another.
 
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
@@ -26,15 +37,18 @@ import { logger } from '@/lib/logger'
 import {
   assertInsideAttachments,
   attachmentsManifestPath,
+  ideaAttachmentsDir,
+  ideaUploadsDir,
   sessionAttachmentsDir,
   sessionUploadsDir,
 } from '@/lib/paths'
 import { hasControlChars } from '@/lib/text'
 import { SNIFF_HEAD_BYTES, sniff } from './sniff'
 
-export interface StoredFile {
+/** Fields common to a stored blob on either root, before an owner id (a
+ * sessionId or an ideaId) is attached to it. */
+export interface StoredBlob {
   fileId: string
-  sessionId: string
   originalFilename: string
   storedName: string
   mimeType: string
@@ -44,7 +58,16 @@ export interface StoredFile {
   pageCount: number | null
 }
 
-/** Thrown by `put()`. `code` is what the service layer maps onto an HTTP error. */
+export interface StoredFile extends StoredBlob {
+  sessionId: string
+}
+
+export interface StoredIdeaFile extends StoredBlob {
+  ideaId: string
+}
+
+/** Thrown by `put()`/`putIdeaFile()`. `code` is what the service layer maps
+ * onto an HTTP error. */
 export class AttachmentUploadError extends Error {
   readonly code: 'too_large' | 'rejected_type'
   constructor(message: string, code: 'too_large' | 'rejected_type') {
@@ -93,16 +116,28 @@ export function sanitizeFilename(original: string): string {
   return flattened.slice(0, 100) || 'file'
 }
 
-async function ensureSessionUploadsDir(sessionId: string): Promise<string> {
-  const dir = sessionUploadsDir(sessionId)
-  // mkdir's mode is masked by umask, so each level gets an explicit chmod
-  // too — the same two-step pattern lib/ssh.ts's generateKey uses for its
-  // own 0700 directory.
+/**
+ * mkdir + chmod dance shared by every uploads directory either root manages.
+ * `mkdir`'s mode is masked by umask, so each level gets an explicit `chmod`
+ * too — the same two-step pattern lib/ssh.ts's generateKey uses for its own
+ * 0700 directory. `ownerDir` is the directory one level up (a session's or an
+ * idea's own directory, whose mode also needs forcing past umask, not just
+ * its uploads/ child).
+ */
+async function ensureUploadsDir(dir: string, ownerDir: string): Promise<string> {
   await mkdir(dir, { recursive: true, mode: 0o700 })
-  await chmod(sessionAttachmentsDir(sessionId), 0o700)
+  await chmod(ownerDir, 0o700)
   await chmod(dir, 0o700)
   await assertInsideAttachments(dir)
   return dir
+}
+
+async function ensureSessionUploadsDir(sessionId: string): Promise<string> {
+  return ensureUploadsDir(sessionUploadsDir(sessionId), sessionAttachmentsDir(sessionId))
+}
+
+async function ensureIdeaUploadsDir(ideaId: string): Promise<string> {
+  return ensureUploadsDir(ideaUploadsDir(ideaId), ideaAttachmentsDir(ideaId))
 }
 
 function textLike(mimeType: string): boolean {
@@ -126,26 +161,28 @@ function estimatePdfPageCount(buf: Buffer): number | null {
 }
 
 /**
- * Write a new file into a session's uploads directory.
- *
- * Streams to `.tmp-<uuid>` in the final directory, hashing and sniffing as it
- * goes, and only `rename()`s into place once the write and the fsync are both
- * done — an agent must never observe a half-written upload. Any failure along
+ * Write a new file into `dir`, streaming to `.tmp-<uuid>` in that directory,
+ * hashing and sniffing as it goes, and only `rename()`-ing into place once
+ * the write and the fsync are both done — an agent (or, for an idea asset, a
+ * later handoff) must never observe a half-written upload. Any failure along
  * the way — over the per-file cap, an unrecognised type, a disk error —
  * removes the temp file and rethrows; no partial file, no orphan row is ever
  * left for a caller to insert.
  *
- * `declaredType` is accepted for parity with the interface this is meant to
- * be swappable behind, but deliberately unused: the allowlist is decided by
- * sniffing content, never a client-declared content type.
+ * The one writer both storage roots share: `ensure` performs whichever
+ * mkdir/chmod dance `dir` needs (see `ensureSessionUploadsDir` /
+ * `ensureIdeaUploadsDir`) and is called before anything is written; `dir`
+ * itself is what every path below is joined against. `put()` and
+ * `putIdeaFile()` are the id-flavoured callers that actually construct these
+ * two arguments — this function never sees a session or idea id at all.
  */
-export async function put(
-  sessionId: string,
+async function writeBlob(
+  dir: string,
+  ensure: () => Promise<unknown>,
   originalFilename: string,
   body: ReadableStream<Uint8Array>,
-  _declaredType?: string,
-): Promise<StoredFile> {
-  const dir = await ensureSessionUploadsDir(sessionId)
+): Promise<StoredBlob> {
+  await ensure()
   const fileId = randomUUID()
   const storedName = `${fileId}-${sanitizeFilename(originalFilename)}`
   const tempPath = join(dir, `.tmp-${fileId}`)
@@ -217,7 +254,6 @@ export async function put(
 
     return {
       fileId,
-      sessionId,
       originalFilename,
       storedName,
       mimeType: sniffed.mimeType,
@@ -233,6 +269,40 @@ export async function put(
   }
 }
 
+/**
+ * `declaredType` is accepted for parity with the interface this is meant to
+ * be swappable behind, but deliberately unused: the allowlist is decided by
+ * sniffing content, never a client-declared content type.
+ */
+export async function put(
+  sessionId: string,
+  originalFilename: string,
+  body: ReadableStream<Uint8Array>,
+  _declaredType?: string,
+): Promise<StoredFile> {
+  const dir = sessionUploadsDir(sessionId)
+  const blob = await writeBlob(
+    dir,
+    () => ensureSessionUploadsDir(sessionId),
+    originalFilename,
+    body,
+  )
+  return { ...blob, sessionId }
+}
+
+/** Idea-flavoured sibling of `put()` — see `writeBlob` for the shared writer
+ * both call. */
+export async function putIdeaFile(
+  ideaId: string,
+  originalFilename: string,
+  body: ReadableStream<Uint8Array>,
+  _declaredType?: string,
+): Promise<StoredIdeaFile> {
+  const dir = ideaUploadsDir(ideaId)
+  const blob = await writeBlob(dir, () => ensureIdeaUploadsDir(ideaId), originalFilename, body)
+  return { ...blob, ideaId }
+}
+
 interface ResolvedBlob {
   path: string
   storedName: string
@@ -242,12 +312,8 @@ interface ResolvedBlob {
   nameFromDisk: string
 }
 
-async function resolveStoredPath(
-  sessionId: string,
-  fileId: string,
-): Promise<ResolvedBlob | undefined> {
+async function resolveStoredPathIn(dir: string, fileId: string): Promise<ResolvedBlob | undefined> {
   assertFileId(fileId)
-  const dir = sessionUploadsDir(sessionId)
   let entries: string[]
   try {
     entries = await readdir(dir)
@@ -276,7 +342,7 @@ export async function open(
   fileId: string,
   range?: { start: number; end: number },
 ): Promise<{ file: StoredFile; stream: ReadableStream<Uint8Array> } | undefined> {
-  const resolved = await resolveStoredPath(sessionId, fileId)
+  const resolved = await resolveStoredPathIn(sessionUploadsDir(sessionId), fileId)
   if (!resolved) return undefined
   const st = await fsStat(resolved.path)
   const bunFile = Bun.file(resolved.path)
@@ -297,21 +363,40 @@ export async function open(
   }
 }
 
-/**
- * Ground truth for one file: a full re-read, re-sniff and re-hash from disk.
- * Expensive relative to `open()` on purpose — this is what gc.ts calls to
- * detect a `checksum_mismatch` or confirm a `dangling_row`, an hourly batch
- * job over the whole store, not a per-download cost. Bounded by the per-file
- * size cap, so "expensive" tops out in the tens of milliseconds.
- */
-export async function stat(sessionId: string, fileId: string): Promise<StoredFile | undefined> {
-  const resolved = await resolveStoredPath(sessionId, fileId)
+/** Idea-flavoured sibling of `open()`. */
+export async function openIdeaFile(
+  ideaId: string,
+  fileId: string,
+  range?: { start: number; end: number },
+): Promise<{ file: StoredIdeaFile; stream: ReadableStream<Uint8Array> } | undefined> {
+  const resolved = await resolveStoredPathIn(ideaUploadsDir(ideaId), fileId)
+  if (!resolved) return undefined
+  const st = await fsStat(resolved.path)
+  const bunFile = Bun.file(resolved.path)
+  const sliced = range ? bunFile.slice(range.start, range.end + 1) : bunFile
+  return {
+    file: {
+      fileId,
+      ideaId,
+      originalFilename: resolved.nameFromDisk,
+      storedName: resolved.storedName,
+      mimeType: 'application/octet-stream',
+      sizeBytes: st.size,
+      checksum: '',
+      lineCount: null,
+      pageCount: null,
+    },
+    stream: sliced.stream(),
+  }
+}
+
+async function statAt(dir: string, fileId: string): Promise<StoredBlob | undefined> {
+  const resolved = await resolveStoredPathIn(dir, fileId)
   if (!resolved) return undefined
   const buf = await readFile(resolved.path)
   const sniffed = sniff(buf.subarray(0, SNIFF_HEAD_BYTES), resolved.nameFromDisk)
   return {
     fileId,
-    sessionId,
     originalFilename: resolved.nameFromDisk,
     storedName: resolved.storedName,
     mimeType: sniffed.ok && sniffed.mimeType ? sniffed.mimeType : 'application/octet-stream',
@@ -322,22 +407,54 @@ export async function stat(sessionId: string, fileId: string): Promise<StoredFil
   }
 }
 
-/** Idempotent: deleting a file that is already gone is not an error. */
-export async function deleteFile(sessionId: string, fileId: string): Promise<void> {
-  const resolved = await resolveStoredPath(sessionId, fileId)
+/**
+ * Ground truth for one file: a full re-read, re-sniff and re-hash from disk.
+ * Expensive relative to `open()` on purpose — this is what gc.ts calls to
+ * detect a `checksum_mismatch` or confirm a `dangling_row`, an hourly batch
+ * job over the whole store, not a per-download cost. Bounded by the per-file
+ * size cap, so "expensive" tops out in the tens of milliseconds.
+ */
+export async function stat(sessionId: string, fileId: string): Promise<StoredFile | undefined> {
+  const blob = await statAt(sessionUploadsDir(sessionId), fileId)
+  return blob && { ...blob, sessionId }
+}
+
+/** Idea-flavoured sibling of `stat()`. */
+export async function statIdeaFile(
+  ideaId: string,
+  fileId: string,
+): Promise<StoredIdeaFile | undefined> {
+  const blob = await statAt(ideaUploadsDir(ideaId), fileId)
+  return blob && { ...blob, ideaId }
+}
+
+async function deleteBlobAt(dir: string, fileId: string): Promise<void> {
+  const resolved = await resolveStoredPathIn(dir, fileId)
   if (!resolved) return
   await rm(resolved.path, { force: true })
 }
 
+/** Idempotent: deleting a file that is already gone is not an error. */
+export async function deleteFile(sessionId: string, fileId: string): Promise<void> {
+  return deleteBlobAt(sessionUploadsDir(sessionId), fileId)
+}
+
+/** Idea-flavoured sibling of `deleteFile()`. */
+export async function deleteIdeaFile(ideaId: string, fileId: string): Promise<void> {
+  return deleteBlobAt(ideaUploadsDir(ideaId), fileId)
+}
+
 /**
- * Prune the two shard directories above a session's, ignoring ENOTEMPTY —
- * another session can share either one — and ENOENT, since this always runs
- * after the session directory itself is already gone.
+ * Prune the two shard directories above one owner's, ignoring ENOTEMPTY —
+ * another owner on the same root can share either one — and ENOENT, since
+ * this always runs after the owner's own directory is already gone.
+ * `rootSegment` defaults to `'sessions'`; the idea-flavoured callers below
+ * pass `'ideas'` explicitly.
  */
-async function pruneShardDirs(sessionId: string): Promise<void> {
-  const hex = sessionId.toLowerCase().replace(/-/g, '')
-  const bbDir = join(env.ATTACHMENTS_DIR, 'sessions', hex.slice(0, 2), hex.slice(2, 4))
-  const aaDir = join(env.ATTACHMENTS_DIR, 'sessions', hex.slice(0, 2))
+async function pruneShardDirs(id: string, rootSegment: string = 'sessions'): Promise<void> {
+  const hex = id.toLowerCase().replace(/-/g, '')
+  const bbDir = join(env.ATTACHMENTS_DIR, rootSegment, hex.slice(0, 2), hex.slice(2, 4))
+  const aaDir = join(env.ATTACHMENTS_DIR, rootSegment, hex.slice(0, 2))
   for (const dir of [bbDir, aaDir]) {
     try {
       await rmdir(dir)
@@ -364,17 +481,31 @@ export async function deleteSessionFiles(sessionId: string): Promise<void> {
 }
 
 /**
+ * Idea-flavoured sibling of `deleteSessionFiles()`. Nothing in this codebase
+ * calls this yet — an idea's own deletion flow belongs to whichever track
+ * builds it — but it is the same operation on the other root, kept here for
+ * the same reason `deleteSessionFiles` is: one place removes an owner's
+ * whole tree, rather than every future caller reaching for `rm` itself.
+ */
+export async function deleteIdeaFiles(ideaId: string): Promise<void> {
+  const dir = ideaAttachmentsDir(ideaId)
+  await rm(dir, { recursive: true, force: true })
+  await pruneShardDirs(ideaId, 'ideas')
+}
+
+/**
  * Regenerate ATTACHMENTS.md. The one writer, called by the *service* layer
  * after every mutation — see manifest.ts for why the content itself is
  * rendered there and not here, and features/attachments/service.ts for the
- * caller.
+ * caller. Sessions only: an idea has no manifest (see idea_files' own
+ * comment in db/schema.ts) and so no idea-flavoured sibling exists here.
  */
 export async function writeManifest(sessionId: string, content: string): Promise<void> {
   const dir = await ensureSessionUploadsDir(sessionId)
   const path = attachmentsManifestPath(sessionId)
   const tempPath = join(dir, `.tmp-manifest-${randomUUID()}`)
   await Bun.write(tempPath, content)
-  // 0600 like every blob (see put() above) — Bun.write's mode is masked by
+  // 0600 like every blob (see writeBlob above) — Bun.write's mode is masked by
   // umask the same way mkdir's is, so this has to be set explicitly rather
   // than trusted to land there. Chmod before rename, not after: the rename is
   // what publishes this under its final name, so a reader must never be able
@@ -383,23 +514,77 @@ export async function writeManifest(sessionId: string, content: string): Promise
   await rename(tempPath, path)
 }
 
+/**
+ * Copy an existing idea asset's bytes into a session's uploads directory
+ * under a fresh file id — the one place features/ideas/files.ts's handoff
+ * touches either storage root, keeping the "only storage.ts builds a path"
+ * rule intact even for a cross-root operation. Preserves nothing about the
+ * source's own identity: metadata (mimeType, checksum, lineCount, ...) is the
+ * caller's to carry across from the idea_files row that already vouches for
+ * these bytes, not something this re-derives.
+ *
+ * Bytes land under their final name (via the same temp-then-rename discipline
+ * `writeBlob` uses) before this returns; inserting the session_files row is
+ * entirely the caller's next, separate step. A failure between the two
+ * — this succeeding but the caller's insert failing — leaves an unrowed
+ * blob, which is GC-able exactly like any other orphan (see
+ * ATTACHMENTS_GC_GRACE_MS), never an orphan row.
+ */
+export async function copyIdeaFileIntoSession(
+  ideaId: string,
+  ideaFileStoredName: string,
+  sessionId: string,
+  originalFilename: string,
+): Promise<{ fileId: string; storedName: string }> {
+  const sourcePath = join(ideaUploadsDir(ideaId), ideaFileStoredName)
+  await assertInsideAttachments(sourcePath)
+
+  const dir = sessionUploadsDir(sessionId)
+  await ensureSessionUploadsDir(sessionId)
+  const fileId = randomUUID()
+  const storedName = `${fileId}-${sanitizeFilename(originalFilename)}`
+  const tempPath = join(dir, `.tmp-${fileId}`)
+  const finalPath = join(dir, storedName)
+
+  try {
+    await Bun.write(tempPath, Bun.file(sourcePath))
+    await chmod(tempPath, 0o600)
+    await rename(tempPath, finalPath)
+  } catch (error) {
+    await rm(tempPath, { force: true })
+    throw error
+  }
+
+  return { fileId, storedName }
+}
+
 // --- reconciliation helpers -------------------------------------------------
 //
-// Used only by features/attachments/gc.ts. These walk the storage root
-// directly rather than through (sessionId, fileId) — that is the whole point
-// of two of the four anomaly classes, which exist precisely because the
-// session or file id on disk may not resolve to anything in Postgres. They
-// still live here rather than being reimplemented in gc.ts, so path
-// construction stays in exactly one module.
+// Used only by features/attachments/gc.ts and reconcile.ts. These walk a
+// storage root directly rather than through (ownerId, fileId) — that is the
+// whole point of the two dir-orphan classes, which exist precisely because
+// the session/idea or file id on disk may not resolve to anything in
+// Postgres. They still live here rather than being reimplemented in gc.ts, so
+// path construction stays in exactly one module.
 
 export function attachmentsRoot(): string {
   return resolve(env.ATTACHMENTS_DIR)
 }
 
-/** Every session directory under the storage root, shard structure and all. */
-export async function walkSessionDirs(): Promise<{ sessionId: string; dir: string }[]> {
-  const root = join(attachmentsRoot(), 'sessions')
-  const out: { sessionId: string; dir: string }[] = []
+export interface WalkedDir {
+  /** The session or idea id this directory belongs to — never both; which
+   * one depends on which `rootSegment` was walked. */
+  id: string
+  dir: string
+}
+
+/** Every directory under one storage root's shard tree, `'sessions'` or
+ * `'ideas'` alike — sharded structure and all. gc.ts is the only caller, and
+ * always passes `rootSegment` explicitly so both roots are walked in the same
+ * pass (see that module's runCheck for why that has to be one pass). */
+export async function walkStorageDirs(rootSegment: string): Promise<WalkedDir[]> {
+  const root = join(attachmentsRoot(), rootSegment)
+  const out: WalkedDir[] = []
   let shardA: string[]
   try {
     shardA = await readdir(root)
@@ -411,13 +596,13 @@ export async function walkSessionDirs(): Promise<{ sessionId: string; dir: strin
     const shardB = await readdir(aaDir).catch(() => [] as string[])
     for (const bb of shardB) {
       const bbDir = join(aaDir, bb)
-      const sessionDirs = await readdir(bbDir).catch(() => [] as string[])
-      for (const name of sessionDirs) {
+      const idDirs = await readdir(bbDir).catch(() => [] as string[])
+      for (const name of idDirs) {
         if (!UUID_RE.test(name)) {
-          logger.warn(`Skipping ${join(bbDir, name)}: not a session id`)
+          logger.warn(`Skipping ${join(bbDir, name)}: not a valid id`)
           continue
         }
-        out.push({ sessionId: name, dir: join(bbDir, name) })
+        out.push({ id: name, dir: join(bbDir, name) })
       }
     }
   }
@@ -434,9 +619,8 @@ export interface BlobEntry {
   mtimeMs: number
 }
 
-/** Real files in a session's uploads dir — never `.tmp-*`, never ATTACHMENTS.md. */
-export async function listBlobEntries(sessionId: string): Promise<BlobEntry[]> {
-  const dir = sessionUploadsDir(sessionId)
+/** Real files in a directory — never `.tmp-*`, never ATTACHMENTS.md. */
+async function listBlobEntriesIn(dir: string): Promise<BlobEntry[]> {
   const entries = await readdir(dir).catch(() => [] as string[])
   const out: BlobEntry[] = []
   for (const name of entries) {
@@ -449,6 +633,17 @@ export async function listBlobEntries(sessionId: string): Promise<BlobEntry[]> {
     out.push({ fileId, storedName: name, path, sizeBytes: st.size, mtimeMs: st.mtimeMs })
   }
   return out
+}
+
+/** Real files in a session's uploads dir — never `.tmp-*`, never
+ * ATTACHMENTS.md. */
+export async function listBlobEntries(sessionId: string): Promise<BlobEntry[]> {
+  return listBlobEntriesIn(sessionUploadsDir(sessionId))
+}
+
+/** Idea-flavoured sibling of `listBlobEntries()`. */
+export async function listIdeaBlobEntries(ideaId: string): Promise<BlobEntry[]> {
+  return listBlobEntriesIn(ideaUploadsDir(ideaId))
 }
 
 /** Streamed, for gc.ts's system-wide walk, which may touch far more files in
@@ -464,8 +659,10 @@ export async function checksumFile(path: string): Promise<string> {
 }
 
 /** Raw delete by an absolute path already discovered via the walk helpers
- * above — used for orphan_blob GC, where there may be no valid session or
- * file id to route through the (sessionId, fileId) functions at all. */
+ * above — used for orphan_blob GC, where there may be no valid session, idea
+ * or file id to route through the (ownerId, fileId) functions at all. Safe
+ * across both roots unchanged: `orphan_blob` is keyed on `path`, and paths
+ * are globally unique regardless of which root they live under. */
 export async function removeBlobAt(path: string): Promise<void> {
   await rm(path, { force: true })
 }
@@ -474,4 +671,11 @@ export async function removeBlobAt(path: string): Promise<void> {
 export async function removeSessionDirAt(sessionId: string, dir: string): Promise<void> {
   await rm(dir, { recursive: true, force: true })
   await pruneShardDirs(sessionId)
+}
+
+/** Idea-flavoured sibling of `removeSessionDirAt()`, for an `orphan_idea_dir`
+ * anomaly. */
+export async function removeIdeaDirAt(ideaId: string, dir: string): Promise<void> {
+  await rm(dir, { recursive: true, force: true })
+  await pruneShardDirs(ideaId, 'ideas')
 }

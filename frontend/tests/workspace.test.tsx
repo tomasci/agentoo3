@@ -175,8 +175,15 @@ test('the workspace opens as one system tab, showing system navigation only', as
 
   expect(tabs()).toEqual(['System'])
   expect(activeTab()).toBe('System')
-  // Library, ssh keys, configuration — and nothing about any project.
-  expect(navLinks()).toEqual(['/library', '/library', '/ssh-keys', '/storage', '/settings'])
+  // Library, ssh keys, storage, prompts, configuration — and nothing about any project.
+  expect(navLinks()).toEqual([
+    '/library',
+    '/library',
+    '/ssh-keys',
+    '/storage',
+    '/prompts/idea-to-prompt',
+    '/settings',
+  ])
   expect(navLinks().some((href) => href?.startsWith('/projects'))).toBe(false)
   expect(problems).toEqual([])
 })
@@ -205,7 +212,12 @@ test('picking a project fills in that same tab, and turns on project navigation'
   expect(tabs()).toEqual(['System', 'Alpha'])
   expect(activeTab()).toBe('Alpha')
   expect(at()).toBe('/projects/p1')
-  expect(navLinks()).toEqual(['/projects/p1', '/projects/p1/sessions', '/projects/p1/library'])
+  expect(navLinks()).toEqual([
+    '/projects/p1',
+    '/projects/p1/sessions',
+    '/projects/p1/ideas',
+    '/projects/p1/library',
+  ])
   // No system pages in a project tab.
   expect(navLinks().includes('/settings')).toBe(false)
   expect(problems).toEqual([])

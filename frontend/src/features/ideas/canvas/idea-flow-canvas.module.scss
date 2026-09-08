@@ -1,0 +1,12 @@
+// A fixed-height region, not `preventScrolling={false}`: React Flow defaults
+// to swallowing page scroll wherever a wheel or a one-finger drag lands on
+// it (`preventScrolling`, kept at its default `true`), so the canvas needs a
+// bounded box of its own rather than a page that can no longer be scrolled
+// through it — see the report for the full trade-off.
+.canvas {
+  position: relative;
+  height: 32rem;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}

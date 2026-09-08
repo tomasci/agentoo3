@@ -136,7 +136,9 @@
     "library": "Library",
     "projectLibrary": "Agents & skills",
     "system": "System",
-    "configuration": "Configuration"
+    "configuration": "Configuration",
+    "prompts": "Prompts",
+    "ideas": "Ideas"
   },
   "sshKeys": {
     "heading": "Your keys",
@@ -413,7 +415,10 @@
       "orphan_blob": "Orphan blob",
       "dangling_row": "Dangling row",
       "orphan_session_dir": "Orphan session directory",
-      "checksum_mismatch": "Checksum mismatch"
+      "checksum_mismatch": "Checksum mismatch",
+      "orphan_idea_dir": "Orphan idea directory",
+      "idea_dangling_row": "Idea dangling row",
+      "idea_checksum_mismatch": "Idea checksum mismatch"
     },
     "topSessions": {
       "heading": "Largest sessions",
@@ -431,7 +436,7 @@
     "cleanupCountsFailed": "Could not load exact counts for cleanup",
     "cleanupConfirm": {
       "title": "Clean up storage?",
-      "body": "Deletes {{blobs}} orphan file(s), {{rows}} dangling row(s), {{dirs}} orphan session director(y/ies) and {{mismatches}} checksum mismatch(es) found by the last check — {{bytes}} in total. A checksum mismatch deletes both the corrupt blob and its row.",
+      "body": "Deletes {{blobs}} orphan file(s), {{rows}} dangling row(s), {{dirs}} orphan director(y/ies) and {{mismatches}} checksum mismatch(es) found by the last check — {{bytes}} in total. A checksum mismatch deletes both the corrupt blob and its row.",
       "empty": "Nothing to clean up — the last check found no anomalies to remove."
     },
     "anomalies": {
@@ -494,6 +499,235 @@
         "size": "Size",
         "firstSeen": "First seen",
         "lastSeen": "Last seen"
+      }
+    }
+  },
+  "prompts": {
+    "title": "Idea → prompt instruction",
+    "description": "The system instruction that turns an idea's canvas into a single development prompt for an orchestrator session. Tune it here instead of over SSH.",
+    "body": "Instruction",
+    "bodyHint": "The whole system prompt for the one-shot call that turns a canvas into a session prompt. Blank is rejected — an empty instruction means the model runs with no guidance at all.",
+    "sourceFile": "Custom — your saved instruction",
+    "sourceDefault": "Built-in default",
+    "defaultNotice": "No custom instruction is saved yet. This is the built-in default the app runs on until you save one of your own.",
+    "loadFailed": "Could not load the instruction",
+    "saveFailed": "Could not save",
+    "resetFailed": "Could not reset",
+    "resetToDefault": "Reset to default",
+    "resetTitle": "Reset to the built-in default?",
+    "resetConfirm": "Your saved instruction will be deleted, and the app will fall back to the built-in default shown above. This cannot be undone."
+  },
+  "ideas": {
+    "heading": "Ideas",
+    "loadFailed": "Could not load ideas",
+    "notFound": "That idea does not exist.",
+    "open": "Open",
+    "actionsFor": "Actions for \"{{title}}\"",
+    "status": {
+      "backlog": "Backlog",
+      "todo": "To do",
+      "selected_for_development": "Selected for development",
+      "in_progress_dev": "In progress",
+      "verification": "Verification",
+      "done": "Done"
+    },
+    "board": {
+      "empty": "No ideas in this column yet.",
+      "addIdea": "Add idea",
+      "blocks_one": "{{count}} block",
+      "blocks_other": "{{count}} blocks",
+      "comments_one": "{{count}} comment",
+      "comments_other": "{{count}} comments",
+      "assets_one": "{{count}} file",
+      "assets_other": "{{count}} files",
+      "stuckReason": "Why this is stuck"
+    },
+    "form": {
+      "createHeading": "New idea",
+      "editHeading": "Edit idea",
+      "title": "Title",
+      "titlePlaceholder": "A dark-mode toggle",
+      "startColumn": "Starting column",
+      "orchestrator": "Orchestrator",
+      "orchestratorNone": "None",
+      "orchestratorHint": "The agent from the library that drives the session once this idea is handed off.",
+      "baseBranch": "Base branch",
+      "baseBranchHint": "Cut the session's worktree from this branch instead of the project default, once handed off.",
+      "budget": "Spend cap (USD)",
+      "budgetHint": "Optional hard ceiling for the session this idea hands off to.",
+      "submit": "Add idea",
+      "adding": "Adding…",
+      "saveChanges": "Save changes",
+      "saving": "Saving…",
+      "createFailed": "Could not add the idea",
+      "updateFailed": "Could not save the idea",
+      "errors": {
+        "titleRequired": "Give the idea a title",
+        "titleTooLong": "Title is too long",
+        "orchestratorTooLong": "Name is too long",
+        "budgetInvalid": "Enter a positive whole number",
+        "budgetTooHigh": "Spend cap is too high"
+      },
+      "orchestratorEmpty": "No orchestrator agents in the library yet. Add one with role: orchestrator."
+    },
+    "delete": {
+      "title": "Delete idea?",
+      "confirm": "Delete \"{{title}}\"? Its canvas, comments and files go with it.",
+      "failed": "Could not delete the idea"
+    },
+    "move": {
+      "failed": "Could not move the idea",
+      "selectForDevelopment": {
+        "title": "Start development on this idea?",
+        "body": "This hands the idea straight to a generated development prompt — there is no review step before it goes to a session. Make sure every decision you care about is already recorded on the canvas: anything left open here will be decided automatically, and reported back as an assumption on the generated prompt.",
+        "confirm": "Start development"
+      }
+    },
+    "detail": {
+      "backToBoard": "Back to board",
+      "settingsHeading": "Settings",
+      "settingsSaved": "Settings saved",
+      "continue": "Continue",
+      "continuing": "Continuing…",
+      "continueFailed": "Could not continue"
+    },
+    "canvas": {
+      "heading": "Canvas",
+      "empty": "Nothing on the canvas yet. Add a note, a requirement, an example, a link or an image to get started.",
+      "loadFailed": "Could not load the canvas",
+      "addBlock": "Add block",
+      "addGroup": "Add group",
+      "groupTitlePlaceholder": "Group title",
+      "kind": {
+        "note": "Note",
+        "requirement": "Requirement",
+        "example": "Example",
+        "link": "Link",
+        "image": "Image"
+      },
+      "block": {
+        "kindLabel": "Block type",
+        "textLabel": "Text",
+        "urlLabel": "URL",
+        "labelLabel": "Label",
+        "assetLabel": "Image",
+        "chooseAsset": "Choose an uploaded image",
+        "captionLabel": "Caption",
+        "errors": {
+          "textRequired": "Write something for this block",
+          "textTooLong": "Too long",
+          "urlRequired": "Enter a URL",
+          "urlTooLong": "URL is too long",
+          "labelTooLong": "Label is too long",
+          "assetRequired": "Choose an image",
+          "captionTooLong": "Caption is too long"
+        }
+      },
+      "createFailed": "Could not add the block",
+      "updateFailed": "Could not save the block",
+      "deleteFailed": "Could not delete the block",
+      "deleteBlock": {
+        "title": "Delete block?",
+        "confirm": "Delete this block?"
+      },
+      "groupCreateFailed": "Could not add the group",
+      "groupUpdateFailed": "Could not rename the group",
+      "groupDeleteFailed": "Could not delete the group",
+      "deleteGroup": {
+        "title": "Delete group?",
+        "confirm": "Delete \"{{title}}\"? Its blocks are kept, ungrouped."
+      },
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "reorderFailed": "Could not change the reading order",
+      "flow": {
+        "heading": "Canvas layout",
+        "reorderFromLayout": "Reorder from layout",
+        "reorderFromLayoutSuccess": "Reading order updated to match the canvas layout",
+        "reorderFromLayoutFailed": "Could not reorder from the canvas layout",
+        "removeFromGroup": "Remove from group",
+        "nudge": {
+          "up": "Nudge up",
+          "down": "Nudge down",
+          "left": "Nudge left",
+          "right": "Nudge right"
+        }
+      }
+    },
+    "comments": {
+      "heading": "Feedback",
+      "empty": "No feedback yet.",
+      "placeholder": "Leave feedback for the next prompt to fold in…",
+      "add": "Add comment",
+      "adding": "Adding…",
+      "consumed": "Already folded into a prompt",
+      "loadFailed": "Could not load the feedback",
+      "addFailed": "Could not add the comment",
+      "deleteFailed": "Could not delete the comment",
+      "delete": {
+        "title": "Delete comment?",
+        "confirm": "Delete this comment?"
+      }
+    },
+    "prompts": {
+      "heading": "Generated prompts",
+      "empty": "No prompt generated yet.",
+      "kind": {
+        "initial": "Initial",
+        "followup": "Follow-up"
+      },
+      "status": {
+        "pending": "Generating…",
+        "ready": "Ready",
+        "failed": "Failed"
+      },
+      "generate": "Generate prompt",
+      "regenerate": "Regenerate",
+      "generating": "Generating…",
+      "assumptions": "Assumptions the generator made",
+      "cost": "Cost",
+      "model": "Model",
+      "loadFailed": "Could not load the generated prompts",
+      "generateFailed": "Could not generate the prompt"
+    },
+    "runs": {
+      "heading": "Runs",
+      "empty": "No runs yet.",
+      "status": {
+        "generating": "Generating",
+        "dispatching": "Dispatching",
+        "running": "Running",
+        "closed": "Closed"
+      },
+      "outcome": {
+        "finished": "Finished",
+        "needs_attention": "Needs attention",
+        "interrupted": "Interrupted",
+        "superseded": "Superseded",
+        "session_deleted": "Session deleted"
+      },
+      "loadFailed": "Could not load the runs"
+    },
+    "assets": {
+      "heading": "Files",
+      "empty": "No files attached yet.",
+      "attach": "Attach a file",
+      "cancel": "Cancel uploading {{name}}",
+      "remove": "Remove {{name}}",
+      "removed": "File removed",
+      "tooLargeForIdea": "Too large for what's left of this idea's storage limit",
+      "uploadFailed": "Could not upload the file",
+      "usageLoadFailed": "Could not load file usage",
+      "usage": "{{count}} of {{maxFiles}} files · {{used}} of {{max}}",
+      "loadFailed": "Could not load files",
+      "status": {
+        "ready": "Ready",
+        "missing": "Missing",
+        "unreadable": "Unreadable"
+      },
+      "delete": {
+        "title": "Remove file?",
+        "confirm": "Remove \"{{name}}\" from this idea?"
       }
     }
   }

@@ -48,11 +48,17 @@ export const uploadFileBodySchema = z.object({
 
 // --- storage / reconciliation ----------------------------------------------
 
+// Mirrors db/schema.ts's storageAnomalyClassEnum exactly — see that file's
+// comment on storage_anomalies for what each class means and why the three
+// idea_* ones exist as distinct classes rather than a scope column.
 export const storageAnomalyClassSchema = z.enum([
   'orphan_blob',
   'dangling_row',
   'orphan_session_dir',
   'checksum_mismatch',
+  'orphan_idea_dir',
+  'idea_dangling_row',
+  'idea_checksum_mismatch',
 ])
 export type StorageAnomalyClass = z.infer<typeof storageAnomalyClassSchema>
 
@@ -149,8 +155,19 @@ export const topSessionSchema = z.object({
 })
 
 export const storageSummarySchema = z.object({
-  totalBytes: z.number().int(),
+  totalBytes: z.number().int().openapi({
+    description: 'session file bytes plus idea asset bytes combined — see sessionBytes/ideaBytes',
+  }),
   totalFiles: z.number().int(),
+  // A handed-off asset lives on disk twice (its idea copy, and the copy
+  // attachIdeaAssetsToSession made in its session) and legitimately counts
+  // in both sums below — this is a disk-space cap, not a count of distinct
+  // logical files. Additive fields: existing consumers of totalBytes/
+  // totalFiles are unaffected by these being present.
+  sessionBytes: z.number().int(),
+  sessionFiles: z.number().int(),
+  ideaBytes: z.number().int(),
+  ideaFiles: z.number().int(),
   sessionCount: z.number().int(),
   maxTotalBytes: z.number().int(),
   openAnomalies: z.number().int(),

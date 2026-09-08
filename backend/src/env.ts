@@ -46,6 +46,12 @@ const schema = z.object({
   ATTACHMENTS_SESSION_MAX_BYTES: z.coerce.number().int().positive().default(209_715_200),
   ATTACHMENTS_SESSION_MAX_FILES: z.coerce.number().int().positive().default(50),
   ATTACHMENTS_TOTAL_MAX_BYTES: z.coerce.number().int().positive().default(5_368_709_120),
+  // Idea-owned assets get their own pair of caps rather than sharing the
+  // session ones: an idea has no session yet, so there is no session row to
+  // scope a limit to. A straight clone of ATTACHMENTS_SESSION_MAX_BYTES/
+  // ATTACHMENTS_SESSION_MAX_FILES otherwise — see features/ideas/files.ts.
+  ATTACHMENTS_IDEA_MAX_BYTES: z.coerce.number().int().positive().default(209_715_200),
+  ATTACHMENTS_IDEA_MAX_FILES: z.coerce.number().int().positive().default(50),
   // How often the attachments-gc queue runs its scheduled reconciliation pass.
   ATTACHMENTS_GC_INTERVAL_MS: z.coerce.number().int().positive().default(3_600_000),
   // An orphan blob younger than this is left alone: it may be an upload still
@@ -54,6 +60,38 @@ const schema = z.object({
   // 0 disables retention purging. Shipped off: nobody asked for attachments to
   // vanish on a timer, and turning it on is a per-deployment decision.
   ATTACHMENTS_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
+
+  // Idea Manager: converting one idea's canvas into a development prompt is a
+  // single, short, tool-less model call — nothing like a session turn — so it
+  // gets its own concurrency knob rather than sharing WORKER_CONCURRENCY (see
+  // queue/index.ts for why every queue whose work looks nothing like a
+  // session turn gets its own). Tying it to session concurrency would starve
+  // idea prompts behind long-running turns, or let a burst of idea prompts
+  // crowd out sessions — neither shares a resource with the other, so neither
+  // should share a knob.
+  IDEA_PROMPT_CONCURRENCY: z.coerce.number().int().positive().default(4),
+  // Per-generation ceiling passed to the SDK's own maxBudgetUsd. An ordinary
+  // one-shot, tool-less structured-output call over one idea's canvas costs a
+  // small fraction of this; it exists to bound the ordinary case, not to be
+  // brushed against.
+  IDEA_PROMPT_MAX_BUDGET_USD: z.coerce.number().positive().default(1),
+  // The only timeout the SDK offers is an AbortController — see
+  // features/ideas/prompt-service.ts — so this is what stops a generation
+  // that never produces a result (a hung connection, a model stuck retrying
+  // structured output) from tying up a worker slot indefinitely. A killed
+  // *worker process* mid-generation is a separate, known gap that module
+  // documents; this only covers a live process that never gets an answer.
+  IDEA_PROMPT_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+  // How long a claimed run may sit `generating` with no promptId linked yet
+  // before the sweep gives up on it — see features/ideas/handoff.ts's
+  // progressOpenRuns. claimIdeaForHandoff's own two writes (insert the run,
+  // then link the prompt it just generated) cannot be one transaction —
+  // createIdeaPrompt's own enqueue must run only after ITS transaction
+  // commits (see that function's own comment) — so a worker killed in
+  // between is, for one tick, indistinguishable from a claim still in
+  // flight. Comfortably above how long that gap ordinarily takes (a couple
+  // of database round trips), never brushed against in the ordinary case.
+  IDEA_HANDOFF_CLAIM_GRACE_MS: z.coerce.number().int().positive().default(120_000),
 
   // Comma-separated origin allowlist. Empty by default: nginx and the Vite dev
   // proxy both make the frontend same-origin, so nothing legitimate needs CORS.

@@ -276,6 +276,12 @@ dbTest('all four classes are produced and classified correctly', () => {
     dangling_row: 1,
     orphan_session_dir: 1,
     checksum_mismatch: 1,
+    // The session-only scenario above never touches the ideas root, so these
+    // three stay at zero — see gc.ts's runCheck, which now walks both roots
+    // in the same pass.
+    orphan_idea_dir: 0,
+    idea_dangling_row: 0,
+    idea_checksum_mismatch: 0,
   })
   expect(f.openAfterFirst).toEqual([
     'checksum_mismatch',
@@ -330,6 +336,9 @@ dbTest('a second run in a row changes nothing', () => {
     dangling_row: 1,
     orphan_session_dir: 1,
     checksum_mismatch: 1,
+    orphan_idea_dir: 0,
+    idea_dangling_row: 0,
+    idea_checksum_mismatch: 0,
   })
 })
 
@@ -351,6 +360,11 @@ dbTest('cleanup resolves all four classes, checksum_mismatch included', () => {
     // both, same as any other class it can act on unattended. See
     // reconcile.ts's remediateAnomaly for the reasoning at the call site.
     checksumMismatchesDeleted: 1,
+    // Same reasoning as firstClassified/secondClassified above: nothing here
+    // touches the ideas root, so its three counters stay at zero.
+    orphanIdeaDirsDeleted: 0,
+    ideaDanglingRowsDeleted: 0,
+    ideaChecksumMismatchesDeleted: 0,
     skippedRevalidated: 0,
     failures: [],
   })
@@ -375,6 +389,9 @@ dbTest('a re-run after cleanup classifies nothing at all, of any class', () => {
     dangling_row: 0,
     orphan_session_dir: 0,
     checksum_mismatch: 0,
+    orphan_idea_dir: 0,
+    idea_dangling_row: 0,
+    idea_checksum_mismatch: 0,
   })
 })
 

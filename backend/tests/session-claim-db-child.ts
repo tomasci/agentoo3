@@ -103,7 +103,7 @@ const { and, eq, sql } = await import('drizzle-orm')
 const { closeDb, db } = await import(`${SRC}/db/client.ts`)
 const { messages, projects, sessions } = await import(`${SRC}/db/schema.ts`)
 const { env } = await import(`${SRC}/env.ts`)
-const { enqueueSessionRun } = await import(`${SRC}/queue/index.ts`)
+const { enqueueSessionRun, QUEUE_SESSION_RUN } = await import(`${SRC}/queue/index.ts`)
 const { runTurn, startSessionRunWorker } = await import(`${SRC}/queue/session-run.worker.ts`)
 
 const facts: Record<string, unknown> = {}
@@ -176,9 +176,20 @@ const pendingCount = async (id: string) => {
 const rowCount = async (id: string) =>
   (await db.select().from(messages).where(eq(messages.sessionId, id))).length
 
-/** Jobs enqueued for one session, oldest first. */
+/**
+ * Re-enqueues of one session's own turn, oldest first.
+ *
+ * Scoped to `QUEUE_SESSION_RUN` as well as the id: `sessionId` alone stopped
+ * being a session-run job's exclusive fingerprint once `endTurn`
+ * (session-run.worker.ts) started handing every closed turn's session id to
+ * a second queue too (`QUEUE_TURN_ENDED`, announcing that the turn ended, not
+ * asking BullMQ to run it again) — this helper's whole job is counting the
+ * former, never the latter.
+ */
 const jobsFor = (id: string) =>
-  enqueued.filter((j) => (j.data as { sessionId?: string }).sessionId === id)
+  enqueued.filter(
+    (j) => j.queue === QUEUE_SESSION_RUN && (j.data as { sessionId?: string }).sessionId === id,
+  )
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 

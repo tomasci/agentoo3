@@ -169,6 +169,9 @@ export function StoragePage() {
       dangling_row: 0,
       orphan_session_dir: 0,
       checksum_mismatch: 0,
+      orphan_idea_dir: 0,
+      idea_dangling_row: 0,
+      idea_checksum_mismatch: 0,
     }
     for (const a of openAll.data ?? []) counts[a.class] += 1
     return counts

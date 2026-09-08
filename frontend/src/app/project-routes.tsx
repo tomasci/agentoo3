@@ -1,4 +1,5 @@
 import { useParams } from '@tanstack/react-router'
+import { IdeaBoardPage, IdeaDetailPage } from '@/features/ideas'
 import { ProjectLibraryPage } from '@/features/library'
 import { ProjectOverview, ProjectPicker, useProjects } from '@/features/projects'
 import { ProjectSessions, SessionPage } from '@/features/sessions'
@@ -27,6 +28,16 @@ export function ProjectSessionsRoute() {
 export function ProjectLibraryRoute() {
   const { projectId } = useParams({ from: '/projects/$projectId' })
   return <ProjectLibraryPage projectId={projectId} />
+}
+
+export function ProjectIdeasRoute() {
+  const { projectId } = useParams({ from: '/projects/$projectId' })
+  return <IdeaBoardPage projectId={projectId} />
+}
+
+export function IdeaDetailRoute() {
+  const { projectId, ideaId } = useParams({ from: '/projects/$projectId/ideas/$ideaId' })
+  return <IdeaDetailPage projectId={projectId} ideaId={ideaId} />
 }
 
 export function SessionRoute() {

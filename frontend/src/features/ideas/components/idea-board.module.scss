@@ -1,0 +1,84 @@
+@use '@/styles/breakpoints' as bp;
+
+// Six columns side by side on anything wide enough, each shrinking to a
+// minimum before the strip itself scrolls — a real kanban board rather than
+// six squeezed slivers. Below `md` this flips to one column at a time (see
+// the below() block): the phone shape this page deliberately chose over
+// trying to cram six columns into 360px.
+.board {
+  display: flex;
+  gap: var(--space-4);
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  padding-bottom: var(--space-2);
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1 1 16rem;
+  min-width: 16rem;
+  scroll-snap-align: start;
+}
+
+@include bp.below(md) {
+  .board { scroll-snap-type: x mandatory; }
+
+  // One column, full width: a finger swipe lands squarely on the next status
+  // rather than half on two of them.
+  .column {
+    flex: 0 0 100%;
+    min-width: 0;
+  }
+}
+
+.columnHeading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+.columnCount {
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  color: var(--color-text-muted);
+}
+
+.columnBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 4rem;
+}
+
+.cardTitle { margin: 0; font-size: var(--text-base); line-height: var(--leading-base); font-weight: var(--weight-semibold); }
+
+.cardLink {
+  color: inherit;
+  text-decoration: none;
+}
+
+.cardLink:hover { color: var(--color-accent); text-decoration: underline; }
+
+.cardLink:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.busyLabel {
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  color: var(--color-text-secondary);
+}
+
+.counts {
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  color: var(--color-text-muted);
+}

@@ -1,0 +1,51 @@
+// React Flow's own theme, expressed through the ~30 `--xy-*` custom
+// properties it exposes on `.react-flow` (see @xyflow/react/dist/base.css
+// and style.css), mapped to this project's semantic tokens rather than the
+// library's bundled defaults. Deliberately NOT a `.module.scss`: `.react-flow`,
+// `.react-flow__controls-button`, … are the library's own global class names,
+// not this project's per-component ones, so CSS Modules' scoping would
+// rename every selector here into something nothing ever matches.
+//
+// `idea-flow-canvas.tsx` imports `@xyflow/react/dist/base.css` — the
+// structural rules only, never `style.css` (the library's own default theme)
+// — so every `--xy-*-default` fallback base.css itself sets is this
+// stylesheet's own defaults to override, not a second theme to fight.
+//
+// Edge, handle, connection-line and minimap variables are omitted on purpose:
+// this canvas renders `nodesConnectable={false}`, no edges, no `<Handle>`
+// and no `<MiniMap>`, so nothing ever reads them — mapping unused variables
+// would just be dead code the next reader has to verify is really dead.
+//
+// The two custom node types (`block-node.tsx`, `group-node.tsx`) are not
+// React Flow's *built-in* ones (`default`/`input`/`output`/`group`), so they
+// never read a `--xy-node-*` property either — those only style the classes
+// `.react-flow__node-default` etc., which this canvas never renders. A
+// custom node's look comes entirely from its own wrapper class, the same as
+// any other feature-owned component.
+.react-flow {
+  --xy-background-color: var(--color-bg-app);
+  --xy-background-pattern-color: var(--color-border);
+  --xy-controls-box-shadow: var(--shadow-md);
+  --xy-controls-button-background-color: var(--color-surface-raised);
+  --xy-controls-button-background-color-hover: var(--color-surface-hover);
+  --xy-controls-button-color: var(--color-text-secondary);
+  --xy-controls-button-color-hover: var(--color-text-primary);
+  --xy-controls-button-border-color: var(--color-border);
+  --xy-selection-background-color: var(--color-accent-subtle-bg);
+  --xy-selection-border: 1px dotted var(--color-accent);
+
+  // Transparent, not a translucent white/gray pill (the library's own
+  // default in both themes): this app's canvas background is neither of
+  // those colours, and a mismatched patch behind the credit link would read
+  // as a rendering bug rather than a deliberate choice.
+  --xy-attribution-background-color: transparent;
+}
+
+// No :root[data-theme='dark'] block: every value above is a --color-* token,
+// and each of those is itself redeclared under [data-theme='dark']
+// (_theme-dark.scss) — var() re-resolves against the current cascaded value
+// of the token it names (same reasoning as global.scss's migration-shim
+// comment), so the dark theme falls out of the cascade for free. An empty
+// dark-mode rule here would exist only to be seen, which is what the
+// comment above is for instead — and stylelint's block-no-empty would
+// reject it besides.

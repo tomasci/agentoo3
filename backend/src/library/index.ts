@@ -8,6 +8,7 @@ import { agentFrontmatterSchema, type LibraryAgent, type LibrarySkill } from './
 
 export const AGENTS_DIR = () => join(env.LIBRARY_DIR, 'agents')
 export const SKILLS_DIR = () => join(env.LIBRARY_DIR, 'skills')
+export const PROMPTS_DIR = () => join(env.LIBRARY_DIR, 'prompts')
 
 /**
  * Build a path inside a library directory, refusing anything that escapes it.
@@ -31,6 +32,7 @@ function insideLibrary(dir: string, child: string): string {
 
 export const agentPath = (name: string) => insideLibrary(AGENTS_DIR(), `${name}.md`)
 export const skillDir = (name: string) => insideLibrary(SKILLS_DIR(), name)
+export const promptPath = (name: string) => insideLibrary(PROMPTS_DIR(), `${name}.md`)
 
 /** A one-line reason, rather than a wall of Zod issue JSON in the log. */
 function describeError(error: unknown): string {

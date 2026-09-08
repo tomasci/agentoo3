@@ -23,8 +23,8 @@ import type { GetApiStorageSummaryStatus200 } from '@/shared/api/generated/types
 import type { PostApiStorageAnomaliesIdDeleteStatus200 } from '@/shared/api/generated/types/PostApiStorageAnomaliesIdDelete'
 
 // The 200 response is an array, so an anomaly is its element type, and its
-// class is that element's own `class` field — never hand-typed against the
-// four fixed strings, so a class the backend ever adds shows up here as a
+// class is that element's own `class` field — never hand-typed against a
+// fixed list of strings, so a class the backend ever adds shows up here as a
 // type error rather than a silent gap.
 export type StorageAnomaly = GetApiStorageAnomaliesStatus200[number]
 export type AnomalyClass = StorageAnomaly['class']
@@ -43,6 +43,9 @@ export const ANOMALY_CLASSES: readonly AnomalyClass[] = [
   'dangling_row',
   'orphan_session_dir',
   'checksum_mismatch',
+  'orphan_idea_dir',
+  'idea_dangling_row',
+  'idea_checksum_mismatch',
 ]
 
 /**

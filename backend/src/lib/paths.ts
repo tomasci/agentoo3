@@ -51,29 +51,38 @@ export function assertInsideProjects(path: string): string {
 // --- attachments ----------------------------------------------------------
 
 /**
- * Canonical dashed UUID shape, checked before a session id is ever handed to
- * `join()`. This repo already has a scar for skipping this exact step —
- * `library/index.ts:18`'s `insideLibrary` exists because a path built from an
- * unchecked name became an arbitrary file write and an `rm -rf` of an
- * arbitrary directory. A validated UUID cannot contain `/`, `\` or `..`, so
- * everything derived from it below is safe by construction rather than by a
- * prefix check applied after the fact.
+ * Canonical dashed UUID shape, checked before a session or idea id is ever
+ * handed to `join()`. This repo already has a scar for skipping this exact
+ * step — `library/index.ts:18`'s `insideLibrary` exists because a path built
+ * from an unchecked name became an arbitrary file write and an `rm -rf` of an
+ * arbitrary directory. A validated UUID cannot contain a separator or `..`,
+ * so everything derived from it below is safe by construction rather than by
+ * a prefix check applied after the fact. Shared by both id kinds below —
+ * they are the same shape, and a second regex literal would just be one more
+ * place to keep in sync with this comment.
  */
-const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function assertSessionId(sessionId: string): string {
-  if (!SESSION_ID_RE.test(sessionId)) {
+  if (!UUID_RE.test(sessionId)) {
     throw new Error(`Refusing to use "${sessionId}" as a session id: not a UUID`)
   }
   return sessionId
+}
+
+function assertIdeaId(ideaId: string): string {
+  if (!UUID_RE.test(ideaId)) {
+    throw new Error(`Refusing to use "${ideaId}" as an idea id: not a UUID`)
+  }
+  return ideaId
 }
 
 /**
  * Root of one session's attachments, sharded two levels deep by the session
  * id's own hex digits so a deployment with thousands of sessions never puts
  * thousands of entries in one directory: `sessions/<aa>/<bb>/<session-id>`.
- * The leaf keeps the full dashed id — the shard prefix only fans out the tree,
- * it is not the identity.
+ * The leaf keeps the full dashed id — the shard prefix only fans out the
+ * tree, it is not the identity.
  */
 export function sessionAttachmentsDir(sessionId: string): string {
   assertSessionId(sessionId)
@@ -93,6 +102,31 @@ export function sessionUploadsDir(sessionId: string): string {
 /** The generated index an agent can re-read after context compaction. */
 export function attachmentsManifestPath(sessionId: string): string {
   return join(sessionUploadsDir(sessionId), 'ATTACHMENTS.md')
+}
+
+/**
+ * Root of one idea's uploaded assets — the second storage root, sharded
+ * exactly like `sessionAttachmentsDir` above (`ideas/<aa>/<bb>/<idea-id>`).
+ * An idea has no session until handoff, so its files need a home entirely
+ * independent of `sessions/`; `attachIdeaAssetsToSession` (see
+ * features/ideas/files.ts) is what later copies them into one.
+ */
+export function ideaAttachmentsDir(ideaId: string): string {
+  assertIdeaId(ideaId)
+  const hex = ideaId.toLowerCase().replace(/-/g, '')
+  const aa = hex.slice(0, 2)
+  const bb = hex.slice(2, 4)
+  return join(env.ATTACHMENTS_DIR, 'ideas', aa, bb, ideaId)
+}
+
+/** Where an idea's uploaded assets actually live. No agent is ever granted
+ * this directly — an idea has no session to run an agent in — so, unlike
+ * `sessionUploadsDir`, nothing outside storage.ts and features/ideas/files.ts
+ * needs to resolve this. Kept alongside it anyway, not inlined, for the same
+ * reason `sessionUploadsDir` isn't: one place decides where a root's uploads
+ * live. */
+export function ideaUploadsDir(ideaId: string): string {
+  return join(ideaAttachmentsDir(ideaId), 'uploads')
 }
 
 /**

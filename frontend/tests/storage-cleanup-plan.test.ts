@@ -66,3 +66,20 @@ test('a null sizeBytes contributes nothing to the byte total rather than becomin
   ])
   expect(plan.bytes).toBe(100)
 })
+
+// The regression this guards against next: a storage root or class added
+// later gets its own bucket by mistake (or none at all) instead of folding
+// into the kind of problem it already is — see cleanup-plan.ts's own comment
+// on why the three idea-rooted classes fold into their session-rooted twins'
+// buckets rather than getting buckets of their own.
+test('an idea-rooted anomaly folds into the same bucket as its session-rooted twin, not a bucket of its own', () => {
+  const plan = cleanupPlanFor([
+    anomaly({ id: 'a1', class: 'orphan_session_dir', sizeBytes: 10 }),
+    anomaly({ id: 'a2', class: 'orphan_idea_dir', sizeBytes: 20 }),
+    anomaly({ id: 'a3', class: 'dangling_row', sizeBytes: 30 }),
+    anomaly({ id: 'a4', class: 'idea_dangling_row', sizeBytes: 40 }),
+    anomaly({ id: 'a5', class: 'checksum_mismatch', sizeBytes: 50 }),
+    anomaly({ id: 'a6', class: 'idea_checksum_mismatch', sizeBytes: 60 }),
+  ])
+  expect(plan).toEqual({ blobs: 0, rows: 2, dirs: 2, mismatches: 2, bytes: 210, total: 6 })
+})

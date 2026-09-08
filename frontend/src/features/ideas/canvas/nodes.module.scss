@@ -1,0 +1,136 @@
+// Both custom node types' own look — neither reads a single `--xy-node-*`
+// property (those only style React Flow's *built-in* node types; see
+// `to-nodes.ts`'s own comment), so everything below is this project's usual
+// --color-*/--space-*/--radius-* tokens, exactly as any other feature-owned
+// component.
+
+.root {
+  position: relative;
+  width: 16rem;
+}
+
+.orderBadge {
+  position: absolute;
+  top: calc(var(--space-2) * -1);
+  left: calc(var(--space-2) * -1);
+  z-index: var(--z-raised);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.body {
+  margin-bottom: var(--space-2);
+  min-height: 1.5rem;
+}
+
+.link {
+  color: var(--color-accent-text);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  overflow-wrap: anywhere;
+}
+
+// Reset to a plain, full-width block so `Markdown`'s own output (headings,
+// paragraphs, tables — content a real `<button>` cannot legally contain)
+// reads as part of the card rather than as a control, while staying
+// activatable by click and by keyboard (`block-node.tsx` wires the role,
+// `tabIndex` and `onKeyDown` by hand for exactly that reason).
+.contentButton {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+
+  &:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+}
+
+.contentScroll {
+  max-height: 10rem;
+  overflow-y: auto;
+}
+
+.editActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+// One row of tiny, discrete steppers — the replacement for React Flow's own
+// arrow-key node movement (`idea-flow-canvas.tsx` disables it): that built-in
+// path calls the store directly and never reaches this app's own
+// `onNodesChange`/`onNodeDragStop` pipeline, so a keyboard nudge through it
+// would move a node on screen and then never persist — see the report.
+.nudgeRow {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-1);
+
+  button {
+    min-width: 1.75rem;
+    min-height: 1.75rem;
+    padding: 0;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface);
+    color: var(--color-text-secondary);
+    font-size: var(--text-sm);
+    cursor: pointer;
+
+    &:hover {
+      background: var(--color-surface-hover);
+    }
+
+    &:focus-visible {
+      outline: var(--focus-ring-width) solid var(--color-focus-ring);
+      outline-offset: var(--focus-ring-offset);
+    }
+  }
+}
+
+// A group's own footprint (see `to-nodes.ts`'s `DEFAULT_GROUP_WIDTH`/
+// `DEFAULT_GROUP_HEIGHT`) — fixed rather than fit-to-content, since a
+// container needs room for blocks *before* any are dropped into it, and no
+// resize control exists in this track (see the report).
+.groupRoot {
+  box-sizing: border-box;
+  width: 26rem;
+  height: 16rem;
+  padding: var(--space-3);
+  border: 2px dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-sunken);
+}
+
+.groupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.groupTitle {
+  overflow: hidden;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

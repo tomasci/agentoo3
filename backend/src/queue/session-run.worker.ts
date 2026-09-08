@@ -13,7 +13,14 @@ import { and, desc, eq, inArray, isNotNull, isNull, ne, notExists, or, sql } fro
 import { alias } from 'drizzle-orm/pg-core'
 import { db } from '@/db/client'
 import { sanitizeForDb } from '@/db/sanitize'
-import { messageFiles, messages, projects, sessionFiles, sessions } from '@/db/schema'
+import {
+  messageFiles,
+  messages,
+  projects,
+  sessionFiles,
+  sessions,
+  type turnOutcomeEnum,
+} from '@/db/schema'
 import { env, hasClaudeCredential } from '@/env'
 import { announcementFor } from '@/features/attachments/manifest'
 import { toManifestFile } from '@/features/attachments/service'
@@ -23,6 +30,16 @@ import { type TranscriptMessage, titleFor } from '@/features/sessions/titles'
 import { publishSessionEvent, subscribeControl } from '@/lib/events'
 import { logger } from '@/lib/logger'
 import { sessionUploadsDir } from '@/lib/paths'
+// Imported as a namespace, not destructured: several tests hand-write a
+// mock of this module listing only the exports that existed when they were
+// written (session-recovery.test.ts, attachments-announcement.test.ts,
+// session-message-shape.test.ts among them), and a static `import { x }
+// from` a name that mock does not provide is a hard `SyntaxError` at load
+// time under Bun's `mock.module`, not a soft `undefined` — verified
+// directly. A namespace import degrades to `queueIndex.enqueueTurnEnded`
+// reading `undefined` instead, which `endTurn` below already treats the
+// same as the queue rejecting the call.
+import * as queueIndex from './index'
 import { enqueueSessionRun, QUEUE_SESSION_RUN, redisConnection, type SessionRunJob } from './index'
 
 /**
@@ -89,6 +106,78 @@ async function setStatus(sessionId: string, status: string, lastError?: string |
     })
     .where(eq(sessions.id, sessionId))
   await publishSessionEvent({ kind: 'status', sessionId, status, lastError })
+}
+
+/** The turn_outcome enum's own value type, so a typo cannot compile. */
+type TurnOutcome = (typeof turnOutcomeEnum.enumValues)[number]
+
+/**
+ * How often the running-turn heartbeat below touches `sessions.heartbeatAt`.
+ * Also the unit the reconciler's staleness threshold is built from
+ * (turn-reconcile.worker.ts imports this and multiplies it by 3, rather than
+ * redefining the tick there, so the two constants cannot drift apart). A
+ * file-local constant, not `env.ts`: a parallel track owns that file right
+ * now.
+ */
+export const HEARTBEAT_INTERVAL_MS = 30_000
+
+/**
+ * Record the one durable fact a turn produces: that the prompt which started
+ * it has stopped, and how. Persist first, announce after — the row is the
+ * record, the same rule `appendMessage` already follows above.
+ *
+ * `AND turn_ended_at IS NULL` is what makes this idempotent, and idempotency
+ * here is load-bearing, not incidental: `runTurn`'s backstop in its `finally`
+ * calls this unconditionally whenever no branch above already has, and the
+ * reconciler (turn-reconcile.worker.ts) calls it again for a turn it decides
+ * is stranded — both have to find nothing left to do on a prompt some branch
+ * already closed, rather than overwriting a true verdict with a stale one.
+ *
+ * Returns whether *this* call is the one that actually rendered the verdict.
+ * `runTurn` feeds that straight into its own `verdict` flag rather than
+ * assuming it is always true at the call site, because the one case it is
+ * *not* true — a verdict already recorded — is exactly the case the backstop
+ * must not re-fire for.
+ *
+ * Guarded end to end, unlike most of this file's writes: this runs *after* a
+ * branch has already decided the turn's fate (and usually the session's), so
+ * a failure recording it must not re-enter that decision or throw back into
+ * it. The same reasoning `recover`'s own comment gives for why a throw there
+ * would be worse than the failure it exists to handle applies here too, one
+ * layer further out.
+ */
+export async function endTurn(
+  promptMessageId: string,
+  outcome: TurnOutcome,
+  detail?: string | null,
+): Promise<boolean> {
+  try {
+    const [row] = await db
+      .update(messages)
+      .set({
+        turnEndedAt: new Date(),
+        turnOutcome: outcome,
+        // Its own column, not sessions.lastError: the next turn's claim resets
+        // that to null, the identical trap sessions.baseNote documents.
+        turnDetail: detail == null ? null : sanitizeForDb(detail),
+      })
+      .where(and(eq(messages.id, promptMessageId), isNull(messages.turnEndedAt)))
+      .returning({ sessionId: messages.sessionId })
+    if (!row) return false
+
+    // Strictly after the row above commits: a lost job here degrades to the
+    // reconciler catching it later, which is a strictly better failure than a
+    // client believing a turn ended before the row that says so exists.
+    try {
+      await queueIndex.enqueueTurnEnded({ sessionId: row.sessionId, promptMessageId, outcome })
+    } catch (error) {
+      logger.warn(`Could not announce the end of turn ${promptMessageId}: ${String(error)}`)
+    }
+    return true
+  } catch (error) {
+    logger.error(`Could not record the end of turn ${promptMessageId}: ${String(error)}`)
+    return false
+  }
 }
 
 /** How many continuations one stall may be nudged through before it stops. */
@@ -209,6 +298,59 @@ export function cancelledWithoutInterrupt(message: TranscriptMessage | undefined
       typeof entry === 'object' &&
       (entry as { non_execution_kind?: unknown }).non_execution_kind === 'cancelled',
   )
+}
+
+/**
+ * The truth behind the `completed` branch, once nothing above it in the
+ * cascade has already claimed the turn (drained, over budget, cancelled tool,
+ * lost background work).
+ *
+ * Before this, branch g wrote `setStatus('completed')` — the *session*
+ * status, which this does not change — for three different endings, two of
+ * which are lies: a turn that hit `error_max_turns` a third of the way
+ * through, and a turn whose own result reports `is_error: true`, both read
+ * identically to one that actually finished the work. A board that advances a
+ * card on `completed` cannot tell those apart without this.
+ *
+ * Order matters, twice over. `error_max_turns` is checked first because it is
+ * the most specific case of the same `error_*` family the third check below
+ * also matches. The other `error_*` subtypes (`error_during_execution`,
+ * `error_max_structured_output_retries`) have to be checked *before* the
+ * `is_error === true` check, not after: the SDK's own `SDKResultError` type
+ * declares `is_error` as a plain `boolean`, not narrowed to `true`, but every
+ * error-subtype result actually observed (including `error_max_turns`,
+ * verified against the real shape) carries `is_error: true` regardless of
+ * which `error_*` subtype it is. Checking `is_error === true` first, as an
+ * earlier version of this function did, therefore swallowed every `error_*`
+ * result other than `error_max_turns` into the vaguer `stopped_api_error`,
+ * making `stopped_execution_error` a value nothing could ever write — a real
+ * defect an independent, real-Postgres pass caught
+ * (turn-outcome-truth.test.ts). `is_error === true` only means something once
+ * every `error_*` subtype has already been ruled out: it is what tells a
+ * `success`-subtype result that ended on an API error apart from one that
+ * did not, which is the one place the SDK's own docs on `SDKResultMessage`
+ * actually use `is_error` to distinguish an ending.
+ *
+ * A missing `lastResult` entirely — the turn ended before a single `result`
+ * message arrived — falls through every check here to `completed`, matching
+ * what branch g already did before this existed (session-recovery.test.ts's
+ * "a turn that ends before any result at all" pins that).
+ *
+ * Exported for the tests, like the other decisions in this file worth
+ * pinning: nothing else imports it.
+ */
+export function completionOutcome(
+  resultSubtype: string | undefined,
+  lastResult: TranscriptMessage | undefined,
+): TurnOutcome {
+  const isError =
+    lastResult?.type === 'result' ? (lastResult as { is_error?: unknown }).is_error : undefined
+  if (resultSubtype === 'error_max_turns') return 'stopped_turn_limit'
+  if (typeof resultSubtype === 'string' && resultSubtype.startsWith('error_')) {
+    return 'stopped_execution_error'
+  }
+  if (isError === true) return 'stopped_api_error'
+  return 'completed'
 }
 
 /**
@@ -461,7 +603,11 @@ async function autoContinuationsSincePrompt(sessionId: string): Promise<number> 
  * `auto: true` is what makes the bound above countable, and marks the row as
  * ours so the UI can tell it apart from something the operator typed.
  */
-async function enqueueContinuation(sessionId: string, text: string): Promise<void> {
+async function enqueueContinuation(
+  sessionId: string,
+  text: string,
+  parentPromptId?: string,
+): Promise<void> {
   const [seqRow] = await db
     .update(sessions)
     .set({ nextSeq: sql`${sessions.nextSeq} + 1`, updatedAt: new Date() })
@@ -477,6 +623,11 @@ async function enqueueContinuation(sessionId: string, text: string): Promise<voi
       type: 'prompt',
       pending: true,
       payload: sanitizeForDb({ text, auto: true }),
+      // Links the continuation back to the prompt whose turn spawned it, so a
+      // chain is reconstructible from the transcript alone with no live
+      // observer. Omitted (not set to `null`) when the caller has none to
+      // give, which today is only a test calling `recover` directly.
+      ...(parentPromptId !== undefined && { continuesMessageId: parentPromptId }),
     })
     .returning()
 }
@@ -520,8 +671,30 @@ interface Recovery {
  *
  * Exported for the tests, like the other decisions in this file worth pinning:
  * nothing else imports it.
+ *
+ * Returns what it decided rather than `void`: `runTurn`'s four call sites use
+ * it to record the turn's own outcome via `endTurn` (`continued` maps to
+ * `'continuing'`, `gave_up`/`recovery_failed` both map to `'stalled'` — the
+ * caller could not tell those two apart from outside before this, which is
+ * exactly the ambiguity this whole track exists to remove). Additive: every
+ * existing caller in the tests ignores the return, so widening it from `void`
+ * costs nothing already relying on the old shape. `parentPromptId` is new
+ * too, and optional for the same reason — it links a continuation back to the
+ * prompt whose turn spawned it (see `enqueueContinuation`), and a caller with
+ * none to give (only a test invoking `recover` directly, today) simply omits
+ * it rather than being forced to pass one.
  */
-export async function recover(sessionId: string, who: string, recovery: Recovery): Promise<void> {
+export interface RecoveryOutcome {
+  outcome: 'continued' | 'gave_up' | 'recovery_failed'
+  detail: string
+}
+
+export async function recover(
+  sessionId: string,
+  who: string,
+  recovery: Recovery,
+  parentPromptId?: string,
+): Promise<RecoveryOutcome> {
   // What the session is told happened, if everything below this line fails. It
   // becomes the notice once we know we are nudging rather than stopping.
   let why = recovery.giveUp
@@ -530,21 +703,24 @@ export async function recover(sessionId: string, who: string, recovery: Recovery
     if (sent < MAX_AUTO_CONTINUATIONS) {
       why = recovery.notice(sent + 1, MAX_AUTO_CONTINUATIONS)
       await appendMessage(sessionId, { type: 'notice', message: why }, who)
-      await enqueueContinuation(sessionId, recovery.instruction)
+      await enqueueContinuation(sessionId, recovery.instruction, parentPromptId)
       await setStatus(sessionId, 'queued', null)
       await enqueueSessionRun({ sessionId })
-      return
+      return { outcome: 'continued', detail: why }
     }
     // Said in the transcript as well as on the session row: a failure that
     // shows only as a red line on the sessions list is invisible from inside
     // the session, which is where whoever is reading it actually is.
     await appendMessage(sessionId, { type: 'error', message: recovery.giveUp }, who)
     await setStatus(sessionId, 'failed', recovery.giveUp)
+    return { outcome: 'gave_up', detail: recovery.giveUp }
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
     logger.error(`Session ${sessionId} could not be resumed: ${detail}`)
+    const combined = `${why} Recovering from that failed too: ${detail}`
     try {
-      await setStatus(sessionId, 'failed', `${why} Recovering from that failed too: ${detail}`)
+      await setStatus(sessionId, 'failed', combined)
+      return { outcome: 'recovery_failed', detail: combined }
     } catch (fatal) {
       // Nothing left to write with. Said as loudly as this process can say it,
       // because the row is now stale: the session reads as `running` and no
@@ -553,6 +729,10 @@ export async function recover(sessionId: string, who: string, recovery: Recovery
       logger.error(
         `Session ${sessionId} is stranded: it still reads as 'running' and could not be marked failed (${why2}). Reset it by hand once the database is back.`,
       )
+      return {
+        outcome: 'recovery_failed',
+        detail: `${combined} The failure itself could not be written either: ${why2}.`,
+      }
     }
   }
 }
@@ -745,7 +925,17 @@ async function claimTurn(sessionId: string): Promise<SessionRow | undefined> {
   try {
     const [row] = await db
       .update(sessions)
-      .set({ status: 'running', lastError: null, updatedAt: new Date() })
+      .set({
+        status: 'running',
+        lastError: null,
+        // Reset, not merely left alone: a fresh claim's heartbeat has to start
+        // from this claim's own `updatedAt` below, not from whatever a
+        // *previous* turn of this same session last wrote here — otherwise a
+        // brand-new turn could read as already stale to the reconciler before
+        // its own first tick ever lands.
+        heartbeatAt: null,
+        updatedAt: new Date(),
+      })
       .where(
         and(
           eq(sessions.id, sessionId),
@@ -881,7 +1071,26 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
   // afterwards.
   let announcement = ''
   await db.transaction(async (tx) => {
-    await tx.update(messages).set({ pending: false }).where(eq(messages.id, userRow.id))
+    await tx
+      .update(messages)
+      .set({
+        pending: false,
+        // A claim is a fresh turn starting on this prompt, so any verdict
+        // already sitting here is stale by definition — whether it came from
+        // the reconciler (a prompt it marked 'abandoned' that this very send
+        // just revived) or from anywhere else. Unconditional, unlike
+        // endTurn's own guarded update: a claim does not ask whether a turn
+        // already ended here, it declares that a new one is starting.
+        // Without this reset, endTurn's `WHERE turn_ended_at IS NULL` guard
+        // would still find this row "already ended" from the stale verdict
+        // and silently refuse to record what this turn actually does,
+        // leaving the stale outcome to stick.
+        turnStartedAt: new Date(),
+        turnEndedAt: null,
+        turnOutcome: null,
+        turnDetail: null,
+      })
+      .where(eq(messages.id, userRow.id))
 
     const toAnnounce = await tx
       .select()
@@ -945,6 +1154,31 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
 
   const abortController = new AbortController()
   let interrupted = false
+  // Set from endTurn's own return, not assumed true at the call site: the one
+  // case it is *not* true — a verdict already recorded — is exactly the case
+  // the backstop below must not re-fire for. This cannot see a killed worker
+  // process; that failure domain belongs to the heartbeat below and the
+  // reconciler that reads it (turn-reconcile.worker.ts). This one only catches
+  // a future branch that runs to a `return` without ever calling `endTurn`.
+  let verdict = false
+  // Proves the *worker process* is alive and holding the turn, nothing more —
+  // not that the agent itself is making progress. Timer-driven on purpose,
+  // not folded into the `for await` loop below: a turn blocked in a long
+  // foreground Bash call runs no loop body either, and this platform actively
+  // tells agents to run long things in the foreground rather than
+  // backgrounding them, so a loop-driven heartbeat would be exactly as blind
+  // as transcript silence for precisely the turns this exists to catch.
+  const heartbeat = setInterval(() => {
+    db.update(sessions)
+      .set({ heartbeatAt: new Date() })
+      .where(eq(sessions.id, sessionId))
+      .catch((error) => {
+        // A missed tick is not a missed turn: the next one tries again in
+        // HEARTBEAT_INTERVAL_MS, and the reconciler only acts after three are
+        // missed in a row.
+        logger.warn(`Session ${sessionId}: heartbeat write failed: ${String(error)}`)
+      })
+  }, HEARTBEAT_INTERVAL_MS)
   const unsubscribe = subscribeControl(sessionId, (event) => {
     if (event.kind === 'interrupt') {
       interrupted = true
@@ -1028,6 +1262,7 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
     if (interrupted) {
       if (announcement) await unstampAnnouncement(sessionId, userRow.seq, userRow.id)
       await noticeStrandedPrompt(sessionId, orchestratorName)
+      verdict = await endTurn(userRow.id, 'interrupted', null)
       await setStatus(sessionId, 'interrupted', null)
       return
     }
@@ -1040,6 +1275,7 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
       .limit(1)
 
     if (more) {
+      verdict = await endTurn(userRow.id, 'drained', null)
       await setStatus(sessionId, 'queued', null)
       await enqueueSessionRun({ sessionId })
       return
@@ -1051,11 +1287,9 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
     const resultSubtype =
       lastResult?.type === 'result' ? (lastResult as { subtype?: string }).subtype : undefined
     if (resultSubtype === 'error_max_budget_usd') {
-      await setStatus(
-        sessionId,
-        'failed',
-        `Stopped: the session reached its $${claimed.maxBudgetUsd} budget. Raise it to continue.`,
-      )
+      const detail = `Stopped: the session reached its $${claimed.maxBudgetUsd} budget. Raise it to continue.`
+      verdict = await endTurn(userRow.id, 'stopped_over_budget', detail)
+      await setStatus(sessionId, 'failed', detail)
       return
     }
 
@@ -1070,12 +1304,22 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
     // whatever tool calls were still outstanding and nudging there would just
     // fight a limit that is working correctly.
     if (cancelledOutsideInterrupt && !resultSubtype?.startsWith('error_')) {
-      await recover(sessionId, orchestratorName, {
-        notice: (attempt, of) =>
-          `A tool call in this turn came back cancelled by the harness, not refused by the operator — nobody declined it. Re-running it (${attempt} of ${of}).`,
-        instruction: `A tool call in your previous turn was reported as cancelled. That was not the operator saying no: nobody was asked, and this session runs with permissions bypassed, so there was no confirmation to refuse in the first place. The harness cancelled it on its own — most likely because the turn ended while it was still running. There is no menu to offer and no decision to wait for: re-run whatever that call was doing and carry on.`,
-        giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: a tool call keeps coming back cancelled by the harness, not refused by the operator.`,
-      })
+      const recovery = await recover(
+        sessionId,
+        orchestratorName,
+        {
+          notice: (attempt, of) =>
+            `A tool call in this turn came back cancelled by the harness, not refused by the operator — nobody declined it. Re-running it (${attempt} of ${of}).`,
+          instruction: `A tool call in your previous turn was reported as cancelled. That was not the operator saying no: nobody was asked, and this session runs with permissions bypassed, so there was no confirmation to refuse in the first place. The harness cancelled it on its own — most likely because the turn ended while it was still running. There is no menu to offer and no decision to wait for: re-run whatever that call was doing and carry on.`,
+          giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: a tool call keeps coming back cancelled by the harness, not refused by the operator.`,
+        },
+        userRow.id,
+      )
+      verdict = await endTurn(
+        userRow.id,
+        recovery.outcome === 'continued' ? 'continuing' : 'stalled',
+        recovery.detail,
+      )
       return
     }
 
@@ -1100,12 +1344,22 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
     if (lostCommands > 0 && !resultSubtype?.startsWith('error_')) {
       const oneCommand = lostCommands === 1
       const commands = oneCommand ? 'a command' : `${lostCommands} commands`
-      await recover(sessionId, orchestratorName, {
-        notice: (attempt, of) =>
-          `The turn ended while ${commands} you left running in the background ${oneCommand ? 'was' : 'were'} still going, so ${oneCommand ? 'it was' : 'they were'} stopped — this session cannot outlive its turn. Picking the work back up (${attempt} of ${of}).`,
-        instruction: `Your previous turn ended while ${commands} you left running in the background ${oneCommand ? 'was' : 'were'} still going, so ${oneCommand ? 'it was' : 'they were'} stopped when the turn closed. No report is coming for ${oneCommand ? 'it' : 'them'}, and any claim that ${oneCommand ? 'it' : 'they'} finished is unsafe — check what actually happened (did it land, did it finish) before you trust it, then carry on. Backgrounding a command does not outlive your turn: run it in the foreground if you need to see it through, or check back on it again before the turn ends.`,
-        giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: every turn ended with a command still running in the background. Check whether it actually finished.`,
-      })
+      const recovery = await recover(
+        sessionId,
+        orchestratorName,
+        {
+          notice: (attempt, of) =>
+            `The turn ended while ${commands} you left running in the background ${oneCommand ? 'was' : 'were'} still going, so ${oneCommand ? 'it was' : 'they were'} stopped — this session cannot outlive its turn. Picking the work back up (${attempt} of ${of}).`,
+          instruction: `Your previous turn ended while ${commands} you left running in the background ${oneCommand ? 'was' : 'were'} still going, so ${oneCommand ? 'it was' : 'they were'} stopped when the turn closed. No report is coming for ${oneCommand ? 'it' : 'them'}, and any claim that ${oneCommand ? 'it' : 'they'} finished is unsafe — check what actually happened (did it land, did it finish) before you trust it, then carry on. Backgrounding a command does not outlive your turn: run it in the foreground if you need to see it through, or check back on it again before the turn ends.`,
+          giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: every turn ended with a command still running in the background. Check whether it actually finished.`,
+        },
+        userRow.id,
+      )
+      verdict = await endTurn(
+        userRow.id,
+        recovery.outcome === 'continued' ? 'continuing' : 'stalled',
+        recovery.detail,
+      )
       return
     }
 
@@ -1117,21 +1371,39 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
     if (lost > 0) {
       const one = lost === 1
       const tasks = `${lost} delegated task${one ? '' : 's'}`
-      await recover(sessionId, orchestratorName, {
-        notice: (attempt, of) =>
-          `The turn ended while ${tasks} ${one ? 'was' : 'were'} still running in the background, so ${one ? 'it was' : 'they were'} stopped — this session cannot outlive its turn. Picking the work back up (${attempt} of ${of}).`,
-        instruction: `Your previous turn ended while ${tasks} ${one ? 'was' : 'were'} still running in the background, so ${one ? 'it was' : 'they were'} stopped when the turn closed. No report is coming for ${one ? 'it' : 'them'}, and any claim that ${one ? 'it' : 'they'} finished is unsafe: check what actually landed on disk first, then carry on from there. Delegation blocks — send the work again and read the result inside the turn you are in, rather than ending a turn to wait for it.`,
-        giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: every turn ended with delegated work still running in the background. Check the worktree for partial work.`,
-      })
+      const recovery = await recover(
+        sessionId,
+        orchestratorName,
+        {
+          notice: (attempt, of) =>
+            `The turn ended while ${tasks} ${one ? 'was' : 'were'} still running in the background, so ${one ? 'it was' : 'they were'} stopped — this session cannot outlive its turn. Picking the work back up (${attempt} of ${of}).`,
+          instruction: `Your previous turn ended while ${tasks} ${one ? 'was' : 'were'} still running in the background, so ${one ? 'it was' : 'they were'} stopped when the turn closed. No report is coming for ${one ? 'it' : 'them'}, and any claim that ${one ? 'it' : 'they'} finished is unsafe: check what actually landed on disk first, then carry on from there. Delegation blocks — send the work again and read the result inside the turn you are in, rather than ending a turn to wait for it.`,
+          giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: every turn ended with delegated work still running in the background. Check the worktree for partial work.`,
+        },
+        userRow.id,
+      )
+      verdict = await endTurn(
+        userRow.id,
+        recovery.outcome === 'continued' ? 'continuing' : 'stalled',
+        recovery.detail,
+      )
       return
     }
 
+    // The outcome is a pure function of two values already in memory —
+    // resultSubtype and lastResult — not a re-derivation of the cascade
+    // above. See completionOutcome's own comment for why `error_max_turns`
+    // and a genuine `is_error: true` are not the same fact as this session
+    // actually finishing the work, and why writing `completed` for both was
+    // exactly the lie a downstream board would advance a card on.
+    verdict = await endTurn(userRow.id, completionOutcome(resultSubtype, lastResult), null)
     await setStatus(sessionId, 'completed', null)
   } catch (error) {
     // An abort surfaces here as a thrown error, but it was asked for.
     if (interrupted) {
       if (announcement) await unstampAnnouncement(sessionId, userRow.seq, userRow.id)
       await noticeStrandedPrompt(sessionId, orchestratorName)
+      verdict = await endTurn(userRow.id, 'interrupted', null)
       await setStatus(sessionId, 'interrupted', null)
       return
     }
@@ -1147,12 +1419,22 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
     const kill = processKill(detail)
     if (kill) {
       if (announcement) await unstampAnnouncement(sessionId, userRow.seq, userRow.id)
-      await recover(sessionId, orchestratorName, {
-        notice: (attempt, of) =>
-          `The Claude Code process running this turn was killed by ${kill.signal}. ${kill.cause} Resuming where it left off (${attempt} of ${of}).`,
-        instruction: `Your previous turn was cut short: the process running it was killed by ${kill.signal} partway through, so everything in flight stopped where it stood rather than finishing. ${kill.cause} Nothing is coming back for that work, and any note you left claiming it was done is unsafe — check what actually landed on disk before you trust it, then carry on. If a command you ran is what exhausted the machine, do not run it the same way again: split it up, run it over fewer files at a time, or cap its memory.`,
-        giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: the Claude Code process keeps being killed (${detail}). ${kill.cause}`,
-      })
+      const recovery = await recover(
+        sessionId,
+        orchestratorName,
+        {
+          notice: (attempt, of) =>
+            `The Claude Code process running this turn was killed by ${kill.signal}. ${kill.cause} Resuming where it left off (${attempt} of ${of}).`,
+          instruction: `Your previous turn was cut short: the process running it was killed by ${kill.signal} partway through, so everything in flight stopped where it stood rather than finishing. ${kill.cause} Nothing is coming back for that work, and any note you left claiming it was done is unsafe — check what actually landed on disk before you trust it, then carry on. If a command you ran is what exhausted the machine, do not run it the same way again: split it up, run it over fewer files at a time, or cap its memory.`,
+          giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: the Claude Code process keeps being killed (${detail}). ${kill.cause}`,
+        },
+        userRow.id,
+      )
+      verdict = await endTurn(
+        userRow.id,
+        recovery.outcome === 'continued' ? 'continuing' : 'stalled',
+        recovery.detail,
+      )
       return
     }
 
@@ -1161,10 +1443,23 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
     // session, which is where someone reading the history actually is.
     if (announcement) await unstampAnnouncement(sessionId, userRow.seq, userRow.id)
     await appendMessage(sessionId, { type: 'error', message: detail }, orchestratorName)
+    verdict = await endTurn(userRow.id, 'failed', detail)
     // Anything still pending stays pending. Draining it now would replay the
     // same failure against every queued message in turn.
     await setStatus(sessionId, 'failed', detail)
   } finally {
+    clearInterval(heartbeat)
+    // The other failure domain, distinct from the reconciler's: not a killed
+    // process, but a branch of the cascade above that ran to a `return` (or
+    // fell through to here) without ever calling `endTurn` at all — the
+    // "eleventh branch someone adds next year" this exists for. Guarded twice
+    // over: `endTurn`'s own WHERE makes a second call a no-op whenever a
+    // branch above already rendered the verdict, and `endTurn` itself never
+    // throws — so this is safe to call unconditionally rather than trusted to
+    // run only when it should.
+    if (!verdict) {
+      await endTurn(userRow.id, 'unknown', 'No branch in this turn recorded an outcome.')
+    }
     unsubscribe()
   }
 }
