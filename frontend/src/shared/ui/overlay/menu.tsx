@@ -1,6 +1,7 @@
 import { Menu as ArkMenu, Portal } from '@ark-ui/react'
 import type { ReactNode } from 'react'
 import { cx } from '../lib/cx'
+import { usePortalContainer } from '../lib/portal-container'
 import styles from './menu.module.scss'
 
 export interface MenuAction {
@@ -39,6 +40,9 @@ interface MenuProps {
  * control-height, full-width picker rather than a compact square.
  */
 export function Menu({ trigger, label, items, triggerVariant = 'icon' }: MenuProps) {
+  // undefined outside a Dialog: Ark's own "portal to document.body" fallback.
+  const portalContainer = usePortalContainer()
+
   return (
     <ArkMenu.Root
       onSelect={(details) => {
@@ -54,7 +58,7 @@ export function Menu({ trigger, label, items, triggerVariant = 'icon' }: MenuPro
       >
         {trigger}
       </ArkMenu.Trigger>
-      <Portal>
+      <Portal container={portalContainer}>
         <ArkMenu.Positioner>
           <ArkMenu.Content className={styles.content}>
             {items.map((item) => (

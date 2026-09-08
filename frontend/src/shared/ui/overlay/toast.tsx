@@ -73,6 +73,11 @@ export function toast({
  * `!important` is not worth it (see component-contract.md).
  */
 export function Toaster() {
+  // Deliberately no container prop here, unlike Select/Menu/Tooltip: this
+  // mounts once in the app shell (providers.tsx), is never itself rendered
+  // inside a Dialog, and a toast raised by a dialog action must outlive that
+  // dialog closing — parenting it to Dialog.Content would unmount it with
+  // the dialog. Stays on document.body.
   return (
     <Portal>
       <ArkToaster toaster={toaster} className={styles.root}>

@@ -3,6 +3,7 @@ import type { Ref } from 'react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cx } from '../lib/cx'
+import { usePortalContainer } from '../lib/portal-container'
 import type { Size } from '../lib/types'
 import styles from './select.module.scss'
 
@@ -61,6 +62,8 @@ export function Select({
 }: SelectProps) {
   const { t } = useTranslation()
   const collection = useMemo(() => createListCollection({ items: options }), [options])
+  // undefined outside a Dialog: Ark's own "portal to document.body" fallback.
+  const portalContainer = usePortalContainer()
 
   return (
     <ArkSelect.Root
@@ -84,7 +87,7 @@ export function Select({
           `id` lands here too — this is the real, focusable/queryable
           `HTMLSelectElement`, not the trigger button. */}
       <ArkSelect.HiddenSelect ref={ref} name={name} id={id} />
-      <Portal>
+      <Portal container={portalContainer}>
         <ArkSelect.Positioner className={styles.positioner}>
           <ArkSelect.Content className={styles.content}>
             {options.length === 0 ? (
