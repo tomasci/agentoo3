@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import { getApiIdeasIdBlocksQueryKey } from '@/shared/api/generated/hooks/useGetApiIdeasIdBlocks'
@@ -20,9 +20,7 @@ import {
   Spinner,
   Stack,
   Textarea,
-  toast,
 } from '@/shared/ui'
-import { useReorderIdeaBlocks } from '../canvas/use-reorder-idea-blocks'
 import { useIdeaAssets } from '../hooks/use-idea-assets'
 import {
   type IdeaBlock,
@@ -37,6 +35,7 @@ import {
   useUpdateIdeaBlock,
   useUpdateIdeaGroup,
 } from '../hooks/use-idea-canvas'
+import { blockLabel } from '../lib/block-label'
 import { ideaBlockFormSchema } from '../model/idea-block.schema'
 import styles from './idea-canvas.module.scss'
 
@@ -48,6 +47,11 @@ const IdeaFlowCanvas = lazy(() => import('../canvas/idea-flow-canvas'))
 
 const BLOCK_KINDS: IdeaBlockKind[] = ['note', 'requirement', 'example', 'link', 'image']
 
+// `seq` is allocated once at insert (`ideas.nextSeq`, backend `db/schema.ts`)
+// and, since nothing left in this UI ever calls `POST /ideas/{id}/blocks/
+// reorder`, is never mutated afterwards — so ascending `seq` is exactly
+// creation order. The id tiebreaker only matters for two rows minted in the
+// same request, where `seq` could tie.
 const bySeq = <T extends { seq: number; id: string }>(a: T, b: T) =>
   a.seq - b.seq || a.id.localeCompare(b.id)
 
@@ -332,73 +336,56 @@ function GroupDialog({
   )
 }
 
-function BlockRow({
+/**
+ * One block's row in the structure explorer: a kind marker, its one-line
+ * name (`blockLabel`), and an actions menu — never the block's own body, and
+ * never more than the one line CSS (`styles.rowName`'s own ellipsis) allows.
+ * The name doubles as the row's click target (`styles.rowButton`), which
+ * reveals this block on the canvas pane the way clicking a file opens it in
+ * an editor's tree; a real `<button>` is legal here (unlike `block-node.tsx`'s
+ * own markdown surface) because this row's content is always plain text.
+ */
+function ExplorerBlockRow({
   block,
   ideaId,
   assetsById,
   onEdit,
-  onMoveUp,
-  onMoveDown,
-  canMoveUp,
-  canMoveDown,
+  onReveal,
 }: {
   block: IdeaBlock
   ideaId: string
-  assetsById: Map<string, { originalFilename: string }>
+  assetsById: Map<string, { originalFilename: string; mimeType: string }>
   onEdit: (block: IdeaBlock) => void
-  /** Both swap this block with its neighbour *within this same list* — the
-   * ordered list already renders ungrouped blocks and each group's members
-   * as separate lists, in exactly the order `serializeIdea` reads them, so
-   * "up"/"down" here can never reach into a different list — see
-   * `IdeaCanvas`'s own `moveWithinSection`. */
-  onMoveUp: () => void
-  onMoveDown: () => void
-  canMoveUp: boolean
-  canMoveDown: boolean
+  onReveal: (blockId: string) => void
 }) {
   const { t } = useTranslation()
   const remove = useDeleteIdeaBlock(ideaId)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
+  const assetFilename =
+    block.kind === 'image' ? assetsById.get(block.assetId)?.originalFilename : undefined
+  // A block with nothing written into it yet (a fresh, still-empty note) has
+  // no name of its own — the kind label is the only thing worth showing.
+  const name = blockLabel(block, assetFilename) || t(`ideas.canvas.kind.${block.kind}`)
+
   return (
-    <li className={styles.block}>
-      <span className={styles.seq}>#{block.seq}</span>
-      <div className={styles.blockBody}>
-        <Inline gap={2}>
-          <Badge tone="neutral" variant="outline">
-            {t(`ideas.canvas.kind.${block.kind}`)}
-          </Badge>
-        </Inline>
-        {block.kind === 'link' ? (
-          <p className={styles.blockText}>
-            <a href={block.url} target="_blank" rel="noopener noreferrer">
-              {block.label || block.url}
-            </a>
-          </p>
-        ) : block.kind === 'image' ? (
-          <p className={styles.blockText}>
-            {assetsById.get(block.assetId)?.originalFilename ?? block.assetId}
-            {block.caption ? ` — ${block.caption}` : ''}
-          </p>
-        ) : (
-          <p className={styles.blockText}>{block.text}</p>
-        )}
-      </div>
+    <li className={styles.row}>
+      <button
+        type="button"
+        className={styles.rowButton}
+        title={name}
+        aria-label={t('ideas.canvas.explorer.reveal', { title: name })}
+        onClick={() => onReveal(block.id)}
+      >
+        <Badge tone="neutral" variant="outline">
+          {t(`ideas.canvas.kind.${block.kind}`)}
+        </Badge>
+        <span className={styles.rowName}>{name}</span>
+      </button>
       <ActionsMenu
+        label={t('ideas.actionsFor', { title: name })}
         actions={[
           { id: 'edit', label: t('common.edit'), onSelect: () => onEdit(block) },
-          {
-            id: 'move-up',
-            label: t('ideas.canvas.moveUp'),
-            disabled: !canMoveUp,
-            onSelect: onMoveUp,
-          },
-          {
-            id: 'move-down',
-            label: t('ideas.canvas.moveDown'),
-            disabled: !canMoveDown,
-            onSelect: onMoveDown,
-          },
           {
             id: 'delete',
             label: t('common.delete'),
@@ -421,37 +408,56 @@ function BlockRow({
   )
 }
 
-function GroupSection({
+/**
+ * One group's row: a folder, not a section heading — a collapse toggle (▸/▾,
+ * expanded by default), the title, an actions menu, and its member blocks
+ * nested underneath in their own `<ul>` when expanded. Never an `<ol>`: an
+ * ordinal number is exactly what this pane no longer shows anywhere.
+ */
+function ExplorerGroupRow({
   group,
   blocks,
   ideaId,
   assetsById,
   onEditBlock,
-  onMoveBlock,
+  onReveal,
 }: {
   group: IdeaGroup
   blocks: IdeaBlock[]
   ideaId: string
-  assetsById: Map<string, { originalFilename: string }>
+  assetsById: Map<string, { originalFilename: string; mimeType: string }>
   onEditBlock: (block: IdeaBlock) => void
-  /** This group's own reading-order section, addressed by `block.id` rather
-   * than by index — see `IdeaCanvas`'s `moveWithinSection`, which this and
-   * the ungrouped list above it both call with their own member list. */
-  onMoveBlock: (blockId: string, direction: 'up' | 'down') => void
+  onReveal: (blockId: string) => void
 }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const remove = useDeleteIdeaGroup(ideaId)
+  const [expanded, setExpanded] = useState(true)
   const [renaming, setRenaming] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   return (
-    <div className={styles.group}>
-      <Inline justify="between" align="center" gap={2}>
-        <h4 className={styles.groupTitle}>{group.title}</h4>
+    <li className={styles.groupItem}>
+      <div className={styles.groupRow}>
+        <button
+          type="button"
+          className={styles.toggle}
+          aria-expanded={expanded}
+          aria-label={t(
+            expanded ? 'ideas.canvas.explorer.collapse' : 'ideas.canvas.explorer.expand',
+            { title: group.title },
+          )}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? '▾' : '▸'}
+        </button>
+        <span className={styles.groupTitle} title={group.title}>
+          {group.title}
+        </span>
         <ActionsMenu
+          label={t('ideas.actionsFor', { title: group.title })}
           actions={[
-            { id: 'rename', label: t('common.edit'), onSelect: () => setRenaming(true) },
+            { id: 'edit', label: t('common.edit'), onSelect: () => setRenaming(true) },
             {
               id: 'delete',
               label: t('common.delete'),
@@ -460,23 +466,21 @@ function GroupSection({
             },
           ]}
         />
-      </Inline>
-      {blocks.length > 0 && (
-        <ol className={styles.list}>
-          {blocks.map((block, i) => (
-            <BlockRow
+      </div>
+
+      {expanded && blocks.length > 0 && (
+        <ul className={styles.sublist}>
+          {blocks.map((block) => (
+            <ExplorerBlockRow
               key={block.id}
               block={block}
               ideaId={ideaId}
               assetsById={assetsById}
               onEdit={onEditBlock}
-              onMoveUp={() => onMoveBlock(block.id, 'up')}
-              onMoveDown={() => onMoveBlock(block.id, 'down')}
-              canMoveUp={i > 0}
-              canMoveDown={i < blocks.length - 1}
+              onReveal={onReveal}
             />
           ))}
-        </ol>
+        </ul>
       )}
 
       <GroupDialog ideaId={ideaId} open={renaming} onOpenChange={setRenaming} group={group} />
@@ -504,34 +508,36 @@ function GroupSection({
           )
         }
       />
-    </div>
+    </li>
   )
 }
 
 /**
- * The idea's canvas: the ordered list this feature's first track (T11)
- * built, docked beside the spatial drag-and-drop surface this one (T12)
- * adds (`../canvas/idea-flow-canvas`, lazy-loaded — see the report). Both
- * read the same `blocks`/`groups` query data and render it two ways; only
- * the list is a phone's — `idea-canvas.module.scss`'s own `bp.up(sm)` hides
+ * The idea's canvas: a structure-only explorer — like an editor's file tree,
+ * never a rendering of block contents — docked beside the spatial
+ * drag-and-drop surface (`../canvas/idea-flow-canvas`, lazy-loaded — see the
+ * report). Both read the same `blocks`/`groups` query data; only the
+ * explorer is a phone's — `idea-canvas.module.scss`'s own `bp.up(sm)` hides
  * the canvas pane below that width rather than mounting a pan/zoom surface
  * on a 360px screen a finger cannot usefully drag around.
  *
- * Reading order — the list's own order, and the one thing the canvas is not
- * allowed to change by dragging — follows `serializeIdea` on the backend
- * exactly: ungrouped blocks first (ascending `seq`), then each group in
- * ascending `group.seq` with its own members ascending by `seq` beneath it.
- * `seq` itself only ever changes through `POST /ideas/{id}/blocks/reorder`
- * (`../canvas/use-reorder-idea-blocks`), called from here by the list's own
- * move-up/down and, on the canvas, by an explicit "reorder from layout"
- * command — never from a drag handler, which only ever writes `x`/`y`.
+ * Reading order — the one thing dragging on the canvas is not allowed to
+ * change — follows `serializeIdea` on the backend exactly: ungrouped blocks
+ * first (ascending `seq`), then each group in ascending `seq` with its own
+ * members ascending by `seq` beneath it. `seq` itself is allocated once at
+ * insert and never mutated afterwards (see `bySeq`'s own comment) — nothing
+ * in this UI calls `POST /ideas/{id}/blocks/reorder` anymore, so that
+ * reading order is simply creation order.
+ *
+ * Clicking a row reveals that block on the canvas pane (`reveal` state below,
+ * passed to `IdeaFlowCanvas` — see its own comment on the prop), the way
+ * clicking a file opens it in an editor's tree.
  */
 export function IdeaCanvas({ ideaId }: { ideaId: string }) {
   const { t } = useTranslation()
   const blocks = useIdeaBlocks(ideaId)
   const groups = useIdeaGroups(ideaId)
   const assets = useIdeaAssets(ideaId)
-  const reorder = useReorderIdeaBlocks(ideaId)
   const [addingBlock, setAddingBlock] = useState(false)
   const [editingBlock, setEditingBlock] = useState<IdeaBlock | undefined>(undefined)
   const [createPosition, setCreatePosition] = useState<{ x: number; y: number } | null>(null)
@@ -539,56 +545,57 @@ export function IdeaCanvas({ ideaId }: { ideaId: string }) {
   const [renamingGroupViaCanvas, setRenamingGroupViaCanvas] = useState<IdeaGroup | undefined>(
     undefined,
   )
+  const [reveal, setReveal] = useState<{ blockId: string; nonce: number } | null>(null)
+  // A plain counter rather than deriving the nonce from `reveal` itself: a
+  // fresh object every click (even for the same block twice in a row) is
+  // what makes `IdeaFlowCanvas`'s own effect re-fire and re-center.
+  const revealNonce = useRef(0)
+  const revealBlock = (blockId: string) => {
+    revealNonce.current += 1
+    setReveal({ blockId, nonce: revealNonce.current })
+  }
 
   const isPending = blocks.isPending || groups.isPending
   const isError = blocks.isError || groups.isError
 
-  const allBlocks = blocks.data ?? []
-  const allGroups = [...(groups.data ?? [])].sort(bySeq)
-  const ungrouped = allBlocks.filter((b) => b.groupId === null).sort(bySeq)
+  // Memoised on the query data itself (a stable reference from react-query
+  // until it actually refetches), not derived fresh every render: these three
+  // are exactly what `IdeaFlowCanvas`'s own node-rebuild effect depends on
+  // (`idea-flow-canvas.tsx`), and an unstable reference here used to rebuild
+  // its canvas nodes — discarding selection and any unpersisted local node
+  // state — on every keystroke typed anywhere else on this page, and made
+  // the `reveal` effect (also keyed on that same rebuilt `nodes` state)
+  // re-fire and snap the viewport back on every one of those renders too.
+  const allBlocks = useMemo(() => blocks.data ?? [], [blocks.data])
+  const allGroups = useMemo(() => [...(groups.data ?? [])].sort(bySeq), [groups.data])
+  const ungrouped = useMemo(
+    () => allBlocks.filter((b) => b.groupId === null).sort(bySeq),
+    [allBlocks],
+  )
   const membersOf = (groupId: string) => allBlocks.filter((b) => b.groupId === groupId).sort(bySeq)
 
-  const readyAssets = (assets.data?.files ?? []).filter((f) => f.status === 'ready')
-  const assetsById = new Map(
-    readyAssets.map((f) => [f.id, { originalFilename: f.originalFilename }]),
+  const readyAssets = useMemo(
+    () => (assets.data?.files ?? []).filter((f) => f.status === 'ready'),
+    [assets.data],
   )
-  const assetOptions: SelectOption[] = readyAssets.map((f) => ({
-    value: f.id,
-    label: f.originalFilename,
-  }))
+  const assetsById = useMemo(
+    () =>
+      new Map(
+        readyAssets.map((f) => [
+          f.id,
+          { originalFilename: f.originalFilename, mimeType: f.mimeType },
+        ]),
+      ),
+    [readyAssets],
+  )
+  const assetOptions: SelectOption[] = useMemo(
+    () => readyAssets.map((f) => ({ value: f.id, label: f.originalFilename })),
+    [readyAssets],
+  )
 
   const total = allBlocks.length + allGroups.length
   const editorBlock = editingBlock !== undefined
   const blockDialogOpen = addingBlock || editorBlock
-
-  /**
-   * Every one of this idea's block ids, in the reading order the list (and
-   * `serializeIdea`) already renders them in: ungrouped first, then each
-   * group's own members — mirrored from the render below rather than the
-   * other way around, so the two can never drift apart.
-   */
-  const fullOrder = () =>
-    [...ungrouped, ...allGroups.flatMap((g) => membersOf(g.id))].map((b) => b.id)
-
-  /** Swaps `blockId` with its neighbour in whichever of those lists it
-   * belongs to, then submits the *entire* idea's block order — the endpoint
-   * takes nothing less (`reorderIdeaBlocksSchema`'s own "exact permutation"),
-   * even though only one list's slice of it actually changed. */
-  const moveWithinSection = (blockId: string, direction: 'up' | 'down') => {
-    const order = fullOrder()
-    const index = order.indexOf(blockId)
-    const target = direction === 'up' ? index - 1 : index + 1
-    if (index === -1 || target < 0 || target >= order.length) return
-    const next = [...order]
-    ;[next[index], next[target]] = [next[target] as string, next[index] as string]
-    reorder.mutate(
-      { path: { id: ideaId }, body: { order: next } },
-      {
-        onError: (e) =>
-          toast({ tone: 'danger', title: apiErrorMessage(e, t('ideas.canvas.reorderFailed')) }),
-      },
-    )
-  }
 
   const closeBlockDialog = (open: boolean) => {
     if (open) return
@@ -638,37 +645,29 @@ export function IdeaCanvas({ ideaId }: { ideaId: string }) {
       {!isPending && !isError && total > 0 && (
         <div className={styles.layout}>
           <div className={styles.listPane}>
-            <Stack gap={4}>
-              {ungrouped.length > 0 && (
-                <ol className={styles.list}>
-                  {ungrouped.map((block, i) => (
-                    <BlockRow
-                      key={block.id}
-                      block={block}
-                      ideaId={ideaId}
-                      assetsById={assetsById}
-                      onEdit={setEditingBlock}
-                      onMoveUp={() => moveWithinSection(block.id, 'up')}
-                      onMoveDown={() => moveWithinSection(block.id, 'down')}
-                      canMoveUp={i > 0}
-                      canMoveDown={i < ungrouped.length - 1}
-                    />
-                  ))}
-                </ol>
-              )}
-
+            <ul className={styles.tree}>
+              {ungrouped.map((block) => (
+                <ExplorerBlockRow
+                  key={block.id}
+                  block={block}
+                  ideaId={ideaId}
+                  assetsById={assetsById}
+                  onEdit={setEditingBlock}
+                  onReveal={revealBlock}
+                />
+              ))}
               {allGroups.map((group) => (
-                <GroupSection
+                <ExplorerGroupRow
                   key={group.id}
                   group={group}
                   blocks={membersOf(group.id)}
                   ideaId={ideaId}
                   assetsById={assetsById}
                   onEditBlock={setEditingBlock}
-                  onMoveBlock={moveWithinSection}
+                  onReveal={revealBlock}
                 />
               ))}
-            </Stack>
+            </ul>
           </div>
 
           <div className={styles.canvasPane}>
@@ -684,6 +683,7 @@ export function IdeaCanvas({ ideaId }: { ideaId: string }) {
                   setCreatePosition(position)
                   setAddingBlock(true)
                 }}
+                reveal={reveal}
               />
             </Suspense>
           </div>

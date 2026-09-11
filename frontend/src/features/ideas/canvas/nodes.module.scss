@@ -9,13 +9,6 @@
   width: 16rem;
 }
 
-.orderBadge {
-  position: absolute;
-  top: calc(var(--space-2) * -1);
-  left: calc(var(--space-2) * -1);
-  z-index: var(--z-raised);
-}
-
 .header {
   display: flex;
   align-items: center;
@@ -71,36 +64,48 @@
   margin-top: var(--space-2);
 }
 
-// One row of tiny, discrete steppers — the replacement for React Flow's own
-// arrow-key node movement (`idea-flow-canvas.tsx` disables it): that built-in
-// path calls the store directly and never reaches this app's own
-// `onNodesChange`/`onNodeDragStop` pipeline, so a keyboard nudge through it
-// would move a node on screen and then never persist — see the report.
-.nudgeRow {
-  display: flex;
-  justify-content: center;
-  gap: var(--space-1);
+// An image block's own thumbnail — capped short enough that a handful of
+// image blocks still fit a card-sized node without one swallowing the whole
+// canvas; `object-fit: contain` rather than `cover` so a tall or wide photo
+// is never cropped just to fill this box.
+.imageThumbButton {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+  border-radius: var(--radius-sm);
 
-  button {
-    min-width: 1.75rem;
-    min-height: 1.75rem;
-    padding: 0;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface);
-    color: var(--color-text-secondary);
-    font-size: var(--text-sm);
-    cursor: pointer;
-
-    &:hover {
-      background: var(--color-surface-hover);
-    }
-
-    &:focus-visible {
-      outline: var(--focus-ring-width) solid var(--color-focus-ring);
-      outline-offset: var(--focus-ring-offset);
-    }
+  &:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
   }
+}
+
+.imageThumb {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  max-height: 10rem;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+}
+
+.imageCaption {
+  margin: var(--space-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+}
+
+// The lightbox's own image, inside Dialog's `body` slot — `Dialog`'s own
+// `size="lg"` already caps how wide the dialog itself gets, so this only
+// needs to stop the image forcing itself wider than that.
+.imageFull {
+  display: block;
+  max-width: 100%;
+  height: auto;
 }
 
 // A group's own footprint (see `to-nodes.ts`'s `DEFAULT_GROUP_WIDTH`/

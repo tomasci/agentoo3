@@ -1,6 +1,11 @@
 @use '@/styles/breakpoints' as bp;
 
-.list {
+// The structure explorer's own list reset — every level (top-level and each
+// group's own nested `<ul>`, `.sublist` below) shares this, so a group three
+// levels deep never regains browser default list padding/markers on the way
+// down.
+.tree,
+.sublist {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
@@ -9,57 +14,119 @@
   list-style: none;
 }
 
-.block {
+.sublist {
+  margin-top: var(--space-2);
+
+  // Indents a group's members under its own row without indenting the
+  // group row itself — the folder/file relationship the tree is showing.
+  padding-left: var(--space-5);
+}
+
+.row {
   display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-}
-
-.seq {
-  flex: none;
-  min-width: 1.5rem;
-  font-size: var(--text-2xs);
-  line-height: var(--leading-base);
-  color: var(--color-text-muted);
-}
-
-.blockBody {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.blockText {
-  margin: 0;
-  white-space: pre-wrap;
-  font-size: var(--text-sm);
-  line-height: var(--leading-sm);
-}
-
-.group {
-  display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: var(--space-2);
 }
 
-.groupTitle {
-  margin: 0;
-  font-size: var(--text-sm);
-  line-height: var(--leading-sm);
-  font-weight: var(--weight-semibold);
+// The reveal-on-canvas click target: reset to a plain, full-width row so it
+// reads as this row's name rather than as a button, while staying a real
+// `<button>` underneath (`idea-canvas.tsx`'s own comment on why that is safe
+// here, unlike `block-node.tsx`'s markdown surface).
+.rowButton {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+
+  &:hover {
+    background: var(--color-surface-hover);
+  }
+
+  &:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
 }
 
-// The list (T11) and the spatial canvas (T12, `../canvas/idea-flow-canvas`)
-// side by side above `sm`; below it, the canvas pane is not rendered
-// visually at all — a finger cannot usefully drag an infinite plane on a
-// 360px screen, and the list is already a complete, ordered read of the
-// same blocks. `bp.below`/`bp.up`, never a JS media query: this codebase's
-// only place a responsive decision is made.
+// The one-line name (`../lib/block-label.ts`'s own truncation is the ceiling
+// on the string itself; this is what clips a shorter name that still
+// overflows its column).
+.rowName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.groupItem {
+  display: flex;
+  flex-direction: column;
+}
+
+.groupRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+// A small, square disclosure control — never `Collapsible` (`shared/ui`'s own
+// version wraps its whole row in one trigger `<button>`, which cannot also
+// hold this row's own `ActionsMenu` button as a sibling without nesting one
+// button inside another).
+.toggle {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  min-height: 1.5rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+
+  &:hover {
+    background: var(--color-surface-hover);
+  }
+
+  &:focus-visible {
+    outline: var(--focus-ring-width) solid var(--color-focus-ring);
+    outline-offset: var(--focus-ring-offset);
+  }
+}
+
+.groupTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// The explorer (left) and the spatial canvas (right, `../canvas/
+// idea-flow-canvas`) side by side above `sm`; below it, the canvas pane is
+// not rendered visually at all — a finger cannot usefully drag an infinite
+// plane on a 360px screen, and the explorer's own "Edit" action is still
+// reachable at every width. `bp.below`/`bp.up`, never a JS media query:
+// this codebase's only place a responsive decision is made.
 .layout {
   display: flex;
   flex-direction: column;
