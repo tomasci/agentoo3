@@ -4,15 +4,10 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getApiIdeasIdBlocksQueryKey } from '@/shared/api/generated/hooks/useGetApiIdeasIdBlocks'
 import { ActionsMenu, ConfirmDialog, type MenuAction } from '@/shared/ui'
-import { useDeleteIdeaGroup, useUpdateIdeaGroup } from '../hooks/use-idea-canvas'
+import { useDeleteIdeaGroup } from '../hooks/use-idea-canvas'
 import { useIdeaCanvasActions } from './actions-context'
 import styles from './nodes.module.scss'
 import type { IdeaGroupNode } from './to-nodes'
-
-/** Same per-click distance as `block-node.tsx`'s own nudge — kept in sync by
- * eye rather than shared, since sharing a one-line constant across two files
- * for this is not worth the import. */
-const NUDGE_STEP = 24
 
 /**
  * The container a block gets dropped into (`to-nodes.ts`'s `parentId` +
@@ -27,13 +22,8 @@ export function GroupNode({ data }: NodeProps<IdeaGroupNode>) {
   const { t } = useTranslation()
   const { onRenameGroup } = useIdeaCanvasActions()
   const queryClient = useQueryClient()
-  const update = useUpdateIdeaGroup(group.ideaId)
   const remove = useDeleteIdeaGroup(group.ideaId)
   const [confirmDelete, setConfirmDelete] = useState(false)
-
-  const nudge = (dx: number, dy: number) => {
-    update.mutate({ path: { id: group.id }, body: { x: group.x + dx, y: group.y + dy } })
-  }
 
   const actions: MenuAction[] = [
     { id: 'rename', label: t('common.edit'), onSelect: () => onRenameGroup(group) },
@@ -54,37 +44,6 @@ export function GroupNode({ data }: NodeProps<IdeaGroupNode>) {
         </div>
       </div>
 
-      <div className={`nodrag ${styles.nudgeRow}`}>
-        <button
-          type="button"
-          aria-label={t('ideas.canvas.flow.nudge.up')}
-          onClick={() => nudge(0, -NUDGE_STEP)}
-        >
-          ↑
-        </button>
-        <button
-          type="button"
-          aria-label={t('ideas.canvas.flow.nudge.down')}
-          onClick={() => nudge(0, NUDGE_STEP)}
-        >
-          ↓
-        </button>
-        <button
-          type="button"
-          aria-label={t('ideas.canvas.flow.nudge.left')}
-          onClick={() => nudge(-NUDGE_STEP, 0)}
-        >
-          ←
-        </button>
-        <button
-          type="button"
-          aria-label={t('ideas.canvas.flow.nudge.right')}
-          onClick={() => nudge(NUDGE_STEP, 0)}
-        >
-          →
-        </button>
-      </div>
-
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
@@ -95,7 +54,7 @@ export function GroupNode({ data }: NodeProps<IdeaGroupNode>) {
           remove.mutate(
             { path: { id: group.id } },
             {
-              // Same compensation `idea-canvas.tsx`'s own `GroupSection` applies:
+              // Same compensation `idea-canvas.tsx`'s own explorer applies:
               // the server nulls `groupId` on this group's former members, but
               // `useDeleteIdeaGroup` only invalidates the groups list.
               onSuccess: () =>

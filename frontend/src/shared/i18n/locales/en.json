@@ -637,21 +637,14 @@
         "title": "Delete group?",
         "confirm": "Delete \"{{title}}\"? Its blocks are kept, ungrouped."
       },
-      "moveUp": "Move up",
-      "moveDown": "Move down",
-      "reorderFailed": "Could not change the reading order",
+      "explorer": {
+        "expand": "Expand \"{{title}}\"",
+        "collapse": "Collapse \"{{title}}\"",
+        "reveal": "Show \"{{title}}\" on the canvas"
+      },
       "flow": {
         "heading": "Canvas layout",
-        "reorderFromLayout": "Reorder from layout",
-        "reorderFromLayoutSuccess": "Reading order updated to match the canvas layout",
-        "reorderFromLayoutFailed": "Could not reorder from the canvas layout",
-        "removeFromGroup": "Remove from group",
-        "nudge": {
-          "up": "Nudge up",
-          "down": "Nudge down",
-          "left": "Nudge left",
-          "right": "Nudge right"
-        }
+        "removeFromGroup": "Remove from group"
       }
     },
     "comments": {

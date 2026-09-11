@@ -9,12 +9,14 @@ import {
   Button,
   Card,
   ConfirmDialog,
+  Dialog,
   Markdown,
   type MenuAction,
   Textarea,
   toast,
 } from '@/shared/ui'
-import { useDeleteIdeaBlock, useUpdateIdeaBlock } from '../hooks/use-idea-canvas'
+import { type IdeaBlock, useDeleteIdeaBlock, useUpdateIdeaBlock } from '../hooks/use-idea-canvas'
+import { ideaAssetDownloadUrl, isInlineImage } from '../lib/asset-url'
 import { useIdeaCanvasActions } from './actions-context'
 import styles from './nodes.module.scss'
 import type { IdeaBlockNode } from './to-nodes'
@@ -24,10 +26,6 @@ import type { IdeaBlockNode } from './to-nodes'
  * portalled to `document.body`) instead, which escapes the viewport
  * transform entirely rather than rendering a text field at 60% scale. */
 const INLINE_EDIT_MIN_ZOOM = 0.6
-
-/** Per click, in canvas units (not pixels — these move with zoom). Plain
- * enough to feel like a keyboard nudge without a settings surface for it. */
-const NUDGE_STEP = 24
 
 const TEXT_KINDS = new Set(['note', 'requirement', 'example'])
 
@@ -41,6 +39,71 @@ function onActivateKeyDown(event: KeyboardEvent, activate: () => void) {
     event.preventDefault()
     activate()
   }
+}
+
+/**
+ * One image block's own canvas surface: a thumbnail that opens a full-size
+ * `Dialog` lightbox — the same "known inline type, else a plain file chip"
+ * split as `sessions/components/transcript.tsx`'s own `AttachmentItem`, keyed
+ * off this feature's `assetsById` cache instead of a session's attachment
+ * list. Editing stays reachable through the node's own ActionsMenu in every
+ * branch, so a broken or non-image asset never traps the block with no way
+ * to change what it points at.
+ */
+function ImageBlockBody({
+  block,
+  assetsById,
+  onOpenEdit,
+}: {
+  block: Extract<IdeaBlock, { kind: 'image' }>
+  assetsById: Map<string, { originalFilename: string; mimeType: string }>
+  onOpenEdit: () => void
+}) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  // Flips true only if the browser itself fails to load the thumbnail — a GC
+  // race between the asset list and the download, say. Never trusted as the
+  // sole signal an asset is gone; this only ever guards against a broken
+  // `<img>`, same reasoning as `transcript.tsx`'s own `AttachmentItem`.
+  const [broken, setBroken] = useState(false)
+  const asset = assetsById.get(block.assetId)
+  const url = ideaAssetDownloadUrl(block.assetId)
+
+  if (asset && isInlineImage(asset.mimeType) && !broken) {
+    const title = block.caption || asset.originalFilename
+    return (
+      <>
+        <button
+          type="button"
+          className={`nodrag ${styles.imageThumbButton}`}
+          onClick={() => setOpen(true)}
+        >
+          <img
+            src={url}
+            alt={title}
+            className={styles.imageThumb}
+            onError={() => setBroken(true)}
+          />
+        </button>
+        {block.caption && <p className={styles.imageCaption}>{block.caption}</p>}
+        <Dialog open={open} onOpenChange={setOpen} title={title} size="lg">
+          <img src={url} alt={title} className={styles.imageFull} />
+        </Dialog>
+      </>
+    )
+  }
+
+  return (
+    <button
+      type="button"
+      aria-label={t('common.edit')}
+      className={`nodrag ${styles.contentButton}`}
+      onClick={onOpenEdit}
+    >
+      {asset?.originalFilename ?? block.assetId}
+      {block.caption ? ` — ${block.caption}` : ''}
+    </button>
+  )
 }
 
 export function BlockNode({ data, selected }: NodeProps<IdeaBlockNode>) {
@@ -87,16 +150,6 @@ export function BlockNode({ data, selected }: NodeProps<IdeaBlockNode>) {
     )
   }
 
-  const nudge = (dx: number, dy: number) => {
-    update.mutate(
-      { path: { id: block.id }, body: { x: block.x + dx, y: block.y + dy } },
-      {
-        onError: (e) =>
-          toast({ tone: 'danger', title: apiErrorMessage(e, t('ideas.canvas.updateFailed')) }),
-      },
-    )
-  }
-
   const removeFromGroup = () => {
     if (!block.groupId) return
     const group = groupsById.get(block.groupId)
@@ -133,12 +186,6 @@ export function BlockNode({ data, selected }: NodeProps<IdeaBlockNode>) {
 
   return (
     <div className={styles.root} data-selected={selected || undefined}>
-      <span className={styles.orderBadge}>
-        <Badge tone="neutral" variant="outline">
-          #{block.seq}
-        </Badge>
-      </span>
-
       <Card padding="sm">
         <div className={styles.header}>
           <Badge tone="accent" variant="soft">
@@ -159,15 +206,19 @@ export function BlockNode({ data, selected }: NodeProps<IdeaBlockNode>) {
           )}
 
           {block.kind === 'image' && (
-            <button
-              type="button"
-              aria-label={t('common.edit')}
-              className={`nodrag ${styles.contentButton}`}
-              onClick={activateContent}
-            >
-              {assetsById.get(block.assetId)?.originalFilename ?? block.assetId}
-              {block.caption ? ` — ${block.caption}` : ''}
-            </button>
+            // `key` is load-bearing, not decorative: React Flow keeps the same
+            // `BlockNode` instance for the life of this node id, so editing an
+            // image block to point at a different asset would otherwise leave
+            // `ImageBlockBody`'s own `broken` state (set by a now-unrelated
+            // asset's `<img>` failing to load) stuck `true` forever. Keying on
+            // the asset id forces a fresh mount — and a fresh `broken` — every
+            // time the block starts pointing somewhere else.
+            <ImageBlockBody
+              key={block.assetId}
+              block={block}
+              assetsById={assetsById}
+              onOpenEdit={() => onEditBlock(block)}
+            />
           )}
 
           {isTextKind && !editing && block.kind !== 'link' && block.kind !== 'image' && (
@@ -217,37 +268,6 @@ export function BlockNode({ data, selected }: NodeProps<IdeaBlockNode>) {
               </div>
             </div>
           )}
-        </div>
-
-        <div className={`nodrag ${styles.nudgeRow}`}>
-          <button
-            type="button"
-            aria-label={t('ideas.canvas.flow.nudge.up')}
-            onClick={() => nudge(0, -NUDGE_STEP)}
-          >
-            ↑
-          </button>
-          <button
-            type="button"
-            aria-label={t('ideas.canvas.flow.nudge.down')}
-            onClick={() => nudge(0, NUDGE_STEP)}
-          >
-            ↓
-          </button>
-          <button
-            type="button"
-            aria-label={t('ideas.canvas.flow.nudge.left')}
-            onClick={() => nudge(-NUDGE_STEP, 0)}
-          >
-            ←
-          </button>
-          <button
-            type="button"
-            aria-label={t('ideas.canvas.flow.nudge.right')}
-            onClick={() => nudge(NUDGE_STEP, 0)}
-          >
-            →
-          </button>
         </div>
       </Card>
 

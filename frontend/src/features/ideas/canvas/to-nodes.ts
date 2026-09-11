@@ -40,7 +40,7 @@ export function entityIdFromNodeId(nodeId: string): string {
 
 export interface IdeaBlockNodeData extends Record<string, unknown> {
   block: IdeaBlock
-  assetsById: Map<string, { originalFilename: string }>
+  assetsById: Map<string, { originalFilename: string; mimeType: string }>
 }
 
 export interface IdeaGroupNodeData extends Record<string, unknown> {
@@ -79,7 +79,7 @@ export function groupsToNodes(groups: IdeaGroup[]): IdeaGroupNode[] {
  */
 export function blocksToNodes(
   blocks: IdeaBlock[],
-  assetsById: Map<string, { originalFilename: string }>,
+  assetsById: Map<string, { originalFilename: string; mimeType: string }>,
 ): IdeaBlockNode[] {
   return blocks.map((block) => ({
     id: blockNodeId(block.id),
@@ -104,7 +104,7 @@ export function blocksToNodes(
 export function buildIdeaCanvasNodes(
   blocks: IdeaBlock[],
   groups: IdeaGroup[],
-  assetsById: Map<string, { originalFilename: string }>,
+  assetsById: Map<string, { originalFilename: string; mimeType: string }>,
 ): IdeaCanvasNode[] {
   return [...groupsToNodes(groups), ...blocksToNodes(blocks, assetsById)]
 }
