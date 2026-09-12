@@ -33,7 +33,7 @@
 // otherwise only ever written once, at claim time, and never revisited.
 
 import { tmpdir } from 'node:os'
-import type { Options, SDKMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { Options, SDKMessage, SDKResultError } from '@anthropic-ai/claude-agent-sdk'
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
@@ -63,14 +63,149 @@ const IDEA_PROMPT_ANSWER_JSON_SCHEMA: Record<string, unknown> = {
   additionalProperties: false,
 }
 
-async function markFailed(promptId: string, reason: string): Promise<void> {
-  // Model output and SDK error text are both untrusted strings by the time
-  // they reach here — the same reasoning sanitizeForDb's own header states
-  // for tool output.
+async function markFailed(
+  promptId: string,
+  reason: string,
+  captured: { costUsd?: number; model?: string } = {},
+): Promise<void> {
   await db
     .update(ideaPrompts)
-    .set({ status: 'failed', error: sanitizeForDb(reason), completedAt: new Date() })
+    .set({
+      status: 'failed',
+      // Model output and SDK error text are both untrusted strings by the
+      // time they reach here — the same reasoning sanitizeForDb's own header
+      // states for tool output.
+      error: sanitizeForDb(reason),
+      // Populated whenever a `result` message was actually captured before
+      // this failure — see every call site that passes `captured`. An
+      // error_max_budget_usd failure is, by definition, the most expensive
+      // kind of run; leaving these null unconditionally (the previous
+      // behaviour) meant cost accounting over idea_prompts undercounted
+      // exactly the runs that spent the most. A failure with no result ever
+      // captured has nothing to report and stores null here, which is
+      // honest — there is no cost or model to attribute it to.
+      costUsd: captured.costUsd ?? null,
+      model: captured.model ? sanitizeForDb(captured.model) : null,
+      completedAt: new Date(),
+    })
     .where(eq(ideaPrompts.id, promptId))
+}
+
+/**
+ * Turns a non-success `result` message into a reason an operator can act on,
+ * naming the knob that governs it where one exists. The SDK's own `errors`
+ * array is the closest thing to a detail message it gives us; `subtype` is
+ * the only thing that tells us which of our own limits (if any) is at fault.
+ *
+ * Every subtype below (bar `error_during_execution`) corresponds to one of
+ * this module's own ceilings, which is why each gets its env var named
+ * explicitly — "reached its turn limit" is guessable, "set
+ * IDEA_PROMPT_MAX_TURNS higher" saves an operator the trip to this file.
+ */
+function describeResultError(result: SDKResultError): string {
+  // `errors` is typed as always present, but this is SDK output crossing a
+  // process boundary at runtime, not a value this module constructed — the
+  // same reasoning that governs every other untrusted value in this file
+  // (see markFailed's own comment) applies here too, so this reads it
+  // defensively rather than trusting the type declaration.
+  const detail =
+    (Array.isArray(result.errors) ? result.errors.join('; ') : '') ||
+    result.stop_reason ||
+    'no detail given'
+  if (result.subtype === 'error_max_turns') {
+    return `Generation reached its turn limit before producing an answer (${result.subtype}; raise IDEA_PROMPT_MAX_TURNS, currently ${env.IDEA_PROMPT_MAX_TURNS}): ${detail}`
+  }
+  if (result.subtype === 'error_max_budget_usd') {
+    return `Generation reached its budget ceiling before producing an answer (${result.subtype}; raise IDEA_PROMPT_MAX_BUDGET_USD, currently ${env.IDEA_PROMPT_MAX_BUDGET_USD}): ${detail}`
+  }
+  if (result.subtype === 'error_max_structured_output_retries') {
+    return `Generation repeatedly failed to produce output matching the expected shape and gave up (${result.subtype}): ${detail}`
+  }
+  // 'error_during_execution', and anything the SDK adds later — its own doc
+  // on SDKMessage calls this union open ("the set grows over time") — still
+  // gets a legible message, just without a knob of ours to name.
+  return `Generation ended in an internal error (${result.subtype}): ${detail}`
+}
+
+/**
+ * Everything that happens once a `result` message has been captured, whether
+ * `query()`'s generator finished normally or the SDK threw while advancing
+ * past it — see the comment on `lastResult`'s declaration in `runIdeaPrompt`
+ * for why the SDK can do the latter with a perfectly good, already-billed
+ * answer already in hand. Handling both exits through this one function is
+ * what makes that answer reach the row either way, instead of a valid
+ * generation being discarded just because the CLI process then exited
+ * non-zero. Every branch below finalises the row — as `ready` or as
+ * `failed`, with whatever cost and model this result carried — before
+ * returning, so a caller need not do anything further once this resolves;
+ * the boolean says which of the two it was.
+ */
+async function finalizeCapturedResult(
+  promptId: string,
+  model: string | undefined,
+  lastResult: Extract<SDKMessage, { type: 'result' }>,
+): Promise<boolean> {
+  const captured = { costUsd: lastResult.total_cost_usd, model }
+
+  if (lastResult.subtype !== 'success') {
+    // Kept, rather than deleted, even though the SDK throwing on the very
+    // next pull (see `lastResult`'s own comment) is the normal way this is
+    // reached in practice: it is what a future SDK version that lets the
+    // stream end cleanly after an error subtype would hit instead.
+    await markFailed(promptId, describeResultError(lastResult), captured)
+    return false
+  }
+  if (lastResult.is_error) {
+    // subtype stays 'success' here even though the turn failed — see
+    // SDKResultSuccess's own doc: is_error true means an API error ended the
+    // turn, with the error text left in `result`.
+    await markFailed(
+      promptId,
+      `Generation ended in an API error: ${lastResult.result || 'no detail given'}`,
+      captured,
+    )
+    return false
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(lastResult.result)
+  } catch (error) {
+    await markFailed(
+      promptId,
+      `Model answer was not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+      captured,
+    )
+    return false
+  }
+
+  const answer = ideaPromptAnswerSchema.safeParse(parsed)
+  if (!answer.success) {
+    // Per the schema's own boundary-validation reasoning: a structured-
+    // output request is a strong hint, not a guarantee, so a malformed
+    // answer is an ordinary, expected failure mode here — not a bug to throw
+    // over.
+    await markFailed(
+      promptId,
+      `Model answer did not match the expected shape: ${answer.error.message}`,
+      captured,
+    )
+    return false
+  }
+
+  await db
+    .update(ideaPrompts)
+    .set({
+      status: 'ready',
+      generatedTitle: sanitizeForDb(answer.data.title),
+      generatedText: sanitizeForDb(answer.data.prompt),
+      assumptions: sanitizeForDb(answer.data.assumptions),
+      model: model ? sanitizeForDb(model) : null,
+      costUsd: lastResult.total_cost_usd,
+      completedAt: new Date(),
+    })
+    .where(eq(ideaPrompts.id, promptId))
+  return true
 }
 
 /** Whichever of the two credential env vars is actually set — see the `env`
@@ -122,6 +257,24 @@ export async function runIdeaPrompt(promptId: string): Promise<void> {
   // this module ever calls `.abort()`).
   const timeout = setTimeout(() => abortController.abort(), env.IDEA_PROMPT_TIMEOUT_MS)
 
+  // Declared here rather than inside the `try` below so the `catch` block can
+  // still read whatever `result` message this run did receive. That is not
+  // redundant with the post-loop checks a few lines down: reading sdk.mjs's
+  // Query.readMessages shows a "result" message is enqueued to this generator
+  // unconditionally, but the CLI process then exits — always, even on success
+  // (see SDKResultMessage's own doc) — and when the transport treats that
+  // exit as an error, the SDK discards it in favour of throwing
+  // `new Error("Claude Code returned an error result: " + <the result's own
+  // errors, joined>)`, which is exactly the "maxTurns (1)" message this
+  // module used to surface. That throw lands on the *next* iteration of the
+  // `for await` below, i.e. after the result message was already delivered
+  // and `lastResult` set — so without hoisting these two out of the `try`,
+  // every one of the SDK's own error subtypes (and even a genuinely valid,
+  // already-billed answer) was being flattened into the generic catch below
+  // with no access to the result that explains — or redeems — it.
+  let model: string | undefined
+  let lastResult: Extract<SDKMessage, { type: 'result' }> | undefined
+
   try {
     const options: Options = {
       // Reads no files and must touch no worktree, so cwd only has to exist —
@@ -132,7 +285,16 @@ export async function runIdeaPrompt(promptId: string): Promise<void> {
       // Never written to ~/.claude/projects/ and never resumed: this is one
       // question, one answer, not a conversation.
       persistSession: false,
-      maxTurns: 1,
+      // A single round-trip left no room for the model to retry a structured
+      // answer the CLI itself rejected, or to continue a longer one — see
+      // IDEA_PROMPT_MAX_TURNS's own comment in env.ts for why every run used
+      // to fail outright with "Reached maximum number of turns (1)" before
+      // producing anything. `tools: []` below means there is no agentic
+      // tool-use fan-out for a turn ceiling to guard against here, so
+      // maxBudgetUsd and the abort timeout are what actually bound a runaway
+      // run; this only has to be generous enough not to starve the ordinary
+      // case.
+      maxTurns: env.IDEA_PROMPT_MAX_TURNS,
       maxBudgetUsd: env.IDEA_PROMPT_MAX_BUDGET_USD,
       // No project CLAUDE.md, no user settings — this call has no project
       // directory of its own to read one from, and no operator sitting at a
@@ -159,9 +321,6 @@ export async function runIdeaPrompt(promptId: string): Promise<void> {
       },
     }
 
-    let model: string | undefined
-    let lastResult: Extract<SDKMessage, { type: 'result' }> | undefined
-
     for await (const message of query({ prompt: row.sourceDigest, options })) {
       if (message.type === 'system' && 'subtype' in message && message.subtype === 'init') {
         model = message.model
@@ -175,60 +334,30 @@ export async function runIdeaPrompt(promptId: string): Promise<void> {
       await markFailed(promptId, 'The model produced no result message before the query ended')
       return
     }
-    if (lastResult.subtype !== 'success') {
-      await markFailed(promptId, `Generation stopped early: ${lastResult.subtype}`)
-      return
-    }
-    if (lastResult.is_error) {
-      await markFailed(
-        promptId,
-        `Generation ended in an API error: ${lastResult.result || 'no detail given'}`,
-      )
-      return
-    }
-
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(lastResult.result)
-    } catch (error) {
-      await markFailed(
-        promptId,
-        `Model answer was not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
-      )
-      return
-    }
-
-    const answer = ideaPromptAnswerSchema.safeParse(parsed)
-    if (!answer.success) {
-      // Per the schema's own boundary-validation reasoning: a structured-
-      // output request is a strong hint, not a guarantee, so a malformed
-      // answer is an ordinary, expected failure mode here — not a bug to
-      // throw over.
-      await markFailed(
-        promptId,
-        `Model answer did not match the expected shape: ${answer.error.message}`,
-      )
-      return
-    }
-
-    await db
-      .update(ideaPrompts)
-      .set({
-        status: 'ready',
-        generatedTitle: sanitizeForDb(answer.data.title),
-        generatedText: sanitizeForDb(answer.data.prompt),
-        assumptions: sanitizeForDb(answer.data.assumptions),
-        model: model ? sanitizeForDb(model) : null,
-        costUsd: lastResult.total_cost_usd,
-        completedAt: new Date(),
-      })
-      .where(eq(ideaPrompts.id, promptId))
+    await finalizeCapturedResult(promptId, model, lastResult)
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
-    const detail = abortController.signal.aborted
-      ? `Generation exceeded its ${env.IDEA_PROMPT_TIMEOUT_MS}ms budget and was aborted: ${reason}`
-      : `Generation failed: ${reason}`
-    await markFailed(promptId, detail)
+    if (abortController.signal.aborted) {
+      // Kept ahead of the "a result was captured" branch below: a run cut off
+      // by the deadline is still cut off even if the model got as far as
+      // emitting a `result` message first — see the test that drives exactly
+      // this ordering ("an abort is told apart from an early stop even when a
+      // result arrived first"). Any cost that result already reported is real
+      // spend regardless, so it is still recorded.
+      await markFailed(
+        promptId,
+        `Generation exceeded its ${env.IDEA_PROMPT_TIMEOUT_MS}ms budget and was aborted: ${reason}`,
+        lastResult ? { costUsd: lastResult.total_cost_usd, model } : undefined,
+      )
+    } else if (lastResult) {
+      // The usual way this catch is reached at all — see the comment above
+      // `lastResult`'s declaration. A captured result finalises exactly as it
+      // would have if the loop had ended cleanly: as a stored answer when it
+      // is one, and only as a stored failure otherwise.
+      await finalizeCapturedResult(promptId, model, lastResult)
+    } else {
+      await markFailed(promptId, `Generation failed: ${reason}`)
+    }
   } finally {
     clearTimeout(timeout)
   }

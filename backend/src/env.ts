@@ -70,6 +70,18 @@ const schema = z.object({
   // crowd out sessions — neither shares a resource with the other, so neither
   // should share a knob.
   IDEA_PROMPT_CONCURRENCY: z.coerce.number().int().positive().default(4),
+  // Passed to the SDK's own maxTurns. `tools: []` on this call means there is
+  // no tool-use fan-out that could loop turn after turn, so this is not what
+  // stands between an ordinary run and a runaway one — maxBudgetUsd and the
+  // timeout below are the real bounds, and this used to be pinned at 1, which
+  // is a single API round-trip: no room for the model to retry a structured-
+  // output attempt the CLI itself rejected (see error_max_structured_output_
+  // retries in the SDK's SDKResultMessage) or to continue a longer answer,
+  // so every generation failed with "Reached maximum number of turns (1)"
+  // before it could produce one. 6 is a handful of round-trips — enough to
+  // absorb a retry or two — while staying far short of a real multi-tool
+  // agentic session.
+  IDEA_PROMPT_MAX_TURNS: z.coerce.number().int().positive().default(6),
   // Per-generation ceiling passed to the SDK's own maxBudgetUsd. An ordinary
   // one-shot, tool-less structured-output call over one idea's canvas costs a
   // small fraction of this; it exists to bound the ordinary case, not to be
