@@ -457,26 +457,47 @@ plain-container path, `agentoo/<slug>:latest` for the built image). Reads
 (`docker-op`), the same reason a session turn is: `docker compose up -d
 --build` can take minutes and must survive an API restart.
 
-**Both the API and the worker process need docker daemon access** — a socket
-mount, or `docker` on `PATH` talking to a rootless daemon — for this feature to
-do anything at all; without it, `GET /projects/{id}/docker` still answers (with
-`daemon.cliInstalled: false` or `daemon.available: false`), but every mutation
-503s.
+**Both the API and the worker process need docker daemon access** — `docker` on
+`PATH` and the account they run as in the `docker` group (what the installer
+sets up), or a socket mount if you run them some other way — for this feature
+to do anything at all; without it, `GET /projects/{id}/docker` still answers
+(with `daemon.cliInstalled: false` or `daemon.available: false`), but every
+mutation 503s.
 
 Running a project's Dockerfile or compose file **is arbitrary code execution on
 the host**, run at whatever privilege the daemon it talks to has. That sits
 inside this app's existing threat model — no app-level auth by design, tailnet
 only, CORS deliberately off (see the comment in `app.ts`) — the same reasoning
-that already applies to a session's own shell access. But a container with a
-mount into the root Docker socket escapes the service account's own privileges
-in a way a session's sandboxed worktree does not, so **a rootless daemon is the
-recommendation** for whatever user runs these two processes: it confines what
-"docker built and ran something" can reach to that user's own privileges,
-instead of handing every container root on the host through the socket.
+that already applies to a session's own shell access.
+
+**What the installer actually sets up is a rootful daemon**, with `APP_USER`
+(and the account that ran the installer, if different) in the `docker` group —
+see `scripts/65-install-docker.sh` and the top-level README's "Docker" section.
+An earlier version of this document recommended a rootless daemon instead; that
+recommendation is gone because the installer never implemented it, and a
+recommendation the installer contradicts is worse than no recommendation. Two
+things a rootless daemon cannot do are why: dynamic host-port publishing
+(`runArgs` in `args.ts` passes `-p 0:<port>` and lets the daemon pick one, which
+rootless Docker's userspace port driver does not support the same way), and any
+port below 1024, which a rootless daemon can never bind regardless.
+
+Being in the `docker` group **is equivalent to passwordless root** for that
+account — a container can mount `/`, and the socket has no authorization model
+of its own. This is not a smaller privilege than the service account already
+has to run arbitrary session shells, but it is a *different shaped* one (host
+root via a socket, rather than a sandboxed worktree), so it is worth naming
+rather than leaving implicit. The compensating controls are the `DOCKER-USER`
+firewall block (published container ports are not reachable from the public
+internet even though the daemon itself is rootful — see the top-level README)
+and `DOCKER_ENABLED` below, which is the one switch that does not require
+touching the host's Docker install at all to pull back.
 
 `DOCKER_ENABLED` (default true) is the kill switch: false disables every
 mutation (403) while state reads keep working, for a deployment that wants the
-dashboard visible without the controls live.
+dashboard visible without the controls live. The installer sets this from
+`DOCKER_ENABLE` (host-level: is Docker installed at all) — the two are
+deliberately separate switches, so a host can have Docker installed and
+`DOCKER_ENABLED=false`, or vice versa if installed by hand.
 
 ## Commands
 

@@ -98,4 +98,28 @@ else
   log_warn "test run can be OOM-killed mid-session. Set SWAP_ENABLE=1 or add swap yourself."
 fi
 
+# --- docker's own disk footprint ---
+# Not the same question as the / check above: images and container logs pile
+# up under /var/lib/docker specifically, on hosts where that is its own
+# mount. Warning only — the docker step (if it runs at all) checks this again
+# right before it does anything, and DOCKER_ENABLE=0 skips it entirely.
+if [[ "${DOCKER_ENABLE:-1}" == "1" ]]; then
+  docker_target=/var/lib/docker
+  [[ -d "$docker_target" ]] || docker_target=/
+  # ${x:-0}: guards the arithmetic the same way 65-install-docker.sh's own
+  # disk check does -- df producing no second line (an odd mount, a stubbed
+  # df in a test) must not turn "/ 1024 / 1024" into an empty operand and
+  # crash the arithmetic expression outright.
+  # `|| true`: df itself can fail outright (a stale handle, a vanished mount),
+  # and under pipefail that is a real pipeline failure, not just the SIGPIPE
+  # artifact elsewhere in this codebase -- either way it must degrade this
+  # warning to "0GB free", not take the rest of preflight down with it.
+  docker_free_kb="$(df -Pk "$docker_target" 2>/dev/null | awk 'NR==2 {print $4}' || true)"
+  docker_free_gb=$(( ${docker_free_kb:-0} / 1024 / 1024 ))
+  if (( docker_free_gb < ${DOCKER_MIN_DISK_FREE_GB:-10} )); then
+    log_warn "Only ${docker_free_gb}GB free on the filesystem holding $docker_target"
+    log_warn "(Docker wants >= ${DOCKER_MIN_DISK_FREE_GB:-10}GB there for images and container logs)."
+  fi
+fi
+
 log_ok "Preflight passed"
