@@ -131,9 +131,15 @@ beforeEach(() => {
 })
 
 function rowsFor(table: string, aggregate: boolean, sortedBySeq: boolean): Row[] {
-  // countsFor and pendingFor are the only projected selects and both group by
-  // session. One answer serves both: pendingPrompts is not part of the export,
-  // so nothing here depends on which of the two ran first.
+  // ideaIdsFor's select also carries fields (so `aggregate` is true for it
+  // too, same as countsFor/pendingFor below), but it is keyed by table rather
+  // than by shape, so it has to be checked ahead of the aggregate branch.
+  // None of this file's fixtures link an idea to the session, so an empty
+  // result is the honest answer.
+  if (table === 'ideas') return []
+  // countsFor and pendingFor are the only other projected selects and both
+  // group by session. One answer serves both: pendingPrompts is not part of
+  // the export, so nothing here depends on which of the two ran first.
   if (aggregate) return sessionRow ? [{ sessionId: sessionRow.id, n: transcript.length }] : []
   if (table === 'sessions') return sessionRow ? [sessionRow] : []
   if (table === 'projects') return projectRow ? [projectRow] : []

@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
@@ -489,6 +490,20 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
           </span>
         </div>
         <div className={styles.actions}>
+          {/* Only sessions handed off from an idea have anywhere to link back
+              to; a session created directly has no `ideaId` and shows nothing
+              here. Placed ahead of Stop/the menu so navigation reads to the
+              left of the destructive and overflow actions. */}
+          {data.ideaId && (
+            <Button asChild variant="secondary" size="sm">
+              <Link
+                to="/projects/$projectId/ideas/$ideaId"
+                params={{ projectId: data.projectId, ideaId: data.ideaId }}
+              >
+                {t('sessions.backToIdea')}
+              </Link>
+            </Button>
+          )}
           {/* Visible at every size while busy: the only way to halt a running
               agent does not belong behind a menu. */}
           {busy && (

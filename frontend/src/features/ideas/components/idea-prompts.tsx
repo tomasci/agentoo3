@@ -78,6 +78,7 @@ export function IdeaPrompts({ idea, projectId }: { idea: Idea; projectId: string
           <PageHeader
             level={2}
             title={t('ideas.prompts.heading')}
+            description={t('ideas.prompts.previewHint')}
             actions={
               <Button
                 type="button"
@@ -196,7 +197,7 @@ export function IdeaPrompts({ idea, projectId }: { idea: Idea; projectId: string
                     </Inline>
                     <span className={styles.entryMeta}>{formatIdeaDateTime(run.startedAt)}</span>
                   </Inline>
-                  {run.detail && <p className={styles.entryMeta}>{run.detail}</p>}
+                  {run.detail && <Markdown>{run.detail}</Markdown>}
                 </li>
               ))}
             </ul>

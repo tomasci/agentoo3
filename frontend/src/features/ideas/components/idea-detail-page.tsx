@@ -33,6 +33,16 @@ export function IdeaDetailPage({ projectId, ideaId }: { projectId: string; ideaI
         }
         actions={
           <>
+            {data.sessionId && (
+              <Button asChild variant="secondary" size="sm">
+                <Link
+                  to="/projects/$projectId/sessions/$sessionId"
+                  params={{ projectId, sessionId: data.sessionId }}
+                >
+                  {t('ideas.detail.viewSession')}
+                </Link>
+              </Button>
+            )}
             <Button asChild variant="secondary" size="sm">
               <Link to="/projects/$projectId/ideas" params={{ projectId }}>
                 {t('ideas.detail.backToBoard')}

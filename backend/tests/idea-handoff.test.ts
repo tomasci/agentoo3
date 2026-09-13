@@ -103,6 +103,10 @@ dbTest('assets are copied into the session before the prompt message is sent', (
   expect(f.runStatus).toBe('running')
   expect(f.promptMessageIdSet).toBe(true)
   expect(f.ideaStatusAfter).toBe('in_progress_dev')
+  // The session DTO's ideaId is the reverse of ideas.sessionId, joined in
+  // rather than stored — this is what proves the join actually finds the row
+  // handoff just wrote, not merely that the column exists.
+  expect(f.sessionIdeaId).toBe(f.ideaId)
 })
 
 // --- a createSession failure closes the run and writes ideas.lastError -----

@@ -1,7 +1,7 @@
 import { and, count, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { sanitizeForDb } from '@/db/sanitize'
-import { messageFiles, messages, projects, sessionFiles, sessions } from '@/db/schema'
+import { ideas, messageFiles, messages, projects, sessionFiles, sessions } from '@/db/schema'
 import { deleteSessionFiles } from '@/features/attachments/storage'
 import { keyPathFor } from '@/features/ssh-keys/service'
 import { badRequest, conflict, notFound } from '@/lib/errors'
@@ -125,11 +125,13 @@ function toDto(
   row: SessionRow,
   repoPath: string,
   messageCount: number,
+  ideaId: string | null,
   pendingPrompts = 0,
 ): SessionDto {
   return {
     id: row.id,
     projectId: row.projectId,
+    ideaId,
     title: row.title,
     status: row.status,
     orchestrator: row.orchestrator,
@@ -179,6 +181,28 @@ async function countsFor(sessionIds: string[]): Promise<Map<string, number>> {
   return new Map(rows.map((r) => [r.sessionId, Number(r.n)]))
 }
 
+/**
+ * Idea each session was handed off from, keyed by session id.
+ *
+ * The FK lives on ideas.sessionId, not the other way around — deliberately:
+ * deleting a session must not delete the idea it came from, only null out the
+ * idea's own link (see that column's comment in db/schema.ts). So the session
+ * DTO's ideaId is a reverse lookup rather than a column read, same shape as
+ * ideaSchema's own sessionStatus does it in the other direction.
+ */
+async function ideaIdsFor(sessionIds: string[]): Promise<Map<string, string>> {
+  if (sessionIds.length === 0) return new Map()
+  const rows = await db
+    .select({ sessionId: ideas.sessionId, id: ideas.id })
+    .from(ideas)
+    .where(inArray(ideas.sessionId, sessionIds))
+  return new Map(
+    rows
+      .filter((r): r is { sessionId: string; id: string } => r.sessionId !== null)
+      .map((r) => [r.sessionId, r.id]),
+  )
+}
+
 export async function listSessions(projectId: string): Promise<SessionDto[]> {
   const project = await requireProject(projectId)
   const rows = await db
@@ -187,17 +211,33 @@ export async function listSessions(projectId: string): Promise<SessionDto[]> {
     .where(eq(sessions.projectId, projectId))
     .orderBy(desc(sessions.createdAt))
   const ids = rows.map((r) => r.id)
-  const [counts, pending] = await Promise.all([countsFor(ids), pendingFor(ids)])
+  const [counts, pending, ideaIds] = await Promise.all([
+    countsFor(ids),
+    pendingFor(ids),
+    ideaIdsFor(ids),
+  ])
   const repo = projectRepo(project.slug)
-  return rows.map((r) => toDto(r, repo, counts.get(r.id) ?? 0, pending.get(r.id) ?? 0))
+  return rows.map((r) =>
+    toDto(r, repo, counts.get(r.id) ?? 0, ideaIds.get(r.id) ?? null, pending.get(r.id) ?? 0),
+  )
 }
 
 export async function getSession(id: string): Promise<SessionDto> {
   const [row] = await db.select().from(sessions).where(eq(sessions.id, id)).limit(1)
   if (!row) throw notFound('Session')
   const project = await requireProject(row.projectId)
-  const [counts, pending] = await Promise.all([countsFor([row.id]), pendingFor([row.id])])
-  return toDto(row, projectRepo(project.slug), counts.get(row.id) ?? 0, pending.get(row.id) ?? 0)
+  const [counts, pending, ideaIds] = await Promise.all([
+    countsFor([row.id]),
+    pendingFor([row.id]),
+    ideaIdsFor([row.id]),
+  ])
+  return toDto(
+    row,
+    projectRepo(project.slug),
+    counts.get(row.id) ?? 0,
+    ideaIds.get(row.id) ?? null,
+    pending.get(row.id) ?? 0,
+  )
 }
 
 /** Short, readable, and unique enough for a branch name. */

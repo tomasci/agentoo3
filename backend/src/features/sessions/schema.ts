@@ -14,6 +14,16 @@ export const sessionStatusSchema = z.enum([
 export const sessionSchema = z.object({
   id: z.string().uuid(),
   projectId: z.string().uuid(),
+  ideaId: z
+    .string()
+    .uuid()
+    .nullable()
+    .openapi({
+      description:
+        'The idea this session was handed off from — set on ideas.session_id at handoff, ' +
+        'joined in the reverse direction (see that column in db/schema.ts). Null for a session ' +
+        'created directly, without an idea behind it.',
+    }),
   title: z.string().nullable(),
   status: sessionStatusSchema,
   orchestrator: z.string().nullable(),
