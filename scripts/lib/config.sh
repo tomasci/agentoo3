@@ -273,6 +273,71 @@ TAILSCALE_SERVE_PORT="${TAILSCALE_SERVE_PORT:-80}"   # local port to publish (ng
 # yet, so fall back to the newest LTS. The packages are static binaries.
 TAILSCALE_CODENAME_FALLBACK="${TAILSCALE_CODENAME_FALLBACK:-noble}"
 
+# ------------------------------------------------------------------ docker ---
+#
+# Backs the per-project Docker page (backend/src/features/docker/): compose
+# up/down, plain `docker run`, log streaming. DOCKER_ENABLE gates whether
+# *this host* gets Docker installed at all; DOCKER_ENABLED (written to .env by
+# the step below) is the separate, app-level kill switch the feature itself
+# checks — the two can disagree on purpose (host has Docker, app control
+# disabled).
+
+DOCKER_ENABLE_EXPLICIT="${DOCKER_ENABLE+1}"   # set by the operator this run?
+DOCKER_ENABLE="${DOCKER_ENABLE:-1}"
+# Ubuntu's own apt repo trails a brand-new release, same reasoning as
+# TAILSCALE_CODENAME_FALLBACK: try the detected codename first, then this LTS.
+DOCKER_CODENAME_FALLBACK="${DOCKER_CODENAME_FALLBACK:-noble}"
+# Docker's release signing key, from https://docs.docker.com/engine/install/ubuntu/.
+# Checked before the keyring is installed, the same shape as
+# CLAUDE_CODE_GPG_FINGERPRINT above.
+DOCKER_GPG_FINGERPRINT="${DOCKER_GPG_FINGERPRINT:-9DC858229FC7DD38854AE2D88D81803C0EBFCD88}"
+# The plugin the feature actually shells out to (`docker compose ...`), not the
+# old standalone `docker-compose` binary. Below this, flags the feature relies
+# on (`config --format json`) may not exist.
+MIN_COMPOSE_VERSION="${MIN_COMPOSE_VERSION:-2.0.0}"
+# Extra accounts to add to the `docker` group, beyond APP_USER and (when set)
+# SUDO_USER. Space-separated.
+DOCKER_GROUP_USERS="${DOCKER_GROUP_USERS:-}"
+# Docker inserts its own iptables rules ahead of ufw's, in a DOCKER-USER chain
+# ufw does not manage, so a published container port is otherwise reachable
+# from every interface — public included. Off (0) fails *open* and is
+# deliberately NOT sticky: forgetting to pass it again on a later run must
+# re-close the hole, not leave it open because some earlier run asked for 0.
+DOCKER_FIREWALL="${DOCKER_FIREWALL:-1}"
+# Losing this list re-opens the one thing DOCKER_FIREWALL exists to hold shut,
+# so — unlike DOCKER_FIREWALL — both of these ARE sticky, the same reasoning
+# as UFW_TAILSCALE_ONLY: a deliberate change here must survive a later plain
+# re-run. The IPv6 twin gets the identical treatment for the identical
+# reason — an asymmetry here would mean DOCKER_TRUSTED_SOURCES6="fd00::/8"
+# quietly reverting on the next plain run while its IPv4 sibling survives.
+#
+# Defaults are named constants, not inlined into the ${VAR:-default} below,
+# so 65-install-docker.sh can fall back to the exact same string when a
+# whitespace-only value needs to be treated as "unset" too (see that step's
+# own comment on this).
+DOCKER_TRUSTED_SOURCES_DEFAULT="100.64.0.0/10 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16"
+DOCKER_TRUSTED_SOURCES6_DEFAULT="fc00::/7 fe80::/10"
+DOCKER_TRUSTED_SOURCES_EXPLICIT="${DOCKER_TRUSTED_SOURCES+1}"
+# The tailnet (100.64.0.0/10) plus the private ranges a LAN is drawn from.
+DOCKER_TRUSTED_SOURCES="${DOCKER_TRUSTED_SOURCES:-$DOCKER_TRUSTED_SOURCES_DEFAULT}"
+DOCKER_TRUSTED_SOURCES6_EXPLICIT="${DOCKER_TRUSTED_SOURCES6+1}"
+DOCKER_TRUSTED_SOURCES6="${DOCKER_TRUSTED_SOURCES6:-$DOCKER_TRUSTED_SOURCES6_DEFAULT}"
+DOCKER_TRUSTED_IFACES="${DOCKER_TRUSTED_IFACES:-lo tailscale0}"
+# json-file (Docker's default log driver) does not rotate on its own. This box
+# runs arbitrary user containers and the feature streams them with `--follow`;
+# a chatty container with no cap can fill the disk, and postgres lives on the
+# same one.
+DOCKER_LOG_MAX_SIZE="${DOCKER_LOG_MAX_SIZE:-10m}"
+DOCKER_LOG_MAX_FILE="$(num_or DOCKER_LOG_MAX_FILE "${DOCKER_LOG_MAX_FILE:-}" 3)"
+DOCKER_MIN_DISK_FREE_GB="$(num_or DOCKER_MIN_DISK_FREE_GB "${DOCKER_MIN_DISK_FREE_GB:-}" 10)"
+
+# The official repo is primary because Ubuntu 22.04's own docker.io ships only
+# legacy Compose v1 and has no docker-compose-v2 package at all — the distro
+# fallback below only exists for a codename download.docker.com has not
+# published yet.
+PKGS_DOCKER=(docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin)
+PKGS_DOCKER_DISTRO=(docker.io docker-compose-v2)
+
 # ------------------------------------------------------------------- ufw ----
 
 SSH_PORT="${SSH_PORT:-}"                       # empty -> detected from sshd

@@ -84,6 +84,7 @@ scripts/
   60-install-postgres.sh  PostgreSQL + role + database + pgvector
   62-install-redis.sh   Redis, localhost-only, password-protected
   64-install-tailscale.sh Tailscale VPN
+  65-install-docker.sh  Docker Engine + Compose v2 (DOCKER-USER firewall, docker group)
   66-install-nginx.sh   nginx on the tailnet (+ tailscale serve for HTTPS)
   68-setup-backend.sh   bun install, OpenAPI spec, migrations, API + worker
   70-setup-frontend.sh  bun install, generate API client, build, service
@@ -228,6 +229,45 @@ neither the spec nor the generated client is committed, so the client always
 matches the backend running on that machine. The installer generates it, and so
 do the git hooks via `scripts/gen-api-client.sh`, since a session's fresh
 worktree starts without one. Stack and layout: `frontend/README.md`.
+
+## Docker
+
+Step `docker` installs Docker Engine + the Compose v2 plugin from the official
+apt repo — falling back to a known codename, then to Ubuntu's own `docker.io` +
+`docker-compose-v2` if download.docker.com has none for this release yet — so
+the per-project Docker page (`backend/README.md`'s "Docker" section) has a
+daemon to talk to. `APP_USER`, and the account that invoked the installer under
+`sudo` if different, are added to the `docker` group.
+
+**Docker bypasses ufw.** It inserts its own iptables rules ahead of ufw's, in a
+`DOCKER-USER` chain ufw does not manage (`/etc/default/ufw` has
+`MANAGE_BUILTINS=no`), so a published container port would otherwise be
+reachable from every interface — the public one included, on a box where
+nothing else is. The step installs `/usr/local/sbin/agentoo-docker-firewall`
+and a `docker.service.d` drop-in that re-applies it after every daemon
+(re)start, narrowing `DOCKER-USER` by **source address** — the tailnet plus the
+private ranges a LAN is drawn from (`DOCKER_TRUSTED_SOURCES`) — rather than by
+interface, because a single-NIC host's public and LAN addresses usually share
+one interface; filtering by interface would either drop the LAN promise or fail
+to close the actual hole. `80-configure-ufw.sh` only *calls* that script
+(idempotent self-heal) and reports its state — it never authors the rules
+itself, so a host stopped partway between `--only docker` and `--only ufw`, or
+run with `--skip ufw`, is never worse off than before the docker step ran.
+
+A container run with `network_mode: host` bypasses Docker's own networking (and
+`DOCKER-USER`) entirely — it is governed by ufw like any other process on the
+host, not by this chain.
+
+**Group membership only affects processes started after the change.** A
+service that was already running when `usermod -aG docker` ran keeps its old
+group list until it restarts — the step restarts `agentoo-api` and
+`agentoo-worker` itself when their group changes, but a shell you already had
+open needs `newgrp docker` or a fresh login to see it.
+
+```
+DOCKER_ENABLE=0 /opt/agentoo/install.sh --only docker     # skip; never uninstalls Docker
+DOCKER_FIREWALL=0 /opt/agentoo/install.sh --only docker   # install Docker, leave DOCKER-USER alone (not sticky)
+```
 
 ## Claude Code
 
@@ -439,6 +479,14 @@ TAILSCALE_AUTHKEY=tskey-auth-... /opt/agentoo/install.sh --only tailscale
 
 # override the auto-detected tailnet server_name
 NGINX_DOMAIN=ai.example.com /opt/agentoo/install.sh --only nginx
+
+# skip installing Docker (never uninstalls it); or install it but leave
+# DOCKER-USER unmanaged (not sticky — the next run without it puts it back)
+DOCKER_ENABLE=0 /opt/agentoo/install.sh --only docker
+DOCKER_FIREWALL=0 /opt/agentoo/install.sh --only docker
+
+# who DOCKER-USER trusts, beyond the tailnet and the default private ranges
+DOCKER_TRUSTED_SOURCES="100.64.0.0/10 10.0.0.0/8" /opt/agentoo/install.sh --only docker
 
 # non-standard SSH port, if detection ever gets it wrong
 SSH_PORT=2222 /opt/agentoo/install.sh --only ufw

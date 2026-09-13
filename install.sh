@@ -36,6 +36,7 @@ STEPS=(
   "postgres:60-install-postgres.sh:PostgreSQL + role/database (+ pgvector)"
   "redis:62-install-redis.sh:Redis, localhost-only, password-protected"
   "tailscale:64-install-tailscale.sh:Tailscale VPN"
+  "docker:65-install-docker.sh:Docker Engine + Compose v2, published ports kept off the public internet"
   "nginx:66-install-nginx.sh:nginx reverse proxy on the tailnet"
   "backend:68-setup-backend.sh:Backend API + worker (Hono, Agent SDK)"
   "frontend:70-setup-frontend.sh:Generate the API client, build, run as a service"
@@ -79,6 +80,7 @@ ${C_BOLD}Environment overrides${C_RESET} (see scripts/lib/config.sh):
   SWAP_SIZE_MB=4096       Pin the swapfile size instead of deriving it from RAM
   WORKER_MEMORY_HIGH=3G   Soft memory ceiling for the worker and its agents
   TAILSCALE_AUTHKEY=...   Join the tailnet unattended
+  DOCKER_ENABLE=0         Skip installing Docker (never uninstalls it)
   NGINX_DOMAIN=x.com      Override the auto-detected MagicDNS server_name
   UFW_TAILSCALE_ONLY=1    Move SSH behind the VPN (Tailscale must be up)
 TXT

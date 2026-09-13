@@ -445,6 +445,12 @@ svc_enable_now() {
   as_root systemctl enable --now "$svc"
 }
 
+svc_start() {
+  local svc="$1"
+  has_systemd || { log_warn "systemd unavailable; cannot start '$svc'."; return 0; }
+  as_root systemctl start "$svc"
+}
+
 svc_restart() {
   local svc="$1"
   has_systemd || { log_warn "systemd unavailable; cannot restart '$svc'."; return 0; }
