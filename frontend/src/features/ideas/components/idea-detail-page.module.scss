@@ -1,3 +1,29 @@
-.page { display: grid; gap: var(--space-5); }
+.page {
+  display: grid;
 
-.form { max-width: 34rem; }
+  // An implicit `auto` track takes its minimum from the widest item's
+  // min-content — which is how one long `white-space: nowrap` explorer label
+  // (`IdeaCanvas`'s `.rowName`) sized the whole column and pushed every
+  // section past a 360px viewport, even though that label's own `min-width:
+  // 0` and `text-overflow: ellipsis` were already in place further down: the
+  // track sizing is what was asking, not the label. `minmax(0, 1fr)` gives
+  // the track a zero floor instead, so those descendants' existing shrink
+  // rules can actually engage. Pre-existing — `HEAD` overflows by the same
+  // `scrollWidth`, so this is not something the layout rework introduced.
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-5);
+
+  // The canvas is meant to dominate the visible page area — title and any
+  // block-level error above it, everything else below the fold. 18rem is a
+  // measured budget, not a derived one (the tab bar has no height token to
+  // derive from): `.body`'s own `--layout-page-padding-y` top and bottom,
+  // this page's `PageHeader` and the grid `gap` under it, `IdeaCanvas`'s own
+  // h2 and `Stack` gap above its layout, the shell's status bar, and a
+  // remainder so the next section's top edge peeks above the fold — the only
+  // affordance that there is more below, since React Flow keeps
+  // `preventScrolling` on and a wheel over the canvas never scrolls the page
+  // itself. Reads `--shell-height` rather than bare `100dvh` for the same
+  // reason `.shell` itself does (`app/layout.module.scss`): an open on-screen
+  // keyboard shrinks the usable viewport the same way it shrinks the shell.
+  --idea-canvas-height: max(24rem, calc(var(--shell-height, 100dvh) - 18rem));
+}

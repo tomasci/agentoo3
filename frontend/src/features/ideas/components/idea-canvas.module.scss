@@ -143,6 +143,15 @@
 
   @include bp.up(sm) {
     flex: 1 1 20rem;
+
+    // Bounded to the same height the flow surface beside it is (`--idea-
+    // canvas-height`, published by `idea-detail-page.module.scss`) and
+    // scrolling its own overflow, so the explorer and the spatial canvas read
+    // as one region of one screen rather than the taller of the two setting
+    // the page's height. No `overscroll-behavior` — chaining past this
+    // list's own end into the page scroll is what we want.
+    max-height: var(--idea-canvas-height, 32rem);
+    overflow-y: auto;
   }
 }
 
