@@ -107,6 +107,12 @@ const realSendMessage = realSessionsService.sendMessage as (
   sessionId: string,
   text: string,
 ) => Promise<{ id: string }>
+// Unwrapped, for the assetOrdering scenario below to call directly: it wants
+// the real getSession, not a further-mocked one, and there is nothing here
+// worth intercepting the way sendMessage's call order is.
+const realGetSession = realSessionsService.getSession as (
+  sessionId: string,
+) => Promise<{ ideaId: string | null }>
 mock.module(`${SRC}/features/sessions/service.ts`, () => ({
   ...realSessionsService,
   sendMessage: async (sessionId: string, text: string) => {
@@ -286,6 +292,10 @@ async function main() {
     const copiedFiles = sessionId
       ? await db.select().from(sessionFiles).where(eq(sessionFiles.sessionId, sessionId))
       : []
+    // The reverse-join field the session DTO now carries: the session
+    // handoff just created has to point back at the idea it came from, not
+    // merely the idea pointing at the session.
+    const sessionDto = sessionId ? await realGetSession(sessionId) : undefined
 
     facts.assetOrdering = {
       callOrder: [...callOrder],
@@ -294,6 +304,8 @@ async function main() {
       promptMessageIdSet: Boolean(run?.promptMessageId),
       ideaStatusAfter: ideaAfter?.status,
       projectSlugIsSet: Boolean(slug),
+      ideaId: idea,
+      sessionIdeaId: sessionDto?.ideaId ?? null,
     }
   }
 

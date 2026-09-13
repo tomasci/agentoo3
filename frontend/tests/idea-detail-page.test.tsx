@@ -31,6 +31,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { routeTree } from '../src/app/router'
 import type { AgentSummary } from '../src/features/library'
 import type { IdeaBlock, IdeaGroup } from '../src/features/ideas/hooks/use-idea-canvas'
+import type { IdeaPrompt, IdeaRun } from '../src/features/ideas/hooks/use-idea-prompts'
 import type { Idea } from '../src/features/ideas/hooks/use-ideas'
 import { BLOCK_LABEL_MAX_LENGTH } from '../src/features/ideas/lib/block-label'
 import { mockModule } from './mock-module'
@@ -106,6 +107,11 @@ let currentIdea = idea()
 let currentBlocks: IdeaBlock[] = BLOCKS
 let currentGroups: IdeaGroup[] = []
 let currentAgents: AgentSummary[] = []
+/** The prompt-preview history and the run history the page reads — mutable so
+ *  a test can put a previewed prompt, or a run carrying markdown, behind the
+ *  same two endpoints every other test leaves empty. */
+let currentPrompts: IdeaPrompt[] = []
+let currentRuns: IdeaRun[] = []
 
 /** Every PATCH /api/ideas/:id the page made, in order — the settings form's
  *  only observable output. */
@@ -135,10 +141,10 @@ await mockModule(COMMENTS_CLIENT, () => ({
   getApiIdeasIdComments: async () => ({ data: [] }),
 }))
 await mockModule(PROMPTS_CLIENT, () => ({
-  getApiIdeasIdPrompts: async () => ({ data: [] }),
+  getApiIdeasIdPrompts: async () => ({ data: currentPrompts }),
 }))
 await mockModule(RUNS_CLIENT, () => ({
-  getApiIdeasIdRuns: async () => ({ data: [] }),
+  getApiIdeasIdRuns: async () => ({ data: currentRuns }),
 }))
 await mockModule(UPDATE_CLIENT, () => ({
   patchApiIdeasId: async (options: {
@@ -219,6 +225,8 @@ beforeEach(() => {
   currentBlocks = BLOCKS
   currentGroups = []
   currentAgents = []
+  currentPrompts = []
+  currentRuns = []
   updateCalls = []
   updateFailure = null
 })
@@ -503,7 +511,7 @@ test('the title is the first thing on the page, with the canvas directly under i
     'Canvas',
     'Files',
     'Feedback',
-    'Generated prompts',
+    'Prompt Preview',
     'Runs',
   ])
   expect(page.children[1]?.textContent).toContain('Canvas')
@@ -844,3 +852,266 @@ test('a background refetch of the idea row does not overwrite what is being type
   )
   expect((field<HTMLInputElement>('input[name="baseBranch"]') as HTMLInputElement).value).toBe('')
 })
+
+// ---------------------------------------------------------------------------
+// The prompt section as a *preview*, the copy that says so, the link out to
+// the session the idea was handed off to, and the run history's markdown.
+//
+// The wording matters here in a way it usually does not: the section used to
+// be called "Generated prompts" with a "Generate prompt" button, which read
+// as "this is the prompt that will be used". It is not — the real one is
+// regenerated at hand-off. So these assert both the new spellings and the
+// absence of the old ones, in the page and in the portalled dialogs it owns.
+// ---------------------------------------------------------------------------
+
+const PROMPT_HEADING = 'Prompt Preview'
+const RUNS_HEADING = 'Runs'
+
+/** The old wording, verbatim from the locale file before the relabelling
+ *  (git 96148e3): the heading, the idle button, and the regenerate button. */
+const OLD_PROMPT_WORDING = [/generated prompts/i, /generate prompt/i, /\bRegenerate\b/]
+
+const prompt = (overrides: Partial<IdeaPrompt> = {}): IdeaPrompt => ({
+  id: 'prompt-1',
+  ideaId: 'idea-1',
+  kind: 'initial',
+  sourceDigest: 'digest',
+  generatedTitle: null,
+  generatedText: null,
+  assumptions: null,
+  model: null,
+  costUsd: null,
+  status: 'ready',
+  error: null,
+  createdAt: T,
+  completedAt: T,
+  ...overrides,
+})
+
+const run = (overrides: Partial<IdeaRun> = {}): IdeaRun => ({
+  id: 'run-1',
+  ideaId: 'idea-1',
+  sessionId: 's-9',
+  promptId: 'prompt-1',
+  promptMessageId: null,
+  kind: 'initial',
+  status: 'closed',
+  outcome: 'finished',
+  detail: null,
+  startedAt: T,
+  // Ended: an open run makes `useIdeaRuns` poll every 1.5s, which none of
+  // these tests need.
+  endedAt: T,
+  ...overrides,
+})
+
+/** The `<h2>` with exactly this text, and the two blocks around it:
+ *  `PageHeader` renders `<div.root><div.text><h2/><p.description/></div>
+ *  <div.actions/></div>`, so the heading's parent is the text block and its
+ *  grandparent is the header. `body` is the element holding the header and
+ *  whatever the section renders under it. */
+function section(headingText: string) {
+  const heading = [...container.querySelectorAll('h2')].find((h) => h.textContent === headingText)
+  if (!heading) throw new Error(`no <h2> reading ${JSON.stringify(headingText)} on the page`)
+  const text = heading.parentElement as HTMLElement
+  const header = text.parentElement as HTMLElement
+  return { heading, text, header, body: header.parentElement as HTMLElement }
+}
+
+/** The single action button in a section header — the prompt card has exactly
+ *  one, and which label it carries is the thing under test. */
+function headerAction(headingText: string): HTMLButtonElement {
+  const { header } = section(headingText)
+  const found = [...header.querySelectorAll('button')]
+  // Counts, tag names and text throughout the tests below rather than the
+  // nodes themselves: a failed `expect(node).not.toBeNull()` asks bun to
+  // pretty-print a happy-dom element, which takes minutes, so every assertion
+  // here is written to fail with a primitive.
+  expect(found.length).toBe(1)
+  return found[0] as HTMLButtonElement
+}
+
+/** Anchors are how a user leaves the page: found by their visible text, and
+ *  checked by `href`, because `<Link>`'s own props are not what a click uses. */
+const linkByText = (text: string) =>
+  [...container.querySelectorAll('a')].filter((a) => a.textContent?.trim() === text)
+
+test('the prompt section is headed Prompt Preview and offers Preview Prompt when nothing is previewed yet', async () => {
+  currentPrompts = []
+  await mount()
+
+  const { heading, body } = section(PROMPT_HEADING)
+  expect(heading.textContent).toBe(PROMPT_HEADING)
+  expect(headerAction(PROMPT_HEADING).textContent?.trim()).toBe('Preview Prompt')
+  expect(body.textContent).toContain('No prompt previewed yet.')
+
+  // Nothing anywhere on the page — or in the dialogs it portals into
+  // document.body — still says "generate"/"generated prompts".
+  for (const pattern of OLD_PROMPT_WORDING) {
+    expect(container.textContent ?? '').not.toMatch(pattern)
+    expect(document.body.textContent ?? '').not.toMatch(pattern)
+  }
+})
+
+test('once a prompt exists the action reads Refresh Preview, not Regenerate', async () => {
+  currentPrompts = [prompt({ status: 'ready' })]
+  await mount()
+
+  expect(headerAction(PROMPT_HEADING).textContent?.trim()).toBe('Refresh Preview')
+  expect(section(PROMPT_HEADING).heading.textContent).toBe(PROMPT_HEADING)
+  for (const pattern of OLD_PROMPT_WORDING) {
+    expect(container.textContent ?? '').not.toMatch(pattern)
+    expect(document.body.textContent ?? '').not.toMatch(pattern)
+  }
+})
+
+test('a prompt still being produced disables the action and labels it Previewing…', async () => {
+  currentPrompts = [prompt({ status: 'pending', completedAt: null })]
+  await mount()
+
+  const action = headerAction(PROMPT_HEADING)
+  expect(action.textContent?.trim()).toBe('Previewing…')
+  expect(action.hasAttribute('disabled')).toBe(true)
+  for (const pattern of OLD_PROMPT_WORDING) {
+    expect(container.textContent ?? '').not.toMatch(pattern)
+  }
+})
+
+test('the preview hint sits in the header description, and says both what the preview is and what replaces it', async () => {
+  await mount()
+
+  const { heading, text, header } = section(PROMPT_HEADING)
+
+  // The description slot specifically: the `<p>` PageHeader renders directly
+  // after the heading, inside the text block — not a paragraph somewhere
+  // further down the card, and not in the actions.
+  const description = heading.nextElementSibling as HTMLElement | null
+  expect(description?.tagName ?? '(nothing after the heading)').toBe('P')
+  expect(text.contains(description)).toBe(true)
+
+  const copy = description?.textContent ?? ''
+  // Claim one: it is the canvas as it is right now.
+  expect(copy).toContain('canvas as it looks right now')
+  // Claim two: the real prompt is regenerated at "Selected for development".
+  expect(copy).toContain('Selected for development')
+  expect(copy).toContain('regenerates the prompt fresh')
+  // And it says outright that this is not the prompt that gets used.
+  expect(copy).toContain("isn't the prompt that will actually be used")
+
+  // Rendered next to the heading, not swallowed by the button row.
+  const actions = header.querySelector('button')?.parentElement
+  expect(actions?.contains(description ?? null)).toBe(false)
+})
+
+// A session exists in more than one state, and the link out to it is not a
+// "currently running" indicator — it is the idea's record of where it went.
+// Each state gets its own mount: `afterEach` unmounts exactly one page.
+for (const sessionStatus of [null, 'idle', 'running', 'error', 'closed']) {
+  test(`the header links to the session while its status is ${sessionStatus ?? 'unknown'}`, async () => {
+    currentIdea = idea({ sessionId: 'sess-42', sessionStatus })
+    await mount()
+
+    const links = linkByText('View Session')
+    expect(links.length).toBe(1)
+    expect(links[0]?.getAttribute('href')).toBe('/projects/p1/sessions/sess-42')
+
+    // In the page header's actions, next to Back to board.
+    const h1 = [...container.querySelectorAll('h1')].find((h) => h.textContent === 'An idea')
+    const header = h1?.parentElement?.parentElement as HTMLElement
+    expect(header.contains(links[0] ?? null)).toBe(true)
+  })
+}
+
+test('an idea with no session offers no link to one', async () => {
+  currentIdea = idea({ sessionId: null })
+  await mount()
+
+  expect(linkByText('View Session').length).toBe(0)
+  expect(container.textContent ?? '').not.toContain('View Session')
+  expect(
+    [...container.querySelectorAll('a')]
+      .map((a) => a.getAttribute('href') ?? '')
+      .filter((href) => href.includes('/sessions/')),
+  ).toEqual([])
+})
+
+test("a run's detail renders as markdown elements, not as literal ## and - characters", async () => {
+  const detail = '## Heading\n\n- one\n- two\n\n```js\ncode\n```\n\n[docs](https://example.com)'
+  currentRuns = [run({ detail })]
+  await mount()
+
+  const { body } = section(RUNS_HEADING)
+  const entries = [...body.querySelectorAll('li')].filter((li) =>
+    li.textContent?.includes('Heading'),
+  )
+  expect(entries.length).toBe(1)
+  const entry = entries[0] as HTMLElement
+
+  // Real elements, with the text the source said — a heading level below the
+  // section's own `<h2>`… (react-markdown maps `##` to `<h2>`, so this one is
+  // found inside the entry rather than by document order).
+  expect(entry.querySelector('h2')?.textContent ?? '(no <h2> in the run entry)').toBe(
+    'Heading',
+  )
+
+  // …a real list…
+  const items = [...entry.querySelectorAll('ul > li')].map((li) => li.textContent)
+  expect(items).toEqual(['one', 'two'])
+
+  // …and a real fenced block.
+  expect(
+    entry.querySelector('pre > code')?.textContent ?? '(no <pre><code> in the run entry)',
+  ).toContain('code')
+
+  // The failure this is really about: the whole detail arriving as one text
+  // node with its own syntax still in it.
+  expect(entry.textContent ?? '').not.toContain('##')
+  expect(entry.textContent ?? '').not.toContain('```')
+  expect(entry.textContent ?? '').not.toContain('- one')
+
+  // The shared `Markdown` component and not some other renderer: only that one
+  // forces links away from the app (shared/ui/core/markdown.tsx).
+  const link = entry.querySelector('a[href="https://example.com"]')
+  expect(link?.getAttribute('target') ?? '(no link to example.com)').toBe('_blank')
+  expect(link?.getAttribute('rel') ?? '(no link to example.com)').toBe('noopener noreferrer')
+})
+
+test("a run's detail is displayed, never executed", async () => {
+  // A run detail is written by the handoff track from whatever the session
+  // reported, so it is not trusted markup. The shared renderer escapes raw
+  // HTML (shared/ui/core/markdown.tsx); this pins that the run path gets the
+  // same treatment rather than an `innerHTML` of its own.
+  currentRuns = [run({ detail: 'Boom <img src=x onerror="alert(1)"> <script>alert(2)</script>' })]
+  await mount()
+
+  const { body } = section(RUNS_HEADING)
+  const entry = [...body.querySelectorAll('li')].find((li) => li.textContent?.includes('Boom'))
+  expect(entry === undefined).toBe(false)
+  expect(entry?.querySelectorAll('img').length).toBe(0)
+  expect(entry?.querySelectorAll('script').length).toBe(0)
+  // Shown as text, which is the point.
+  expect(entry?.textContent ?? '').toContain('onerror')
+})
+
+// `null` is what the API sends for "no detail"; `''` is what a zero-length
+// string from the same column would look like. Neither should mount a
+// renderer with nothing in it.
+for (const detail of [null, '']) {
+  test(`a run whose detail is ${detail === null ? 'null' : 'empty'} renders its badges and no empty markdown block`, async () => {
+    currentRuns = [run({ detail, status: 'running', outcome: null, endedAt: T })]
+    await mount()
+
+    const { body } = section(RUNS_HEADING)
+    const entries = [...body.querySelectorAll('li')].filter((li) =>
+      li.textContent?.includes('Running'),
+    )
+    expect(entries.length).toBe(1)
+    const entry = entries[0] as HTMLElement
+
+    // Just the badge/timestamp row — nothing else mounted for an absent detail.
+    expect(entry.children.length).toBe(1)
+    expect(entry.querySelector('p')?.textContent ?? null).toBeNull()
+    expect(entry.textContent).toContain('Initial')
+    expect(entry.textContent).toContain('Running')
+  })
+}

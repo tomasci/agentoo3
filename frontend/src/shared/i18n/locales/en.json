@@ -177,6 +177,7 @@
   "sessions": {
     "heading": "Sessions",
     "backToProjects": "All projects",
+    "backToIdea": "Back to Idea",
     "empty": "No sessions yet. Create one above — it gets its own git worktree and branch, so it will not collide with anything else running on this project.",
     "loadFailed": "Could not load the session",
     "createFailed": "Could not create the session",
@@ -585,6 +586,7 @@
     },
     "detail": {
       "backToBoard": "Back to board",
+      "viewSession": "View Session",
       "settingsHeading": "Settings",
       "settingsSaved": "Settings saved",
       "continue": "Continue",
@@ -663,8 +665,9 @@
       }
     },
     "prompts": {
-      "heading": "Generated prompts",
-      "empty": "No prompt generated yet.",
+      "heading": "Prompt Preview",
+      "previewHint": "This is generated from the canvas as it looks right now, so editing the canvas afterwards leaves the preview stale. It isn't the prompt that will actually be used — moving the idea to Selected for development regenerates the prompt fresh from the canvas at that moment, and this preview is discarded.",
+      "empty": "No prompt previewed yet.",
       "kind": {
         "initial": "Initial",
         "followup": "Follow-up"
@@ -674,14 +677,14 @@
         "ready": "Ready",
         "failed": "Failed"
       },
-      "generate": "Generate prompt",
-      "regenerate": "Regenerate",
-      "generating": "Generating…",
+      "generate": "Preview Prompt",
+      "regenerate": "Refresh Preview",
+      "generating": "Previewing…",
       "assumptions": "Assumptions the generator made",
       "cost": "Cost",
       "model": "Model",
-      "loadFailed": "Could not load the generated prompts",
-      "generateFailed": "Could not generate the prompt"
+      "loadFailed": "Could not load the prompt previews",
+      "generateFailed": "Could not generate the preview"
     },
     "runs": {
       "heading": "Runs",
