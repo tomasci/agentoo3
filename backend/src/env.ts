@@ -118,6 +118,20 @@ const schema = z.object({
     ),
 
   LOG_LEVEL: z.coerce.number().int().min(0).max(5).default(3),
+
+  // Docker feature: running a project's Dockerfile/compose IS arbitrary code
+  // execution on the host (see backend/README.md's own paragraph on this),
+  // so a kill switch exists independent of anything per-project. Default true
+  // — the feature is opt-out, not opt-in, matching every other capability
+  // this app already grants with no per-app auth of its own.
+  DOCKER_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v.toLowerCase() !== 'false' && v !== '0'),
+  // Ceiling for one queued docker-op job (compose up --build, most often).
+  // 30 minutes is generous headroom for a cold image pull plus a build on a
+  // small box, not a value anyone should expect to brush against.
+  DOCKER_OP_TIMEOUT_MS: z.coerce.number().int().positive().default(1_800_000),
 })
 
 const parsed = schema.safeParse(process.env)

@@ -27,6 +27,10 @@ export class AppError extends Error {
 export const notFound = (what: string) => new AppError(`${what} not found`, 404)
 export const badRequest = (message: string) => new AppError(message, 400)
 export const conflict = (message: string) => new AppError(message, 409)
+export const forbidden = (message: string) => new AppError(message, 403)
+export const serviceUnavailable = (message: string, recoveryCommands?: string[]) =>
+  new AppError(message, 503, { recoveryCommands })
+export const tooManyRequests = (message: string) => new AppError(message, 429)
 
 /** A zod failure's issues, flattened to the shape this API puts on the wire —
  * shared so every 400 that started as a failed parse looks the same,

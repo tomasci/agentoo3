@@ -1,0 +1,30 @@
+{
+  "name": "agentoo-demo",
+  "services": {
+    "web": {
+      "image": "demo-web",
+      "build": { "context": ".", "dockerfile": "Dockerfile" },
+      "profiles": [],
+      "depends_on": {
+        "worker": { "condition": "service_started" }
+      },
+      "ports": [
+        { "target": 3000, "published": "3000", "protocol": "tcp" },
+        { "target": 9229, "published": "", "protocol": "tcp" }
+      ],
+      "environment": { "NODE_ENV": "production" }
+    },
+    "worker": {
+      "image": "demo-worker",
+      "profiles": ["background"],
+      "depends_on": ["db"],
+      "ports": []
+    },
+    "db": {
+      "image": "postgres:16",
+      "ports": [
+        { "target": 5432, "published": "5432-5439", "host_ip": "127.0.0.1" }
+      ]
+    }
+  }
+}

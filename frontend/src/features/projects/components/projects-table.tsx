@@ -1,6 +1,7 @@
 import { createColumnHelper, getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { DockerDetectedBadge, useDockerDetection } from '@/features/docker'
 import { ActionsMenu, Code, ConfirmDialog, DataTable, type MenuAction } from '@/shared/ui'
 import { type Project, useDeleteProject } from '../hooks/use-projects'
 import { ProjectStatusBadge } from './project-status'
@@ -24,6 +25,14 @@ export function ProjectsTable({
 }) {
   const { t } = useTranslation()
   const remove = useDeleteProject()
+  // One call covering every project (getApiDockerDetectionQueryOptions'
+  // own doc), not a per-row fetch — detection changes on the scale of a
+  // commit, so this never needs its own polling either.
+  const detection = useDockerDetection()
+  const dockerByProject = useMemo(
+    () => new Map((detection.data?.projects ?? []).map((p) => [p.projectId, p])),
+    [detection.data],
+  )
   const [pendingDelete, setPendingDelete] = useState<Project | null>(null)
 
   const columns = useMemo(
@@ -47,6 +56,20 @@ export function ProjectsTable({
         header: () => t('projects.table.status'),
         meta: { role: 'meta', label: t('projects.table.status') },
         cell: (info) => <ProjectStatusBadge project={info.row.original} />,
+      }),
+      columnHelper.display({
+        id: 'docker',
+        header: () => t('projects.table.docker'),
+        meta: { role: 'meta', label: t('projects.table.docker') },
+        cell: (info) => {
+          const detected = dockerByProject.get(info.row.original.id)
+          return (
+            <DockerDetectedBadge
+              hasCompose={detected?.hasCompose ?? false}
+              hasDockerfile={detected?.hasDockerfile ?? false}
+            />
+          )
+        },
       }),
       columnHelper.accessor('path', {
         header: () => t('projects.table.path'),
@@ -82,7 +105,7 @@ export function ProjectsTable({
         },
       }),
     ],
-    [t, onOpen],
+    [t, onOpen, dockerByProject],
   )
 
   const table = useReactTable({ data: projects, columns, getCoreRowModel: getCoreRowModel() })

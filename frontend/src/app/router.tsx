@@ -11,6 +11,7 @@ import { ProjectLayout } from './project-layout'
 import {
   IdeaDetailRoute,
   NewTabRoute,
+  ProjectDockerRoute,
   ProjectIdeasRoute,
   ProjectLibraryRoute,
   ProjectOverviewRoute,
@@ -74,6 +75,16 @@ const projectLibraryRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: '/library',
   component: ProjectLibraryRoute,
+})
+
+// The project's Docker / Docker Compose dashboard — always a child of the
+// project layout, and always in the sidebar (sidebar.tsx's `nav.docker`),
+// regardless of whether anything was actually detected: the page is what
+// explains that, not the nav.
+const projectDockerRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/docker',
+  component: ProjectDockerRoute,
 })
 
 // The Idea Manager's board: six fixed columns, one project's worth of ideas.
@@ -175,6 +186,7 @@ export const routeTree = rootRoute.addChildren([
     projectOverviewRoute,
     projectSessionsRoute,
     sessionRoute,
+    projectDockerRoute,
     projectLibraryRoute,
     projectIdeasRoute,
     ideaDetailRoute,

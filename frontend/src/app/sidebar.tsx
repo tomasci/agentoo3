@@ -131,6 +131,14 @@ export function ProjectSidebar({ projectId }: { projectId: string }) {
       >
         {t('nav.sessions')}
       </Link>
+      <Link
+        to="/projects/$projectId/docker"
+        params={{ projectId }}
+        className={styles.navItem}
+        activeProps={{ 'aria-current': 'page' }}
+      >
+        {t('nav.docker')}
+      </Link>
       {/* Non-exact: the detail route (`/ideas/$ideaId`) is a child page of
           the same section, and should keep this link current rather than
           going dark the moment a card is opened. */}

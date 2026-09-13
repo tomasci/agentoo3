@@ -109,6 +109,7 @@
     "table": {
       "name": "Name",
       "status": "Status",
+      "docker": "Docker",
       "path": "Path",
       "actionsFor": "Actions for {{name}}"
     },
@@ -124,7 +125,13 @@
       "danger": "Danger zone",
       "deleteProject": "Delete project",
       "deleteCloneHint": "Deletes the project and removes its files from the server.",
-      "deleteExistingHint": "Removes the project. The folder in the sources directory is yours and is left alone."
+      "deleteExistingHint": "Removes the project. The folder in the sources directory is yours and is left alone.",
+      "docker": {
+        "fact": "Docker",
+        "detected": "Detected",
+        "notDetected": "Not detected",
+        "openDocker": "Open Docker"
+      }
     }
   },
   "nav": {
@@ -132,6 +139,7 @@
     "storage": "Storage",
     "project": "Project",
     "sessions": "Sessions",
+    "docker": "Docker",
     "overview": "Overview",
     "library": "Library",
     "projectLibrary": "Agents & skills",
@@ -501,6 +509,126 @@
         "firstSeen": "First seen",
         "lastSeen": "Last seen"
       }
+    }
+  },
+  "docker": {
+    "heading": "Docker",
+    "lead": "Run this project's Docker or Docker Compose setup without a terminal: see what was detected, start, stop, restart or clean it up, watch live logs, and find every address a published port can be reached by.",
+    "loadFailed": "Could not load the docker status",
+    "appServiceName": "Application",
+    "composeFileUnknown": "the compose file",
+    "configErrorTitle": "{{file}} could not be parsed",
+    "foreignStacks": "Also running under a different name, started outside this dashboard: {{names}}. Left untouched.",
+    "declaredPorts": "Will publish: {{ports}}",
+    "noContainerYet": "No container has been created yet.",
+    "empty": {
+      "title": "No Docker configuration detected",
+      "description": "Looked for a docker-compose.yml/compose.yaml file and a Dockerfile in {{path}}, and found neither."
+    },
+    "daemon": {
+      "notInstalledTitle": "Docker is not installed",
+      "notInstalled": "The docker CLI was not found on this host, so nothing here can be started, stopped or inspected.",
+      "unavailableTitle": "Docker daemon not reachable",
+      "unavailable": "The docker CLI is installed, but the daemon could not be reached."
+    },
+    "stack": {
+      "heading": "Stack",
+      "startAll": "Start all",
+      "stopAll": "Stop all",
+      "restart": "Restart all",
+      "cleanup": "Clean up"
+    },
+    "cleanupConfirm": {
+      "title": "Clean up this project's containers?",
+      "body": "Stops and removes every container this project created — and, for a compose project, the network compose created for it. Never removes an image or a volume."
+    },
+    "errors": {
+      "operationInProgress": "Another operation is already running for this project.",
+      "startFailed": "Could not start",
+      "stopFailed": "Could not stop",
+      "restartFailed": "Could not restart",
+      "cleanupFailed": "Could not clean up"
+    },
+    "actions": {
+      "start": "Start",
+      "restart": "Restart",
+      "stop": "Stop"
+    },
+    "form": {
+      "containerPort": "Container port",
+      "containerPortHint": "Neither the Dockerfile nor the built image declares a port, so this is required to start.",
+      "hostPort": "Host port",
+      "hostPortHint": "Leave blank to let Docker pick a free port."
+    },
+    "state": {
+      "service": {
+        "running": "Running",
+        "partial": "Partially running",
+        "stopped": "Stopped",
+        "absent": "Not created"
+      },
+      "container": {
+        "created": "Created",
+        "running": "Running",
+        "restarting": "Restarting",
+        "removing": "Removing",
+        "paused": "Paused",
+        "exited": "Exited",
+        "dead": "Dead"
+      },
+      "health": {
+        "healthy": "Healthy",
+        "unhealthy": "Unhealthy",
+        "starting": "Starting",
+        "none": "No healthcheck"
+      }
+    },
+    "container": {
+      "id": "Container ID",
+      "ports": "Ports",
+      "noPorts": "No published ports",
+      "exitCode": "Exit code"
+    },
+    "logs": {
+      "streaming": "Streaming",
+      "connecting": "Connecting…",
+      "reconnecting": "Reconnecting…",
+      "empty": "No log lines yet.",
+      "dropped": "{{count}} line(s) dropped to keep up",
+      "ended": {
+        "exited": "The container exited.",
+        "eof": "Reached the end of the log.",
+        "error": "The log stream ended with an error.",
+        "closed": "The log stream was closed."
+      }
+    },
+    "operation": {
+      "heading": "Operation",
+      "dismiss": "Dismiss",
+      "empty": "Waiting for output…",
+      "services": "Services: {{names}}",
+      "kind": {
+        "up": "Starting",
+        "stop": "Stopping",
+        "restart": "Restarting",
+        "down": "Cleaning up"
+      },
+      "status": {
+        "queued": "Queued",
+        "running": "Running",
+        "succeeded": "Succeeded",
+        "failed": "Failed"
+      }
+    },
+    "accessUrls": {
+      "heading": "Access URLs",
+      "empty": "Start something with a published port to see how to reach it.",
+      "thisBrowser": "This browser",
+      "udpNote": "UDP — not reachable from a browser"
+    },
+    "badge": {
+      "compose": "Compose",
+      "dockerfile": "Dockerfile"
     }
   },
   "prompts": {
