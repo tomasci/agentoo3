@@ -55,6 +55,11 @@ async function mount(path: string, projects = PROJECTS) {
   client.setQueryData([{ url: '/api/projects' }], projects)
   client.setQueryData([{ url: '/api/ssh-keys' }], [])
   client.setQueryData([{ url: '/api/health' }], { claudeCredential: true, version: '0.1.41' })
+  // The Docker page's own tests (docker-page.test.tsx) cover that dashboard;
+  // this file only needs the projects list/overview's small "Docker
+  // detected" indicator (projects-table.tsx, project-overview.tsx) to find
+  // something in the cache rather than reach for a backend that isn't there.
+  client.setQueryData([{ url: '/api/docker/detection' }], { enabled: true, projects: [] })
   for (const p of projects) {
     client.setQueryData([{ url: '/api/projects/:id/sessions', params: { id: p.id } }], [])
   }
@@ -215,6 +220,7 @@ test('picking a project fills in that same tab, and turns on project navigation'
   expect(navLinks()).toEqual([
     '/projects/p1',
     '/projects/p1/sessions',
+    '/projects/p1/docker',
     '/projects/p1/ideas',
     '/projects/p1/library',
   ])

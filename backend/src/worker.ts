@@ -10,6 +10,7 @@ import {
   ensureTurnReconcileSchedule,
 } from '@/queue'
 import { startAttachmentsGcWorker } from '@/queue/attachments-gc.worker'
+import { startDockerOpWorker } from '@/queue/docker-op.worker'
 import { startIdeaHandoffSweepWorker, startIdeaTurnEndedWorker } from '@/queue/idea-handoff.worker'
 import { startIdeaPromptWorker } from '@/queue/idea-prompt.worker'
 import { startProjectSetupWorker } from '@/queue/project-setup.worker'
@@ -26,6 +27,7 @@ const workers = [
   startIdeaPromptWorker(),
   startIdeaHandoffSweepWorker(),
   startIdeaTurnEndedWorker(),
+  startDockerOpWorker(),
 ]
 
 // Idempotent — see ensureAttachmentsGcSchedule's own comment — so running it

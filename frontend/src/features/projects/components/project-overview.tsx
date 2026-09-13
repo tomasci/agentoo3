@@ -1,5 +1,7 @@
+import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useDockerDetection } from '@/features/docker'
 import { useSshKeys } from '@/features/ssh-keys'
 import {
   Alert,
@@ -46,6 +48,12 @@ export function ProjectOverview({
 }) {
   const { t } = useTranslation()
   const { data: sshKeys } = useSshKeys()
+  // One call covering every project, the same query the projects table's
+  // own indicator uses (projects-table.tsx) — detection changes on the
+  // scale of a commit, so this fact is worth showing without a dedicated
+  // per-project poll.
+  const detection = useDockerDetection()
+  const dockerDetected = detection.data?.projects.find((p) => p.projectId === project.id)
   const update = useUpdateProject()
   const retry = useRetryProject()
   const remove = useDeleteProject()
@@ -119,6 +127,22 @@ export function ProjectOverview({
           },
         ]
       : []),
+    {
+      id: 'docker',
+      term: t('projects.overview.docker.fact'),
+      description: (
+        <Inline gap={2} align="center">
+          <span>
+            {dockerDetected?.hasCompose || dockerDetected?.hasDockerfile
+              ? t('projects.overview.docker.detected')
+              : t('projects.overview.docker.notDetected')}
+          </span>
+          <Link to="/projects/$projectId/docker" params={{ projectId: project.id }}>
+            {t('projects.overview.docker.openDocker')}
+          </Link>
+        </Inline>
+      ),
+    },
     {
       id: 'branch',
       term: t('projects.meta.branch'),

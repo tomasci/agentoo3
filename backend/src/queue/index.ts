@@ -9,6 +9,7 @@ export const QUEUE_TURN_ENDED = 'turn-ended'
 export const QUEUE_TURN_RECONCILE = 'turn-reconcile'
 export const QUEUE_IDEA_PROMPT = 'idea-prompt'
 export const QUEUE_IDEA_HANDOFF_SWEEP = 'idea-handoff-sweep'
+export const QUEUE_DOCKER_OP = 'docker-op'
 
 export interface ProjectSetupJob {
   projectId: string
@@ -58,6 +59,36 @@ export interface IdeaPromptJob {
 
 export interface IdeaHandoffSweepJob {
   reason: 'scheduled'
+}
+
+/**
+ * One docker mutation: `compose up/stop/restart/down`, or the plain-Dockerfile
+ * equivalent (`build`/`run`/`stop`/`restart`/`rm`). Everything the worker
+ * needs to build the exact argv is here — paths already resolved and checked
+ * with `assertInsideProjects` by the route (see features/docker/service.ts),
+ * because the worker re-validates rather than trusting a queue payload (see
+ * app.ts's own comment on why: a queue payload is data, from a process that
+ * may not be this one).
+ */
+export interface DockerOpJob {
+  operationId: string
+  projectId: string
+  slug: string
+  mode: 'compose' | 'dockerfile'
+  kind: 'up' | 'stop' | 'restart' | 'down'
+  services: string[]
+  projectPath: string
+  composeProjectName?: string
+  composeFiles?: { base: string; override?: string }
+  build?: boolean
+  forceRecreate?: boolean
+  removeOrphans?: boolean
+  removeVolumes?: boolean
+  removeImages?: boolean
+  dockerfileAbsPath?: string
+  containerPort?: number
+  hostPort?: number
+  protocol?: 'tcp' | 'udp'
 }
 
 // BullMQ requires maxRetriesPerRequest: null on the connection it blocks on.
@@ -273,4 +304,31 @@ export async function ensureIdeaHandoffSweepSchedule() {
     { every: IDEA_HANDOFF_SWEEP_INTERVAL_MS },
     { name: 'sweep', data: { reason: 'scheduled' } },
   )
+}
+
+/**
+ * One queue for every docker mutation, across every project — not one queue
+ * per project. Per-project serialization is enforced by the Redis lock in
+ * features/docker/operations.ts (`claimOperationLock`), the same
+ * claim-don't-check discipline `session-run.worker.ts`'s `claimTurn` uses,
+ * so a second queue per project would add nothing but bookkeeping.
+ *
+ * `attempts: 1`, for the same reason `sessionRunQueue` and `ideaPromptQueue`
+ * both give theirs: by the time a `compose up` or `docker run` can fail, it
+ * has already talked to the daemon and may have created real containers —
+ * retrying blind would risk doubling that, not undoing it. An operator who
+ * wants to try again clicks the button again, same as a session's own retry
+ * story.
+ */
+export const dockerOpQueue = new Queue<DockerOpJob>(QUEUE_DOCKER_OP, {
+  connection: redisConnection(),
+  defaultJobOptions: {
+    attempts: 1,
+    removeOnComplete: { count: 100 },
+    removeOnFail: { count: 100 },
+  },
+})
+
+export async function enqueueDockerOp(job: DockerOpJob) {
+  return dockerOpQueue.add('run', job)
 }

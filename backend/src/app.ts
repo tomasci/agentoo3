@@ -3,6 +3,7 @@ import { cors } from 'hono/cors'
 import { logger as httpLogger } from 'hono/logger'
 import { env } from '@/env'
 import { attachmentsRouter } from '@/features/attachments/routes'
+import { dockerRouter } from '@/features/docker/routes'
 import { healthRouter } from '@/features/health/routes'
 import { ideasRouter } from '@/features/ideas/routes'
 import { libraryRouter } from '@/features/library/routes'
@@ -49,6 +50,7 @@ export function createApp() {
   app.route('/api', sourcesRouter)
   app.route('/api', sessionsRouter)
   app.route('/api', attachmentsRouter)
+  app.route('/api', dockerRouter)
   app.route('/api', ideasRouter)
   app.route('/api', systemRouter)
 

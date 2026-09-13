@@ -1,0 +1,17 @@
+[
+  {
+    "Name": "agentoo-demo",
+    "Status": "running(2)",
+    "ConfigFiles": "/opt/agentoo/projects/demo/repo/compose.yaml"
+  },
+  {
+    "Name": "repo",
+    "Status": "running(1)",
+    "ConfigFiles": "/opt/agentoo/projects/demo/repo/compose.yaml"
+  },
+  {
+    "Name": "some-other-stack",
+    "Status": "exited(0)",
+    "ConfigFiles": "/opt/agentoo/projects/other/repo/compose.yaml,/opt/agentoo/projects/other/repo/compose.override.yaml"
+  }
+]
