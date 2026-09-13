@@ -3,12 +3,32 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
+
+  // Wrap is the escape hatch for a header whose `actions` outgrow the room
+  // `.text`'s `min-width: 0` leaves it (a busy header like the idea detail
+  // page's "Back to board" + "Settings" + "⋯" trio) — without it the title
+  // column is squeezed to a shredded, overflowing sliver instead.
+  flex-wrap: wrap;
 }
 
 .text {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+
+  // `min-width: 0` alone (no basis) is what breaks `flex-wrap` above: with no
+  // basis, this column's hypothetical main size *is* zero, so — as far as
+  // the wrap decision is concerned — it always "fits" no matter how little
+  // room is left, and `.root` never wraps at all. Line-breaking is decided
+  // on that hypothetical size, before flex-shrink ever runs, so the fix is a
+  // real basis here: 16rem is a floor under the title, not a cap on it
+  // (flex-grow still lets it fill the row when there's space) — big enough
+  // that a two-or-three-button `actions` genuinely doesn't fit beside it at
+  // narrow widths, small enough that no header in the app wraps at `md`
+  // (56rem) and above. Do not drop the explicit basis to "simplify" this
+  // back to `flex: 1` — that silently restores the bug this comment is
+  // guarding against.
+  flex: 1 1 16rem;
   min-width: 0;
 }
 

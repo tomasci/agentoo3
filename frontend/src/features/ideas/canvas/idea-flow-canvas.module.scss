@@ -2,10 +2,13 @@
 // to swallowing page scroll wherever a wheel or a one-finger drag lands on
 // it (`preventScrolling`, kept at its default `true`), so the canvas needs a
 // bounded box of its own rather than a page that can no longer be scrolled
-// through it — see the report for the full trade-off.
+// through it — see the report for the full trade-off. The height itself
+// comes from whichever page mounts this: `idea-detail-page.module.scss`
+// publishes `--idea-canvas-height` sized to that page's own viewport budget;
+// any other mount point that never sets it gets the 32rem fallback below.
 .canvas {
   position: relative;
-  height: 32rem;
+  height: var(--idea-canvas-height, 32rem);
   overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
