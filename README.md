@@ -92,6 +92,8 @@ scripts/
   90-summary.sh         verify everything and report
 backend/                Hono API + worker driving the Claude Agent SDK
 frontend/               React + Vite SPA, served by Bun — see frontend/README.md
+docker/                 dev/test compose stack for this repo — see docker/README.md
+compose.yaml            entry point for that stack (`docker compose up --build`)
 library.example/        seed agents/skills/prompts, copied to LIBRARY_DIR on first install
 config/  docs/
 logs/                   install.log (gitignored)
@@ -268,6 +270,11 @@ open needs `newgrp docker` or a fresh login to see it.
 DOCKER_ENABLE=0 /opt/agentoo/install.sh --only docker     # skip; never uninstalls Docker
 DOCKER_FIREWALL=0 /opt/agentoo/install.sh --only docker   # install Docker, leave DOCKER-USER alone (not sticky)
 ```
+
+That daemon is what the per-project Docker page drives. This repo also ships a
+compose stack *of its own* for development — a different thing, and the one to
+reach for when testing agentoo itself rather than a project it hosts: see
+`docker/README.md`.
 
 ## Claude Code
 

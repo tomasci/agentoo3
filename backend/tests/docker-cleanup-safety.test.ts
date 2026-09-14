@@ -148,6 +148,7 @@ function composeJob(overrides: Partial<Job> = {}): Job {
   return {
     operationId: '33333333-3333-4333-8333-333333333333',
     projectId: PROJECT_ID,
+    sessionId: null,
     slug: 'demo',
     mode: 'compose',
     kind: 'down',
@@ -163,6 +164,7 @@ function dockerfileJob(overrides: Partial<Job> = {}): Job {
   return {
     operationId: '44444444-4444-4444-8444-444444444444',
     projectId: PROJECT_ID,
+    sessionId: null,
     slug: 'demo',
     mode: 'dockerfile',
     kind: 'down',

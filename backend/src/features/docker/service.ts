@@ -3,6 +3,14 @@
 // mutation is built here but *dispatched* to the worker (queue/docker-op.worker.ts)
 // — see the brief's "execution split" for why `compose up -d --build` cannot
 // run inside an HTTP request.
+//
+// Every read and write below resolves a `DockerScope` first (see scope.ts) —
+// the project's own repo/ checkout, or one session's independent worktree —
+// and everything downstream (detection, compose files, the container
+// listing, the queued job) is built from that scope's own `.path`, never from
+// the project row directly. Repo scope (no `?sessionId`) is required to stay
+// byte-identical to this feature's behaviour before sessions had worktrees of
+// their own: same names, same lock keys, same argv.
 
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
@@ -16,25 +24,23 @@ import { type DockerOpJob, enqueueDockerOp } from '@/queue'
 import type { ComposeFiles } from './args'
 import { type DockerCli, realDockerCli } from './cli'
 import { foreignStacksFor, getComposeConfig, getComposeVersion } from './compose-config'
+import { composeEnvFor } from './compose-env'
+import { listScopeContainers } from './containers'
 import { type Detection, detectProjectDocker } from './detect'
 import { parseExposedPorts } from './dockerfile'
 import { getHostAddresses } from './hosts'
 import {
-  containerLabels,
+  containerIdentity,
   getDaemonVersion,
   inspectContainers,
   inspectImage,
   listContainerIds,
 } from './inspect'
+import { composeProjectLabelFilter, composeProjectName, imageReference } from './names'
 import {
-  composeProjectLabelFilter,
-  composeProjectName,
-  imageReference,
-  projectLabelFilter,
-} from './names'
-import {
-  activeOperationForProject,
+  activeOperationForScope,
   createOperation,
+  dockerLockScope,
   finishOperation,
   getOperation,
   listOperationsForProject,
@@ -49,6 +55,8 @@ import type {
   ServiceSelectionInput,
   UpRequestInput,
 } from './schema'
+import type { DockerScope } from './scope'
+import { resolveDockerScope } from './scope'
 
 // --- detection, cached -------------------------------------------------------
 
@@ -58,6 +66,10 @@ import type {
  * and is meant to be polled cheaply by a Docker nav badge — not per-project
  * like GET /projects/{id}/docker, which never uses this cache (its own daemon
  * reads dominate the cost of a fresh `stat` anyway).
+ *
+ * Repo scope only, deliberately — per-scope detection for every session's
+ * worktree is out of scope for this feature (see the brief): this cache, and
+ * this endpoint, answer for the project's own repo/ checkout alone.
  */
 const DETECT_TTL_MS = 10_000
 const detectionCache = new Map<string, { at: number; value: Detection }>()
@@ -102,22 +114,23 @@ function serviceStateFor(
 }
 
 /** Absolute, checked path for a basename `detectProjectDocker` found inside
- * this project's own repo root — never built from anything a client sent. */
-function resolveDetected(projectPath: string, basename: string): string {
-  return assertInsideProjects(join(projectPath, basename))
+ * this scope's own directory — never built from anything a client sent. */
+function resolveDetected(scopePath: string, basename: string): string {
+  return assertInsideProjects(join(scopePath, basename))
 }
 
 export async function getProjectDockerState(
   projectId: string,
+  sessionId?: string,
   cli: DockerCli = realDockerCli,
 ): Promise<DockerStateDto> {
-  const project = await getProject(projectId) // 404s on an unknown id
+  const scope = await resolveDockerScope(projectId, sessionId) // 404s / 400s / 409s
 
-  const detection = await detectProjectDocker(project.path)
+  const detection = await detectProjectDocker(scope.path)
 
   const [daemonVersion, activeOperationId, hosts] = await Promise.all([
     getDaemonVersion(cli),
-    activeOperationForProject(projectId).catch((error) => {
+    activeOperationForScope(dockerLockScope(scope.projectId, scope.sessionId)).catch((error) => {
       logger.warn(`Could not read the active docker operation for ${projectId}: ${String(error)}`)
       return undefined
     }),
@@ -131,15 +144,16 @@ export async function getProjectDockerState(
   let foreignStacks: Awaited<ReturnType<typeof foreignStacksFor>> = []
 
   if (detection.hasCompose && detection.composeFile) {
-    composeName = composeProjectName(project.slug)
+    composeName = composeProjectName(scope)
     const files: ComposeFiles = {
-      base: resolveDetected(project.path, detection.composeFile),
+      base: resolveDetected(scope.path, detection.composeFile),
       override: detection.composeOverrideFile
-        ? resolveDetected(project.path, detection.composeOverrideFile)
+        ? resolveDetected(scope.path, detection.composeOverrideFile)
         : undefined,
     }
 
-    const configResult = await getComposeConfig(composeName, files, project.path, cli)
+    const run = { cwd: scope.path, env: composeEnvFor(scope) }
+    const configResult = await getComposeConfig(composeName, files, run, cli)
     configError = configResult.configError
     composeServices = configResult.services
     foreignStacks = await foreignStacksFor(composeName, files.base, cli)
@@ -148,26 +162,19 @@ export async function getProjectDockerState(
   let dockerfilePorts: DockerStateDto['dockerfilePorts'] = []
   let image: DockerStateDto['image'] = null
   if (detection.hasDockerfile && detection.dockerfile) {
-    const dockerfileAbsPath = resolveDetected(project.path, detection.dockerfile)
+    const dockerfileAbsPath = resolveDetected(scope.path, detection.dockerfile)
     try {
       dockerfilePorts = parseExposedPorts(await readFile(dockerfileAbsPath, 'utf8'))
     } catch (error) {
       logger.warn(`Could not read ${dockerfileAbsPath}: ${String(error)}`)
     }
 
-    const reference = imageReference(project.slug)
+    const reference = imageReference(scope)
     const imageInfo = await inspectImage(reference, cli)
     image = { reference, ...imageInfo }
   }
 
-  const containerIds = new Set<string>()
-  for (const id of await listContainerIds(composeProjectLabelFilter(project.slug), cli)) {
-    containerIds.add(id)
-  }
-  for (const id of await listContainerIds(projectLabelFilter(project.slug), cli)) {
-    containerIds.add(id)
-  }
-  const containers = await inspectContainers([...containerIds], cli)
+  const containers = await listScopeContainers(scope, cli)
 
   const services: DockerServiceDto[] = composeServices.map((svc) => {
     const matched = containers.filter((c) => c.service === svc.name)
@@ -185,7 +192,11 @@ export async function getProjectDockerState(
 
   return {
     projectId,
-    projectPath: project.path,
+    sessionId: scope.sessionId,
+    // Always the repo checkout, regardless of scope — scopePath below is the
+    // directory this state was actually read from.
+    projectPath: projectRepo(scope.slug),
+    scopePath: scope.path,
     composeProject: composeName,
     daemon: {
       cliInstalled: daemonVersion.cliInstalled,
@@ -210,25 +221,32 @@ export async function getProjectDockerState(
 // --- operations -----------------------------------------------------------
 
 /**
- * Confirms `containerId` actually belongs to this project before anything
+ * Confirms `containerId` actually belongs to this scope before anything
  * streams its logs — without this, the logs route would read any container
  * on the box given nothing but a hex id. A container is "ours" if it carries
  * either label `-p`/`docker run --label` would have stamped: the compose
- * label for a stack container, or the plain-Dockerfile label for one this
- * dashboard ran directly.
+ * label for a stack container (already scope-specific, since the compose
+ * project name is), or the plain-Dockerfile label plus the `com.agentoo.session`
+ * label matching this scope (present with this scope's session id at worktree
+ * scope, absent entirely at repo scope) — see containers.ts's own
+ * `listScopeContainers` for why a label check replaced a name comparison
+ * here: a name can be forged by a colliding slug or simply not match a
+ * container that was renamed after the fact, but `com.agentoo.session` is a
+ * label only this feature itself ever sets.
  */
-export async function containerBelongsToProject(
+export async function containerBelongsToScope(
   projectId: string,
+  sessionId: string | undefined,
   containerId: string,
   cli: DockerCli = realDockerCli,
 ): Promise<boolean> {
-  const project = await getProject(projectId) // 404s
-  const labels = await containerLabels(containerId, cli)
-  if (!labels) return false
-  return (
-    labels['com.docker.compose.project'] === composeProjectName(project.slug) ||
-    labels['com.agentoo.project'] === project.slug
-  )
+  const scope = await resolveDockerScope(projectId, sessionId) // 404s / 400s / 409s
+  const identity = await containerIdentity(containerId, cli)
+  if (!identity) return false
+  if (identity.labels['com.docker.compose.project'] === composeProjectName(scope)) return true
+  if (identity.labels['com.agentoo.project'] !== scope.slug) return false
+  const session = identity.labels['com.agentoo.session']
+  return scope.sessionId === null ? session === undefined : session === scope.sessionId
 }
 
 export async function listDockerOperations(projectId: string): Promise<DockerOperationDto[]> {
@@ -252,14 +270,14 @@ export async function getDockerOperation(
  * guessed at silently, per the brief: a port neither EXPOSE nor the built
  * image declares is a 400 naming the field the UI should ask for. */
 async function resolveRunPort(
-  slug: string,
+  scope: DockerScope,
   dockerfileAbsPath: string,
   explicit: number | undefined,
   cli: DockerCli,
 ): Promise<{ containerPort: number; protocol: 'tcp' | 'udp' }> {
   if (explicit !== undefined) return { containerPort: explicit, protocol: 'tcp' }
 
-  const image = await inspectImage(imageReference(slug), cli)
+  const image = await inspectImage(imageReference(scope), cli)
   const fromImage = image.exists ? image.exposedPorts[0] : undefined
   if (fromImage) return { containerPort: fromImage.containerPort, protocol: fromImage.protocol }
 
@@ -295,16 +313,17 @@ interface OperationRequest {
 
 async function requestOperation(
   projectId: string,
+  sessionId: string | undefined,
   kind: DockerOperationKind,
   input: OperationRequest,
   cli: DockerCli,
 ): Promise<DockerOperationDto> {
   // Cheapest check first: a disabled feature answers 403 before this project
-  // is even looked up.
+  // (or session) is even looked up.
   if (!env.DOCKER_ENABLED) throw forbidden('Docker controls are disabled (DOCKER_ENABLED=false)')
 
-  const project = await getProject(projectId) // 404s
-  const detection = await detectProjectDocker(project.path)
+  const scope = await resolveDockerScope(projectId, sessionId) // 404s / 400s / 409s
+  const detection = await detectProjectDocker(scope.path)
 
   if (!detection.hasCompose && !detection.hasDockerfile) {
     throw badRequest('No Dockerfile or compose file detected in this project')
@@ -324,7 +343,8 @@ async function requestOperation(
     throw badRequest('services selection only applies to a compose project')
   }
 
-  const existing = await activeOperationForProject(projectId)
+  const lockScope = dockerLockScope(scope.projectId, scope.sessionId)
+  const existing = await activeOperationForScope(lockScope)
   if (existing) {
     throw conflict(`Another docker operation (${existing}) is already running for this project`)
   }
@@ -343,16 +363,17 @@ async function requestOperation(
   let composeFiles: ComposeFiles | undefined
   let composeName: string | undefined
   if (mode === 'compose' && detection.composeFile) {
-    composeName = composeProjectName(project.slug)
+    composeName = composeProjectName(scope)
     composeFiles = {
-      base: resolveDetected(project.path, detection.composeFile),
+      base: resolveDetected(scope.path, detection.composeFile),
       override: detection.composeOverrideFile
-        ? resolveDetected(project.path, detection.composeOverrideFile)
+        ? resolveDetected(scope.path, detection.composeOverrideFile)
         : undefined,
     }
 
     if (services.length > 0) {
-      const config = await getComposeConfig(composeName, composeFiles, project.path, cli)
+      const run = { cwd: scope.path, env: composeEnvFor(scope) }
+      const config = await getComposeConfig(composeName, composeFiles, run, cli)
       if (config.ok || config.services.length > 0) {
         // Either the JSON form resolved cleanly, or it failed but the
         // names-only fallback still knows the service list (a Compose too
@@ -374,7 +395,7 @@ async function requestOperation(
         // what is actually running, via the labels `-p` already stamped on
         // it. up/restart have no such fallback — they need a working config
         // to do anything meaningful — and stay refused below.
-        const ids = await listContainerIds(composeProjectLabelFilter(project.slug), cli)
+        const ids = await listContainerIds(composeProjectLabelFilter(scope), cli)
         const running = await inspectContainers(ids, cli)
         const knownFromDaemon = new Set(
           running.map((c) => c.service).filter((s): s is string => s !== null),
@@ -394,30 +415,35 @@ async function requestOperation(
   let containerPort: number | undefined
   let protocol: 'tcp' | 'udp' | undefined
   if (mode === 'dockerfile' && detection.dockerfile) {
-    dockerfileAbsPath = resolveDetected(project.path, detection.dockerfile)
+    dockerfileAbsPath = resolveDetected(scope.path, detection.dockerfile)
     if (kind === 'up') {
-      const resolved = await resolveRunPort(
-        project.slug,
-        dockerfileAbsPath,
-        input.containerPort,
-        cli,
-      )
+      const resolved = await resolveRunPort(scope, dockerfileAbsPath, input.containerPort, cli)
       containerPort = resolved.containerPort
       protocol = resolved.protocol
     }
   }
 
   const operationId = randomUUID()
-  const record = await createOperation({ id: operationId, projectId, kind, services })
+  const record = await createOperation({
+    id: operationId,
+    projectId,
+    sessionId: scope.sessionId,
+    kind,
+    services,
+  })
 
   const job: DockerOpJob = {
     operationId,
     projectId,
-    slug: project.slug,
+    sessionId: scope.sessionId,
+    slug: scope.slug,
     mode,
     kind,
     services,
-    projectPath: project.path,
+    // The directory this operation's -f/-f/build context resolve against —
+    // the project's repo/ checkout at repo scope, a session's own worktree
+    // once one is in play (see scope.ts).
+    projectPath: scope.path,
     composeProjectName: composeName,
     composeFiles,
     build: input.build,
@@ -442,38 +468,42 @@ async function requestOperation(
     throw error
   }
 
-  logger.info(`Docker ${kind} queued for project ${project.slug} (operation ${operationId})`)
+  logger.info(`Docker ${kind} queued for project ${scope.slug} (operation ${operationId})`)
   return record
 }
 
 export async function requestDockerUp(
   projectId: string,
+  sessionId: string | undefined,
   input: UpRequestInput,
   cli: DockerCli = realDockerCli,
 ): Promise<DockerOperationDto> {
-  return requestOperation(projectId, 'up', input, cli)
+  return requestOperation(projectId, sessionId, 'up', input, cli)
 }
 
 export async function requestDockerStop(
   projectId: string,
+  sessionId: string | undefined,
   input: ServiceSelectionInput,
   cli: DockerCli = realDockerCli,
 ): Promise<DockerOperationDto> {
-  return requestOperation(projectId, 'stop', input, cli)
+  return requestOperation(projectId, sessionId, 'stop', input, cli)
 }
 
 export async function requestDockerRestart(
   projectId: string,
+  sessionId: string | undefined,
   input: ServiceSelectionInput,
   cli: DockerCli = realDockerCli,
 ): Promise<DockerOperationDto> {
-  return requestOperation(projectId, 'restart', input, cli)
+  return requestOperation(projectId, sessionId, 'restart', input, cli)
 }
 
 export async function requestDockerDown(
   projectId: string,
+  sessionId: string | undefined,
   input: DownRequestInput,
   cli: DockerCli = realDockerCli,
 ): Promise<DockerOperationDto> {
-  return requestOperation(projectId, 'down', input, cli)
+  return requestOperation(projectId, sessionId, 'down', input, cli)
 }

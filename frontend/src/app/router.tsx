@@ -16,6 +16,7 @@ import {
   ProjectLibraryRoute,
   ProjectOverviewRoute,
   ProjectSessionsRoute,
+  SessionDockerRoute,
   SessionRoute,
 } from './project-routes'
 import { RootLayout } from './root-layout'
@@ -69,6 +70,21 @@ const sessionRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: '/sessions/$sessionId',
   component: SessionRoute,
+})
+
+// A session's own Docker dashboard: the same page as `projectDockerRoute`
+// below, scoped to this session's own git worktree instead of the project's
+// repo/ checkout (DockerPage's `sessionId` prop — see docker-page.tsx and
+// backend/src/features/docker/scope.ts). A path segment, not a `?sessionId=`
+// search param: this app has no `validateSearch` anywhere, and a tab
+// remembers its own `path` (shared/store/tabs.ts) — a search param would be
+// the one piece of state that path forgot. `activeTabIdForPath`'s
+// `^/projects/([^/]+)` match still resolves this to the same project tab as
+// every other route below.
+const sessionDockerRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/sessions/$sessionId/docker',
+  component: SessionDockerRoute,
 })
 
 const projectLibraryRoute = createRoute({
@@ -186,6 +202,7 @@ export const routeTree = rootRoute.addChildren([
     projectOverviewRoute,
     projectSessionsRoute,
     sessionRoute,
+    sessionDockerRoute,
     projectDockerRoute,
     projectLibraryRoute,
     projectIdeasRoute,

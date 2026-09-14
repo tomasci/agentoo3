@@ -230,36 +230,57 @@ export function toDockerContainer(raw: ContainerInspectRaw): DockerContainer {
 }
 
 /**
- * Raw label lookup for one container — used only for the ownership check
- * `GET .../containers/{containerId}/logs` needs before it will stream
+ * Raw name + label lookup for one container — used only for the ownership
+ * check `GET .../containers/{containerId}/logs` needs before it will stream
  * anything. Deliberately separate from `toDockerContainer` above: the public
  * DTO only ever exposes the *derived* `service` name, never the raw
  * `com.docker.compose.project`/`com.agentoo.project` labels this check reads.
+ *
+ * The name is included (not just labels) because `com.agentoo.project` alone
+ * cannot tell two scopes of the same project apart — see names.ts's own
+ * comment on why it stays slug-only — so the plain-Dockerfile ownership check
+ * also has to compare the container's actual name against the one scope it is
+ * being checked against.
  */
-export async function containerLabels(
+export async function containerIdentity(
   containerId: string,
   cli: DockerCli = realDockerCli,
-): Promise<Record<string, string> | undefined> {
+): Promise<{ name: string; labels: Record<string, string> } | undefined> {
   const result = await cli.run(
     ['inspect', '--type', 'container', '--format', '{{json .}}', containerId],
     { timeoutMs: DOCKER_READ_TIMEOUT_MS },
   )
   if (!result.ok) return undefined
   const [raw] = parseContainerInspectNdjson(result.stdout)
-  return raw?.Config?.Labels ?? undefined
+  if (!raw) return undefined
+  return { name: (raw.Name ?? '').replace(/^\//, ''), labels: raw.Config?.Labels ?? {} }
 }
 
-export async function inspectContainers(
+/**
+ * The raw, unmapped inspect shape for many containers at once — what
+ * `listScopeContainers` (containers.ts) filters on, since `DockerContainer`
+ * below deliberately drops every label but the derived `service` name (see
+ * `containerIdentity`'s own comment on why the public DTO never exposes
+ * `com.agentoo.*`/`com.docker.compose.*` directly).
+ */
+export async function inspectContainersRaw(
   containerIds: string[],
   cli: DockerCli = realDockerCli,
-): Promise<DockerContainer[]> {
+): Promise<ContainerInspectRaw[]> {
   if (containerIds.length === 0) return []
   const result = await cli.run(
     ['inspect', '--type', 'container', '--format', '{{json .}}', ...containerIds.slice(0, 200)],
     { timeoutMs: DOCKER_READ_TIMEOUT_MS },
   )
   if (!result.ok) return []
-  return parseContainerInspectNdjson(result.stdout).map(toDockerContainer)
+  return parseContainerInspectNdjson(result.stdout)
+}
+
+export async function inspectContainers(
+  containerIds: string[],
+  cli: DockerCli = realDockerCli,
+): Promise<DockerContainer[]> {
+  return (await inspectContainersRaw(containerIds, cli)).map(toDockerContainer)
 }
 
 // --- docker image inspect ----------------------------------------------------

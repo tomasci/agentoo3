@@ -54,12 +54,52 @@ const projectDto = {
   updatedAt: '2024-01-01T00:00:00.000Z',
 }
 
+// Spread from the real module, not hand-rolled: `mock.module` replaces this
+// specifier for the whole test process, and projects/service.ts has real
+// consumers elsewhere in this suite that need every one of its exports, not
+// only getProject/listProjects. Restored in afterAll for the same reason.
+const realProjects = { ...(await import(`${B}/features/projects/service.ts`)) } as Record<
+  string,
+  unknown
+>
 mock.module(`${B}/features/projects/service.ts`, () => ({
+  ...realProjects,
   getProject: async (id: string) => {
     if (id !== PROJECT_ID) throw notFound('Project')
     return projectDto
   },
   listProjects: async () => [projectDto],
+}))
+
+// A session belonging to this project, controllable per test — see the
+// worktree-scope tests below. `sessionsById` starts empty; each worktree-scope
+// test registers exactly the session it needs.
+interface SessionRow {
+  id: string
+  projectId: string
+  worktreePath: string | null
+}
+let sessionsById: Record<string, SessionRow> = {}
+// Spread from the real module, not a bare `{ getSessionLocation }`:
+// sessions/service.ts exports far more than this (createSession,
+// deleteSession, ...), and `mock.module` replaces this specifier for the
+// whole test process -- a bare replace here used to leave any later file that
+// imports one of those other exports failing with a `SyntaxError` the moment
+// it happened to run in the same process as this one (session-stream.test.ts,
+// session-export.test.ts, session-docker-teardown-gate.test.ts). Restored in
+// afterAll for the same reason docker-scope.test.ts's own copy of this
+// pattern gives.
+const realSessions = { ...(await import(`${B}/features/sessions/service.ts`)) } as Record<
+  string,
+  unknown
+>
+mock.module(`${B}/features/sessions/service.ts`, () => ({
+  ...realSessions,
+  getSessionLocation: async (id: string) => {
+    const row = sessionsById[id]
+    if (!row) throw notFound('Session')
+    return row
+  },
 }))
 
 // Captured before it is replaced, and restored in afterAll: `mock.module` is
@@ -107,8 +147,29 @@ mock.module(`${B}/queue/index.ts`, () => ({
 }))
 
 let activeOperation: string | undefined
+const lockScopeChecks: string[] = []
+// Spread from the real module (not a bare replace) and restored in afterAll:
+// operations.ts exports far more than the handful this file's own tests
+// reach (claimOperationLock, releaseOperationLock, markOperationRunning,
+// appendOperationOutput, operationChannel, replayOperationOutput,
+// subscribeOperationEvents, ...), all of which routes.ts, docker-op.worker.ts
+// and other test files in this suite need untouched. Leaving this
+// un-restored is the same class of hazard Defect 2 was: whichever test file
+// happens to run after this one (including one that asks for the *real*
+// operations.ts, like a lock-key test) would otherwise get this file's
+// partial stand-in instead.
+const realOperations = { ...(await import(`${B}/features/docker/operations.ts`)) } as Record<
+  string,
+  unknown
+>
 mock.module(`${B}/features/docker/operations.ts`, () => ({
-  activeOperationForProject: async () => activeOperation,
+  ...realOperations,
+  activeOperationForScope: async (scope: string) => {
+    lockScopeChecks.push(scope)
+    return activeOperation
+  },
+  dockerLockScope: (projectId: string, sessionId: string | null) =>
+    sessionId === null ? projectId : `${projectId}:s-${sessionId}`,
   createOperation: async (input: Record<string, unknown>) => ({
     ...input,
     status: 'queued',
@@ -133,7 +194,10 @@ const {
 
 afterAll(async () => {
   mock.module(`${B}/env.ts`, () => realEnv)
+  mock.module(`${B}/features/projects/service.ts`, () => realProjects)
+  mock.module(`${B}/features/sessions/service.ts`, () => realSessions)
   mock.module(`${B}/features/docker/hosts.ts`, () => realHosts)
+  mock.module(`${B}/features/docker/operations.ts`, () => realOperations)
   await rm(TEST_PROJECTS_DIR, { recursive: true, force: true })
 })
 
@@ -219,18 +283,20 @@ async function statusOf(promise: Promise<unknown>): Promise<{ status: number; me
 beforeEach(() => {
   enqueued.length = 0
   activeOperation = undefined
+  lockScopeChecks.length = 0
   behaviour = {}
   testEnv.DOCKER_ENABLED = true
+  sessionsById = {}
 })
 
 afterEach(async () => {
-  await rm(REPO, { recursive: true, force: true })
+  await rm(join(TEST_PROJECTS_DIR, SLUG), { recursive: true, force: true })
 })
 
-async function withCompose(basename = 'compose.yaml', override?: string) {
-  await mkdir(REPO, { recursive: true })
-  await writeFile(join(REPO, basename), 'services:\n  web:\n    image: nginx\n')
-  if (override) await writeFile(join(REPO, override), 'services:\n  web:\n    ports: ["80:80"]\n')
+async function withCompose(basename = 'compose.yaml', override?: string, dir = REPO) {
+  await mkdir(dir, { recursive: true })
+  await writeFile(join(dir, basename), 'services:\n  web:\n    image: nginx\n')
+  if (override) await writeFile(join(dir, override), 'services:\n  web:\n    ports: ["80:80"]\n')
 }
 
 async function withDockerfile(text: string) {
@@ -238,11 +304,21 @@ async function withDockerfile(text: string) {
   await writeFile(join(REPO, 'Dockerfile'), text)
 }
 
+/** A session with its own worktree on disk, registered so resolveDockerScope
+ * (docker/scope.ts) finds it — the worktree-scope twin of `withCompose`. */
+async function withWorktree(sessionId: string, opts: { withCompose?: boolean } = {}) {
+  const path = join(TEST_PROJECTS_DIR, SLUG, 'worktrees', sessionId)
+  await mkdir(path, { recursive: true })
+  sessionsById[sessionId] = { id: sessionId, projectId: PROJECT_ID, worktreePath: path }
+  if (opts.withCompose) await withCompose('compose.yaml', undefined, path)
+  return path
+}
+
 // --- the gates ---------------------------------------------------------------
 
 test('the feature kill switch answers 403 before the project is even looked up', async () => {
   testEnv.DOCKER_ENABLED = false
-  const result = await statusOf(requestDockerUp(PROJECT_ID, {}, fakeCli))
+  const result = await statusOf(requestDockerUp(PROJECT_ID, undefined, {}, fakeCli))
   expect(result.status).toBe(403)
   expect(enqueued).toHaveLength(0)
 })
@@ -250,14 +326,14 @@ test('the feature kill switch answers 403 before the project is even looked up',
 test('an unknown project id is a 404', async () => {
   await withCompose()
   const result = await statusOf(
-    requestDockerUp('99999999-9999-4999-8999-999999999999', {}, fakeCli),
+    requestDockerUp('99999999-9999-4999-8999-999999999999', undefined, {}, fakeCli),
   )
   expect(result.status).toBe(404)
 })
 
 test('a project with neither a compose file nor a Dockerfile is a 400', async () => {
   await mkdir(REPO, { recursive: true })
-  const result = await statusOf(requestDockerUp(PROJECT_ID, {}, fakeCli))
+  const result = await statusOf(requestDockerUp(PROJECT_ID, undefined, {}, fakeCli))
   expect(result.status).toBe(400)
   expect(result.message).toContain('No Dockerfile or compose file detected')
 })
@@ -265,7 +341,7 @@ test('a project with neither a compose file nor a Dockerfile is a 400', async ()
 test('a missing docker binary is a 503 carrying install guidance, not a 500', async () => {
   await withCompose()
   behaviour = { versionExit: -127 }
-  const result = await statusOf(requestDockerUp(PROJECT_ID, {}, fakeCli))
+  const result = await statusOf(requestDockerUp(PROJECT_ID, undefined, {}, fakeCli))
   expect(result.status).toBe(503)
   expect(result.message).toContain('not installed')
   expect(enqueued).toHaveLength(0)
@@ -274,7 +350,7 @@ test('a missing docker binary is a 503 carrying install guidance, not a 500', as
 test('a docker daemon that is down is a 503 quoting its own error', async () => {
   await withCompose()
   behaviour = { versionExit: 1, serverPresent: false }
-  const result = await statusOf(requestDockerUp(PROJECT_ID, {}, fakeCli))
+  const result = await statusOf(requestDockerUp(PROJECT_ID, undefined, {}, fakeCli))
   expect(result.status).toBe(503)
   expect(result.message).toContain('Cannot connect to the Docker daemon')
 })
@@ -282,7 +358,7 @@ test('a docker daemon that is down is a 503 quoting its own error', async () => 
 test('a second operation while one is running is a 409 naming the first', async () => {
   await withCompose()
   activeOperation = '77777777-7777-4777-8777-777777777777'
-  const result = await statusOf(requestDockerStop(PROJECT_ID, {}, fakeCli))
+  const result = await statusOf(requestDockerStop(PROJECT_ID, undefined, {}, fakeCli))
   expect(result.status).toBe(409)
   expect(result.message).toContain('77777777-7777-4777-8777-777777777777')
   expect(enqueued).toHaveLength(0)
@@ -290,14 +366,14 @@ test('a second operation while one is running is a 409 naming the first', async 
 
 test('containerPort and hostPort are refused on a compose project', async () => {
   await withCompose()
-  expect((await statusOf(requestDockerUp(PROJECT_ID, { containerPort: 3000 }, fakeCli))).status).toBe(400)
-  expect((await statusOf(requestDockerUp(PROJECT_ID, { hostPort: 8080 }, fakeCli))).status).toBe(400)
+  expect((await statusOf(requestDockerUp(PROJECT_ID, undefined, { containerPort: 3000 }, fakeCli))).status).toBe(400)
+  expect((await statusOf(requestDockerUp(PROJECT_ID, undefined, { hostPort: 8080 }, fakeCli))).status).toBe(400)
   expect(enqueued).toHaveLength(0)
 })
 
 test('a services selection is refused on a plain-Dockerfile project', async () => {
   await withDockerfile('FROM nginx\nEXPOSE 80\n')
-  const result = await statusOf(requestDockerStop(PROJECT_ID, { services: ['web'] }, fakeCli))
+  const result = await statusOf(requestDockerStop(PROJECT_ID, undefined, { services: ['web'] }, fakeCli))
   expect(result.status).toBe(400)
   expect(result.message).toContain('only applies to a compose project')
 })
@@ -305,7 +381,7 @@ test('a services selection is refused on a plain-Dockerfile project', async () =
 test('compose wins when a project has both a compose file and a Dockerfile', async () => {
   await withCompose()
   await withDockerfile('FROM nginx\nEXPOSE 80\n')
-  await requestDockerUp(PROJECT_ID, {}, fakeCli)
+  await requestDockerUp(PROJECT_ID, undefined, {}, fakeCli)
   expect(enqueued[0]?.mode).toBe('compose')
   expect(enqueued[0]?.dockerfileAbsPath).toBeUndefined()
 })
@@ -315,7 +391,7 @@ test('compose wins when a project has both a compose file and a Dockerfile', asy
 for (const basename of ['compose.yaml', 'compose.yml', 'docker-compose.yaml', 'docker-compose.yml']) {
   test(`${basename} is detected and passed as -f to the queued job`, async () => {
     await withCompose(basename)
-    await requestDockerUp(PROJECT_ID, {}, fakeCli)
+    await requestDockerUp(PROJECT_ID, undefined, {}, fakeCli)
     expect(enqueued[0]?.composeFiles).toEqual({ base: join(REPO, basename), override: undefined })
     expect(enqueued[0]?.composeProjectName).toBe('agentoo-demo')
   })
@@ -323,7 +399,7 @@ for (const basename of ['compose.yaml', 'compose.yml', 'docker-compose.yaml', 'd
 
 test('an override from the same family is paired with its base file', async () => {
   await withCompose('docker-compose.yml', 'docker-compose.override.yml')
-  await requestDockerUp(PROJECT_ID, {}, fakeCli)
+  await requestDockerUp(PROJECT_ID, undefined, {}, fakeCli)
   expect(enqueued[0]?.composeFiles).toEqual({
     base: join(REPO, 'docker-compose.yml'),
     override: join(REPO, 'docker-compose.override.yml'),
@@ -332,7 +408,7 @@ test('an override from the same family is paired with its base file', async () =
 
 test('an override from the other family is not picked up', async () => {
   await withCompose('docker-compose.yml', 'compose.override.yaml')
-  await requestDockerUp(PROJECT_ID, {}, fakeCli)
+  await requestDockerUp(PROJECT_ID, undefined, {}, fakeCli)
   expect(enqueued[0]?.composeFiles).toEqual({
     base: join(REPO, 'docker-compose.yml'),
     override: undefined,
@@ -344,7 +420,7 @@ test('an override from the other family is not picked up', async () => {
 test('a Dockerfile with no EXPOSE and no built image is a 400 naming containerPort', async () => {
   await withDockerfile('FROM nginx\nCMD ["nginx"]\n')
   behaviour = { imageExposedPorts: null }
-  const result = await statusOf(requestDockerUp(PROJECT_ID, {}, fakeCli))
+  const result = await statusOf(requestDockerUp(PROJECT_ID, undefined, {}, fakeCli))
   expect(result.status).toBe(400)
   expect(result.message).toContain('containerPort')
   expect(enqueued).toHaveLength(0)
@@ -353,32 +429,32 @@ test('a Dockerfile with no EXPOSE and no built image is a 400 naming containerPo
 test("the Dockerfile's EXPOSE is used when no image has been built", async () => {
   await withDockerfile('FROM nginx\nEXPOSE 8081/udp\n')
   behaviour = { imageExposedPorts: null }
-  await requestDockerUp(PROJECT_ID, {}, fakeCli)
+  await requestDockerUp(PROJECT_ID, undefined, {}, fakeCli)
   expect(enqueued[0]).toMatchObject({ containerPort: 8081, protocol: 'udp', mode: 'dockerfile' })
 })
 
 test("a built image's ExposedPorts win over the Dockerfile's EXPOSE", async () => {
   await withDockerfile('FROM nginx\nEXPOSE 3000\n')
   behaviour = { imageExposedPorts: ['9090/tcp'] }
-  await requestDockerUp(PROJECT_ID, {}, fakeCli)
+  await requestDockerUp(PROJECT_ID, undefined, {}, fakeCli)
   expect(enqueued[0]).toMatchObject({ containerPort: 9090, protocol: 'tcp' })
 })
 
 test('an explicit containerPort wins over both the image and the Dockerfile', async () => {
   await withDockerfile('FROM nginx\nEXPOSE 3000\n')
   behaviour = { imageExposedPorts: ['9090/tcp'] }
-  await requestDockerUp(PROJECT_ID, { containerPort: 4000 }, fakeCli)
+  await requestDockerUp(PROJECT_ID, undefined, { containerPort: 4000 }, fakeCli)
   expect(enqueued[0]).toMatchObject({ containerPort: 4000, protocol: 'tcp' })
 })
 
 test('hostPort is carried through untouched, and omitted means the daemon allocates', async () => {
   await withDockerfile('FROM nginx\nEXPOSE 3000\n')
   behaviour = { imageExposedPorts: null }
-  await requestDockerUp(PROJECT_ID, { hostPort: 18080 }, fakeCli)
+  await requestDockerUp(PROJECT_ID, undefined, { hostPort: 18080 }, fakeCli)
   expect(enqueued[0]?.hostPort).toBe(18080)
 
   enqueued.length = 0
-  await requestDockerUp(PROJECT_ID, {}, fakeCli)
+  await requestDockerUp(PROJECT_ID, undefined, {}, fakeCli)
   expect(enqueued[0]?.hostPort).toBeUndefined()
 })
 
@@ -387,7 +463,7 @@ test('stop/restart/down on a Dockerfile project need no port at all', async () =
   behaviour = { imageExposedPorts: null }
   for (const request of [requestDockerStop, requestDockerRestart, requestDockerDown]) {
     enqueued.length = 0
-    await request(PROJECT_ID, {}, fakeCli)
+    await request(PROJECT_ID, undefined, {}, fakeCli)
     expect(enqueued[0]?.containerPort).toBeUndefined()
   }
 })
@@ -396,19 +472,19 @@ test('stop/restart/down on a Dockerfile project need no port at all', async () =
 
 test('an unknown service is refused, and a known one is accepted', async () => {
   await withCompose()
-  const bad = await statusOf(requestDockerUp(PROJECT_ID, { services: ['nope'] }, fakeCli))
+  const bad = await statusOf(requestDockerUp(PROJECT_ID, undefined, { services: ['nope'] }, fakeCli))
   expect(bad.status).toBe(400)
   expect(bad.message).toContain('Unknown service: nope')
 
-  await requestDockerUp(PROJECT_ID, { services: ['web', 'db'] }, fakeCli)
+  await requestDockerUp(PROJECT_ID, undefined, { services: ['web', 'db'] }, fakeCli)
   expect(enqueued[0]?.services).toEqual(['web', 'db'])
 })
 
 test('a broken compose file still allows a whole-stack stop and down', async () => {
   await withCompose()
   behaviour = { configOk: false }
-  expect((await statusOf(requestDockerStop(PROJECT_ID, {}, fakeCli))).status).toBe(202)
-  expect((await statusOf(requestDockerDown(PROJECT_ID, {}, fakeCli))).status).toBe(202)
+  expect((await statusOf(requestDockerStop(PROJECT_ID, undefined, {}, fakeCli))).status).toBe(202)
+  expect((await statusOf(requestDockerDown(PROJECT_ID, undefined, {}, fakeCli))).status).toBe(202)
   expect(enqueued).toHaveLength(2)
 })
 
@@ -420,7 +496,7 @@ test('a Compose too old for `config --format json` can still stop one named serv
   // rejected as unverifiable.
   await withCompose()
   behaviour = { configOk: false, fallbackServices: ['web', 'db'] }
-  const result = await statusOf(requestDockerStop(PROJECT_ID, { services: ['web'] }, fakeCli))
+  const result = await statusOf(requestDockerStop(PROJECT_ID, undefined, { services: ['web'] }, fakeCli))
   expect(result.status).toBe(202)
 })
 
@@ -433,8 +509,8 @@ test('a broken compose file does not strand a running container behind a syntax 
   // the dashboard.
   await withCompose()
   behaviour = { configOk: false, fallbackServices: ['web'] }
-  const stop = await statusOf(requestDockerStop(PROJECT_ID, { services: ['web'] }, fakeCli))
-  const down = await statusOf(requestDockerDown(PROJECT_ID, { services: ['web'] }, fakeCli))
+  const stop = await statusOf(requestDockerStop(PROJECT_ID, undefined, { services: ['web'] }, fakeCli))
+  const down = await statusOf(requestDockerDown(PROJECT_ID, undefined, { services: ['web'] }, fakeCli))
   expect({ stop: stop.status, down: down.status }).toEqual({ stop: 202, down: 202 })
 })
 
@@ -442,6 +518,7 @@ test('a queued job never carries a field the request invented', async () => {
   await withCompose()
   await requestDockerUp(
     PROJECT_ID,
+    undefined,
     { services: ['web'], build: true, forceRecreate: true, removeOrphans: true },
     fakeCli,
   )
@@ -465,7 +542,7 @@ test('a queued job never carries a field the request invented', async () => {
 test('a box with no docker binary still answers with a full state object', async () => {
   await withCompose()
   behaviour = { allMissing: true }
-  const state = await getProjectDockerState(PROJECT_ID, fakeCli)
+  const state = await getProjectDockerState(PROJECT_ID, undefined, fakeCli)
   expect(state.daemon).toEqual({
     cliInstalled: false,
     available: false,
@@ -484,7 +561,7 @@ test('a box with no docker binary still answers with a full state object', async
 test('a daemon that is down is reported, with the client version still surfaced', async () => {
   await withCompose()
   behaviour = { versionExit: 1, serverPresent: false, configOk: false }
-  const state = await getProjectDockerState(PROJECT_ID, fakeCli)
+  const state = await getProjectDockerState(PROJECT_ID, undefined, fakeCli)
   expect(state.daemon.cliInstalled).toBe(true)
   expect(state.daemon.available).toBe(false)
   expect(state.daemon.version).toBe('26.1.4')
@@ -495,7 +572,7 @@ test('a daemon that is down is reported, with the client version still surfaced'
 test('a Dockerfile-only project reports its EXPOSE ports and an unbuilt image', async () => {
   await withDockerfile('FROM nginx\nEXPOSE 8080\nEXPOSE 9090/udp\n')
   behaviour = { imageExposedPorts: null }
-  const state = await getProjectDockerState(PROJECT_ID, fakeCli)
+  const state = await getProjectDockerState(PROJECT_ID, undefined, fakeCli)
   expect(state.dockerfilePorts).toEqual([
     { containerPort: 8080, protocol: 'tcp' },
     { containerPort: 9090, protocol: 'udp' },
@@ -512,8 +589,78 @@ test('a Dockerfile-only project reports its EXPOSE ports and an unbuilt image', 
 test("a built image's exposed ports are reported alongside the Dockerfile's", async () => {
   await withDockerfile('FROM nginx\nEXPOSE 3000\n')
   behaviour = { imageExposedPorts: ['9090/tcp'] }
-  const state = await getProjectDockerState(PROJECT_ID, fakeCli)
+  const state = await getProjectDockerState(PROJECT_ID, undefined, fakeCli)
   expect(state.dockerfilePorts).toEqual([{ containerPort: 3000, protocol: 'tcp' }])
   expect(state.image?.exists).toBe(true)
   expect(state.image?.exposedPorts).toEqual([{ containerPort: 9090, protocol: 'tcp' }])
+})
+
+// --- worktree scope: the same gates, one scope over -----------------------------
+
+const SESSION_ID = '33333333-3333-4333-8333-333333333333'
+const OTHER_PROJECT_SESSION_ID = '44444444-4444-4444-8444-444444444444'
+
+test('up in a session scope reads the compose file from that worktree, not the repo', async () => {
+  const worktree = await withWorktree(SESSION_ID, { withCompose: true })
+  await withCompose('compose.yaml') // a different repo/ file — must not be the one used
+  await requestDockerUp(PROJECT_ID, SESSION_ID, {}, fakeCli)
+  expect(enqueued[0]?.projectPath).toBe(worktree)
+  expect(enqueued[0]?.composeFiles).toEqual({ base: join(worktree, 'compose.yaml'), override: undefined })
+  expect(enqueued[0]?.sessionId).toBe(SESSION_ID)
+  expect(enqueued[0]?.slug).toBe(SLUG)
+})
+
+test('a session with no worktree of its own is a 400, not a silent fall-back to the repo', async () => {
+  sessionsById[SESSION_ID] = { id: SESSION_ID, projectId: PROJECT_ID, worktreePath: null }
+  const result = await statusOf(requestDockerUp(PROJECT_ID, SESSION_ID, {}, fakeCli))
+  expect(result.status).toBe(400)
+  expect(result.message).toContain('has no worktree of its own')
+  expect(enqueued).toHaveLength(0)
+})
+
+test("a session belonging to a different project is a 404, the same as an unknown session", async () => {
+  sessionsById[OTHER_PROJECT_SESSION_ID] = {
+    id: OTHER_PROJECT_SESSION_ID,
+    projectId: '99999999-9999-4999-8999-999999999999',
+    worktreePath: '/tmp/somewhere',
+  }
+  await withCompose()
+  const crossProject = await statusOf(
+    requestDockerUp(PROJECT_ID, OTHER_PROJECT_SESSION_ID, {}, fakeCli),
+  )
+  const unknown = await statusOf(
+    requestDockerUp(PROJECT_ID, '55555555-5555-4555-8555-555555555555', {}, fakeCli),
+  )
+  expect(crossProject.status).toBe(404)
+  expect(crossProject).toEqual(unknown)
+})
+
+test('a worktree that is no longer on disk is a 409, not a 404', async () => {
+  const path = join(TEST_PROJECTS_DIR, SLUG, 'worktrees', SESSION_ID)
+  sessionsById[SESSION_ID] = { id: SESSION_ID, projectId: PROJECT_ID, worktreePath: path }
+  // Deliberately never created on disk.
+  await withCompose()
+  const result = await statusOf(requestDockerUp(PROJECT_ID, SESSION_ID, {}, fakeCli))
+  expect(result.status).toBe(409)
+  expect(result.message).toContain('no longer on disk')
+})
+
+test("a session's operation lock is keyed independently of the project's repo scope", async () => {
+  await withWorktree(SESSION_ID, { withCompose: true })
+  await withCompose()
+
+  await requestDockerUp(PROJECT_ID, undefined, {}, fakeCli)
+  await requestDockerUp(PROJECT_ID, SESSION_ID, {}, fakeCli)
+
+  expect(lockScopeChecks).toEqual([PROJECT_ID, `${PROJECT_ID}:s-${SESSION_ID}`])
+})
+
+test('getProjectDockerState in a session scope reports that session, not the repo', async () => {
+  const worktree = await withWorktree(SESSION_ID, { withCompose: true })
+  await withCompose() // the repo/'s own, unrelated compose file
+  const state = await getProjectDockerState(PROJECT_ID, SESSION_ID, fakeCli)
+  expect(state.sessionId).toBe(SESSION_ID)
+  expect(state.scopePath).toBe(worktree)
+  expect(state.projectPath).toBe(REPO)
+  expect(state.composeProject).toBe(`agentoo-demo_s-${SESSION_ID.replace(/-/g, '').slice(0, 12)}`)
 })

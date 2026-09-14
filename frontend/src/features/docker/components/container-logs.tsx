@@ -16,13 +16,21 @@ import styles from './container-logs.module.scss'
  */
 export function ContainerLogs({
   projectId,
+  sessionId,
   containerId,
 }: {
   projectId: string
+  /** Scopes the stream to this session's own worktree — omitted means the
+   *  project's repo/ checkout, exactly like every other docker call here. */
+  sessionId?: string
   containerId: string
 }) {
   const { t } = useTranslation()
-  const { entries, connected, reconnecting, ended } = useContainerLogs(projectId, containerId)
+  const { entries, connected, reconnecting, ended } = useContainerLogs(
+    projectId,
+    containerId,
+    sessionId,
+  )
   const paneRef = useRef<HTMLDivElement>(null)
 
   // Sticks to the bottom only when the reader was already there — scrolled

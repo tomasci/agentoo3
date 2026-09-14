@@ -2,11 +2,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { z } from 'zod'
 import { getApiProjectsIdDockerQueryKey } from '@/shared/api/generated/hooks/useGetApiProjectsIdDocker'
-import type { GetApiProjectsIdDockerOperationsOperationidStatus200 } from '@/shared/api/generated/types/GetApiProjectsIdDockerOperationsOperationid'
 import { env } from '@/shared/config/env'
 import { logger } from '@/shared/lib/logger'
-
-export type DockerOperation = GetApiProjectsIdDockerOperationsOperationidStatus200
 
 export interface OperationOutputLine {
   seq: number
@@ -15,10 +12,14 @@ export interface OperationOutputLine {
   at: string
 }
 
-// Not the whole generated `DockerOperation` shape — an `operation` frame's
-// job here is only ever to update `status`/`exitCode`/`error`, and validating
-// against the full shape would drop a legitimate frame the moment a field
-// this hook never reads went missing or changed type on the backend.
+// Not the *generated* `DockerOperation` shape — an `operation` frame's job
+// here is only ever to update `status`/`exitCode`/`error`, and validating
+// against the full generated type would drop a legitimate frame the moment a
+// field this hook never reads went missing or changed type on the backend
+// (exactly what happened when `sessionId` was added to the generated type
+// for worktree-scoped docker). `DockerOperation` below is inferred from this
+// schema rather than imported from the generated client, so the state this
+// hook holds can never be made to require a field this hook does not parse.
 const operationFrameSchema = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -31,6 +32,8 @@ const operationFrameSchema = z.object({
   startedAt: z.string().nullable(),
   finishedAt: z.string().nullable(),
 })
+
+export type DockerOperation = z.infer<typeof operationFrameSchema>
 
 const outputFrameSchema = z.object({
   seq: z.int(),

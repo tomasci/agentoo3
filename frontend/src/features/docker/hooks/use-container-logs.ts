@@ -104,7 +104,12 @@ function capped(entries: LogEntry[], entry: LogEntry): LogEntry[] {
  * open for every container regardless of whether anyone is looking at it
  * would starve the readers who are.
  */
-export function useContainerLogs(projectId: string, containerId: string, tail = 200) {
+export function useContainerLogs(
+  projectId: string,
+  containerId: string,
+  sessionId?: string,
+  tail = 200,
+) {
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [connected, setConnected] = useState(false)
   // True only while a reconnect is scheduled after a failure — distinct from
@@ -137,6 +142,9 @@ export function useContainerLogs(projectId: string, containerId: string, tail = 
       const params = new URLSearchParams()
       if (since) params.set('since', since)
       else params.set('tail', String(tail))
+      // Scopes the stream the same way the REST status/operation calls do —
+      // omitted entirely for repo scope, never sent as an empty string.
+      if (sessionId) params.set('sessionId', sessionId)
 
       source = new EventSource(
         `${env.apiUrl}/projects/${projectId}/docker/containers/${containerId}/logs?${params}`,
@@ -202,7 +210,7 @@ export function useContainerLogs(projectId: string, containerId: string, tail = 
       setConnected(false)
       setReconnecting(false)
     }
-  }, [projectId, containerId, tail])
+  }, [projectId, containerId, sessionId, tail])
 
   return { entries, connected, reconnecting, ended }
 }

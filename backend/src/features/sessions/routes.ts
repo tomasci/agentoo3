@@ -141,7 +141,11 @@ sessionsRouter.openapi(
     responses: {
       204: { description: 'Deleted' },
       404: json(errorSchema, 'Not found'),
-      409: json(errorSchema, 'Session is running'),
+      409: json(
+        errorSchema,
+        'Session is running, or (when DOCKER_ENABLED) its own docker stack still has ' +
+          'containers — clean those up on the Docker page first',
+      ),
     },
   }),
   async (c) => {

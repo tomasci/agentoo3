@@ -504,6 +504,20 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
               </Link>
             </Button>
           )}
+          {/* Only an isolated session has a worktree of its own to run docker
+              against — a shared-checkout session has none, and the backend
+              400s on it (features/docker/scope.ts) — so the link is never
+              offered for one at all. */}
+          {data.isolated && (
+            <Button asChild variant="secondary" size="sm">
+              <Link
+                to="/projects/$projectId/sessions/$sessionId/docker"
+                params={{ projectId: data.projectId, sessionId: data.id }}
+              >
+                {t('sessions.docker')}
+              </Link>
+            </Button>
+          )}
           {/* Visible at every size while busy: the only way to halt a running
               agent does not belong behind a menu. */}
           {busy && (

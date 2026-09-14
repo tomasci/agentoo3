@@ -33,6 +33,11 @@ export interface StartOptions {
 
 interface ServiceListProps {
   projectId: string
+  /** The scope this list's containers belong to — threaded down to each
+   *  container's own log stream (`ContainerPanel` below), never read here
+   *  otherwise: every mutation this row triggers is the caller's (see
+   *  docker-page.tsx), already scoped there. */
+  sessionId?: string
   status: DockerStatus
   /** Covers daemon unavailability, a busy project-wide operation, and (for
    * start/restart only) a broken compose file — see docker-page.tsx for how
@@ -52,6 +57,7 @@ interface ServiceListProps {
  */
 export function ServiceList({
   projectId,
+  sessionId,
   status,
   startDisabled,
   stopDisabled,
@@ -67,6 +73,7 @@ export function ServiceList({
         <ServiceRow
           key={row.service ?? '__app__'}
           projectId={projectId}
+          sessionId={sessionId}
           row={row}
           status={status}
           startDisabled={startDisabled}
@@ -82,6 +89,7 @@ export function ServiceList({
 
 function ServiceRow({
   projectId,
+  sessionId,
   row,
   status,
   startDisabled,
@@ -91,6 +99,7 @@ function ServiceRow({
   onStop,
 }: {
   projectId: string
+  sessionId?: string
   row: ServiceRowModel
   status: DockerStatus
 } & Pick<ServiceListProps, 'startDisabled' | 'stopDisabled' | 'onStart' | 'onRestart' | 'onStop'>) {
@@ -183,7 +192,12 @@ function ServiceRow({
         ) : (
           <Stack gap={2}>
             {row.containers.map((container) => (
-              <ContainerPanel key={container.id} projectId={projectId} container={container} />
+              <ContainerPanel
+                key={container.id}
+                projectId={projectId}
+                sessionId={sessionId}
+                container={container}
+              />
             ))}
           </Stack>
         )}
@@ -194,9 +208,11 @@ function ServiceRow({
 
 function ContainerPanel({
   projectId,
+  sessionId,
   container,
 }: {
   projectId: string
+  sessionId?: string
   container: DockerContainer
 }) {
   const { t } = useTranslation()
@@ -238,7 +254,9 @@ function ContainerPanel({
       >
         <Stack gap={3}>
           <DefinitionList items={facts} />
-          {open && <ContainerLogs projectId={projectId} containerId={container.id} />}
+          {open && (
+            <ContainerLogs projectId={projectId} sessionId={sessionId} containerId={container.id} />
+          )}
         </Stack>
       </Collapsible>
     </div>

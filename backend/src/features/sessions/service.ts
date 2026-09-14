@@ -2,7 +2,9 @@ import { and, count, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { sanitizeForDb } from '@/db/sanitize'
 import { ideas, messageFiles, messages, projects, sessionFiles, sessions } from '@/db/schema'
+import { env } from '@/env'
 import { deleteSessionFiles } from '@/features/attachments/storage'
+import { listScopeContainers } from '@/features/docker/containers'
 import { keyPathFor } from '@/features/ssh-keys/service'
 import { badRequest, conflict, notFound } from '@/lib/errors'
 import { publishControl, publishSessionEvent } from '@/lib/events'
@@ -240,6 +242,24 @@ export async function getSession(id: string): Promise<SessionDto> {
   )
 }
 
+/**
+ * The three facts docker/scope.ts needs to resolve a session's own worktree —
+ * never the whole session row, so that module (and anything else outside
+ * this feature that only needs "where does this session run") does not reach
+ * for `@/db/client` directly (see docker/service.ts's own comment on why).
+ */
+export async function getSessionLocation(
+  id: string,
+): Promise<{ id: string; projectId: string; worktreePath: string | null }> {
+  const [row] = await db
+    .select({ id: sessions.id, projectId: sessions.projectId, worktreePath: sessions.worktreePath })
+    .from(sessions)
+    .where(eq(sessions.id, id))
+    .limit(1)
+  if (!row) throw notFound('Session')
+  return row
+}
+
 /** Short, readable, and unique enough for a branch name. */
 const branchFor = (sessionId: string) => `agentoo/s-${sessionId.slice(0, 8)}`
 
@@ -391,6 +411,28 @@ export async function deleteSession(id: string): Promise<void> {
   }
 
   const project = await requireProject(row.projectId)
+
+  // Gated on DOCKER_ENABLED so a deployment with docker off pays nothing for
+  // this check. The docker feature keeps no table of its own — the running
+  // daemon is the only record of a session's containers (see
+  // docker/names.ts's own header) — so this has to ask it directly, right
+  // before the worktree it would otherwise orphan is removed. Any container
+  // state counts, not just running: an exited container still pins the name,
+  // network and volumes docker made for it. This refuses rather than
+  // best-effort `compose down`, deliberately: every docker mutation in this
+  // feature runs on the worker, never in a request handler, and enqueuing one
+  // here would race the `removeWorktree` (`git worktree remove --force`)
+  // below. `listScopeContainers` already answers `[]` when the daemon is
+  // unreachable or `docker` itself is missing, so a down daemon never makes a
+  // session undeletable — only its own containers do.
+  if (env.DOCKER_ENABLED && row.worktreePath) {
+    const containers = await listScopeContainers({ slug: project.slug, sessionId: row.id })
+    if (containers.length > 0) {
+      throw conflict(
+        "This session's docker stack still has containers; clean it up on the Docker page before deleting",
+      )
+    }
+  }
 
   if (row.worktreePath) {
     const result = await removeWorktree(projectRepo(project.slug), row.worktreePath)

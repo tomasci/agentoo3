@@ -9,6 +9,7 @@
 // what pins the security property (no shell, no flag an operator-supplied
 // value could be smuggled in as) as well as the behaviour.
 
+import type { DockerScopeRef } from './names'
 import { containerName, imageReference, managedLabels } from './names'
 
 export interface ComposeFiles {
@@ -143,11 +144,11 @@ export function imageInspectArgs(reference: string): string[] {
 // --- the plain-Dockerfile path --------------------------------------------
 
 export function buildArgs(
-  slug: string,
+  ref: DockerScopeRef,
   dockerfileAbsPath: string,
   projectAbsPath: string,
 ): string[] {
-  return ['build', '-t', imageReference(slug), '-f', dockerfileAbsPath, projectAbsPath]
+  return ['build', '-t', imageReference(ref), '-f', dockerfileAbsPath, projectAbsPath]
 }
 
 export interface RunOptions {
@@ -161,17 +162,17 @@ export interface RunOptions {
  * No `--restart` policy, deliberately: a container this dashboard started must
  * not silently outlive a reboot the operator never asked it to survive.
  */
-export function runArgs(slug: string, opts: RunOptions): string[] {
-  const labels = managedLabels(slug).flatMap((label) => ['--label', label])
+export function runArgs(ref: DockerScopeRef, opts: RunOptions): string[] {
+  const labels = managedLabels(ref).flatMap((label) => ['--label', label])
   return [
     'run',
     '-d',
     '--name',
-    containerName(slug),
+    containerName(ref),
     ...labels,
     '-p',
     `${opts.hostPort ?? 0}:${opts.containerPort}/${opts.protocol}`,
-    imageReference(slug),
+    imageReference(ref),
   ]
 }
 

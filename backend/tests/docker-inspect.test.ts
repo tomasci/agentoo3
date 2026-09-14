@@ -6,8 +6,10 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, test } from 'bun:test'
+import { inspectArgs } from '../src/features/docker/args'
 import {
   getDaemonVersion,
+  inspectContainersRaw,
   inspectImage,
   listContainerIds,
   parseContainerInspectNdjson,
@@ -171,4 +173,89 @@ test('a missing docker binary (spawn ENOENT) reports cliInstalled: false', async
   }))
   const version = await getDaemonVersion(cli)
   expect(version).toEqual({ cliInstalled: false, available: false, version: null, error: null })
+})
+
+// --- inspectContainersRaw: the argv is the one HEAD already sent ---------------
+//
+// `inspectContainersRaw` was split out of `inspectContainers` so
+// containers.ts can filter on labels the public DTO deliberately drops. The
+// split must not have changed a single argument reaching `docker` — the argv
+// below is byte-for-byte the one `inspectContainers` sent before the split,
+// and it is what `inspectArgs` (args.ts, asserted separately in
+// docker-args.test.ts) builds. Asserted against `inspectArgs` rather than a
+// second hand-written literal so the two cannot drift apart silently.
+
+test('inspectContainersRaw sends exactly inspectArgs(ids) — unchanged from before the split', async () => {
+  const seen: string[][] = []
+  const cli = fakeCli(async (args) => {
+    seen.push(args)
+    return ok('')
+  })
+  await inspectContainersRaw(['aaa', 'bbb'], cli)
+  expect(seen).toEqual([['inspect', '--type', 'container', '--format', '{{json .}}', 'aaa', 'bbb']])
+  expect(seen[0]).toEqual(inspectArgs(['aaa', 'bbb']))
+})
+
+test('inspectContainersRaw caps at 200 ids in one call, like inspectArgs', async () => {
+  const ids = Array.from({ length: 250 }, (_, i) => `id${i}`)
+  const seen: string[][] = []
+  const cli = fakeCli(async (args) => {
+    seen.push(args)
+    return ok('')
+  })
+  await inspectContainersRaw(ids, cli)
+  expect(seen).toHaveLength(1)
+  expect(seen[0]).toEqual(inspectArgs(ids))
+  expect(seen[0]?.slice(5)).toHaveLength(200)
+})
+
+test('inspectContainersRaw spawns nothing at all for an empty id list', async () => {
+  let calls = 0
+  const cli = fakeCli(async () => {
+    calls++
+    return ok('')
+  })
+  expect(await inspectContainersRaw([], cli)).toEqual([])
+  expect(calls).toBe(0)
+})
+
+test('inspectContainersRaw degrades to [] when docker itself fails', async () => {
+  const cli = fakeCli(async () => fail('Cannot connect to the Docker daemon'))
+  expect(await inspectContainersRaw(['aaa'], cli)).toEqual([])
+})
+
+test('inspectContainersRaw keeps the raw labels the public DTO drops', async () => {
+  const cli = fakeCli(async () =>
+    ok(
+      JSON.stringify({
+        Id: 'f'.repeat(64),
+        Name: '/agentoo-demo',
+        Config: { Labels: { 'com.agentoo.project': 'demo', 'com.agentoo.session': 'sid' } },
+        State: { Status: 'running' },
+      }),
+    ),
+  )
+  const [raw] = await inspectContainersRaw(['aaa'], cli)
+  expect(raw?.Config?.Labels).toEqual({
+    'com.agentoo.project': 'demo',
+    'com.agentoo.session': 'sid',
+  })
+  // ...and the DTO built from that same record exposes none of them.
+  const dto = toDockerContainer(raw as NonNullable<typeof raw>)
+  expect(JSON.stringify(dto)).not.toContain('com.agentoo')
+  expect(JSON.stringify(dto)).not.toContain('com.docker.compose.project')
+  expect(Object.keys(dto).sort()).toEqual([
+    'createdAt',
+    'exitCode',
+    'finishedAt',
+    'health',
+    'id',
+    'image',
+    'name',
+    'ports',
+    'service',
+    'shortId',
+    'startedAt',
+    'state',
+  ])
 })

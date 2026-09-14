@@ -27,8 +27,11 @@ export interface DockerStream {
 }
 
 export interface DockerCli {
-  run(args: string[], options?: { cwd?: string; timeoutMs?: number }): Promise<DockerResult>
-  stream(args: string[], options?: { cwd?: string }): DockerStream
+  run(
+    args: string[],
+    options?: { cwd?: string; timeoutMs?: number; env?: Record<string, string> },
+  ): Promise<DockerResult>
+  stream(args: string[], options?: { cwd?: string; env?: Record<string, string> }): DockerStream
 }
 
 /**
@@ -65,6 +68,14 @@ export const realDockerCli: DockerCli = {
     const spawn = () =>
       Bun.spawn(['docker', ...args], {
         cwd: options.cwd,
+        // Merged over the inherited environment, never a bare replacement: a
+        // literal `env: options.env` here would hand Bun.spawn *only*
+        // whatever this call passed and strip PATH/DOCKER_HOST/HOME, which is
+        // what makes `docker` itself (and the daemon it talks to) resolvable
+        // at all. Every caller today passes nothing extra; the compose env
+        // vars this feature injects (see compose-env.ts) are the first ones
+        // that do.
+        env: { ...process.env, ...options.env },
         stdout: 'pipe',
         stderr: 'pipe',
         // Bun only applies a timeout when one is given; every caller in this
@@ -116,7 +127,13 @@ export const realDockerCli: DockerCli = {
   stream(args, options = {}) {
     // Same reasoning as `run()` above for the local `spawn` function.
     const spawn = () =>
-      Bun.spawn(['docker', ...args], { cwd: options.cwd, stdout: 'pipe', stderr: 'pipe' })
+      Bun.spawn(['docker', ...args], {
+        cwd: options.cwd,
+        // Same merge-not-replace reasoning as `run()` above.
+        env: { ...process.env, ...options.env },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      })
 
     let proc: ReturnType<typeof spawn> | undefined
     let spawnError: string | undefined
