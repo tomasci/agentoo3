@@ -84,18 +84,27 @@ const fakeCli = {
     }
     if (mode === 'binary-missing') return { ok: false, stdout: '', stderr: 'ENOENT', exitCode: -127 }
     if (mode === 'garbage') return { ok: true, stdout: 'not json at all\n{{{', stderr: '', exitCode: 0 }
+    // `ps -aq` prints docker's 12-char short id ('f'.repeat(12)); `inspect`
+    // reports back the 64-char full id ('f'.repeat(64)) for that same
+    // container, never the short id it was looked up by -- kept distinct
+    // here for fidelity to the real CLI (this gate's own containers carry
+    // `com.agentoo.project`, never `com.docker.compose.project`, so unlike
+    // containers.ts's former `composeIds.has(raw.Id)` defect this split does
+    // not change what this file's tests catch -- ownership here has always
+    // been decided by the `com.agentoo.session` label, never by an id
+    // comparison).
     if (args[0] === 'ps') {
       const filter = args[3] ?? ''
       if (mode === 'other-scope-only') {
         // A container of the project's REPO scope, returned by the slug-only
         // label filter -- the gate for a session must not see it.
         return filter.startsWith('label=com.agentoo.project=')
-          ? { ok: true, stdout: 'f'.repeat(64), stderr: '', exitCode: 0 }
+          ? { ok: true, stdout: 'f'.repeat(12), stderr: '', exitCode: 0 }
           : { ok: true, stdout: '', stderr: '', exitCode: 0 }
       }
       if (mode === 'no-containers') return { ok: true, stdout: '', stderr: '', exitCode: 0 }
       return filter.startsWith('label=com.agentoo.project=')
-        ? { ok: true, stdout: 'f'.repeat(64), stderr: '', exitCode: 0 }
+        ? { ok: true, stdout: 'f'.repeat(12), stderr: '', exitCode: 0 }
         : { ok: true, stdout: '', stderr: '', exitCode: 0 }
     }
     if (args[0] === 'inspect') {

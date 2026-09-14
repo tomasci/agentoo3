@@ -9,10 +9,14 @@
 #
 # Deliberately NOT installing a Postgres server for backend/tests/pg-cluster.ts
 # (its initdb-backed throwaway clusters): initdb refuses outright to run as
-# root ("cannot be run as root"), and this container has no non-root user to
-# switch to, so installing the package would not make those tests pass — it
-# would only turn their current graceful `test.skip` (no server binaries
-# found, see hasPostgres in those files) into a hard failure (server binaries
+# root ("cannot be run as root"). entrypoint.sh does drop every service's own
+# command to a non-root uid before it runs (see that file), but `docker
+# compose exec` — how these test suites are actually invoked, per this
+# file's own README — attaches to the already-running container and so
+# bypasses the entrypoint entirely, landing back on root. Installing the
+# package would not make those tests pass under that workflow — it would
+# only turn their current graceful `test.skip` (no server binaries found,
+# see hasPostgres in those files) into a hard failure (server binaries
 # found, cluster start refused). See docker/README.md's "Known caveats" for
 # exactly which test files that affects and how to run them instead.
 #
@@ -35,6 +39,9 @@ ARG TARGETARCH
 # the host's (see compose.yaml's commented-out socket mount).
 ARG DOCKER_CLI_VERSION=27.5.1
 
+# gosu drops root to the bind mount's actual owner before any service command
+# runs — see entrypoint.sh's own header for why that owner is read from /app
+# rather than configured.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
@@ -42,6 +49,7 @@ RUN set -eux; \
       openssh-client \
       ca-certificates \
       curl \
+      gosu \
     ; \
     rm -rf /var/lib/apt/lists/*; \
     case "$TARGETARCH" in \
@@ -56,6 +64,16 @@ RUN set -eux; \
     chmod +x /usr/local/bin/docker; \
     docker --version; \
     git --version; \
-    ssh -V
+    ssh -V; \
+    gosu --version
+
+COPY entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 WORKDIR /app
+
+# Stays root here on purpose — no USER instruction. The uid/gid every
+# service actually runs as is not known until the bind mount exists at
+# container start (see entrypoint.sh), so it cannot be baked in at build
+# time; the entrypoint itself does the drop, per service, every start.
+ENTRYPOINT ["docker-entrypoint.sh"]

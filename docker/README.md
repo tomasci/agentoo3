@@ -53,6 +53,54 @@ Once up:
 - API: `http://localhost:8100/api/health`
 - Frontend: `http://localhost:3100/` (proxies `/api` to the backend itself)
 
+## Container user
+
+Every service built from `docker/dev.Dockerfile` starts as root — the base
+`oven/bun` image has no other user — but `docker/entrypoint.sh` drops to a
+non-root uid/gid before the service's real command (`bun install`, `bun
+--watch`, `vite`, …) ever runs, so nothing that command writes through the
+bind-mounted `/app` lands on the host owned by root.
+
+That uid/gid is derived, never configured. It cannot be configured: this
+stack is started by agentoo itself, spawning `docker compose` from its own
+API/worker process — no shell, no `export UID`, nothing it injects today
+that this file could read. A `user: "${AGENTOO_UID:-1000}:${AGENTOO_GID:-1000}"`
+in `compose.yaml` would be a guess, and a wrong one on any host whose
+checkout isn't owned 1000:1000 (999:983 on the box this was built against).
+Instead, `entrypoint.sh` reads `stat -c %u /app` / `%g` at container start:
+`/app` *is* the bind-mounted checkout, so whichever uid/gid the host already
+made its owner is, by definition, the one this container has to write as —
+no env var, no default to get wrong. It then:
+
+- Creates a matching passwd/group entry for that id (there is usually none —
+  it's whatever the host happens to use, not a Debian system account).
+- Chowns the two named `node_modules` volumes to it. Those are not bind
+  mounts (see `x-app-volumes` in `compose.yaml`), so `/app`'s ownership says
+  nothing about them — the docker engine creates each one root:root on its
+  first use, before the entrypoint ever runs.
+- `exec`s the service's actual command as that user, via `gosu`.
+- If the opt-in docker-socket mount is enabled (see "Opting into the docker
+  socket" below), joins whatever group actually owns
+  `/var/run/docker.sock` — read with `stat`, the same way, never a
+  hardcoded `docker` gid, which differs per host too.
+
+One consequence worth knowing: this only covers a container's own startup.
+`docker compose exec` attaches to an already-running container and so
+bypasses the entrypoint entirely, landing on root regardless — see "Running
+the test suites inside the stack" below for where that matters.
+
+**If you already hit this before the fix** and have root-owned files in your
+checkout (`ls -la` shows `root root` where your own user should be), repair
+them from a throwaway container:
+
+```
+docker run --rm -v "$(pwd)":/work alpine chown -R "$(id -u):$(id -g)" /work
+```
+
+Run that from the repo root. `chown -R` is idempotent, so it's safe to
+re-run, and it only touches what you bind-mounted in (the checkout), never
+anything else on the host.
+
 ## Ports and overrides
 
 Every published host port is a compose variable with a default, chosen to
@@ -111,6 +159,16 @@ docker compose exec frontend bun test tests/
 (or `docker compose run --rm backend bun test tests/` if the service is not
 already up.)
 
+The two forms differ in who they run as (see "Container user" above):
+`exec` attaches to the already-running container and lands on root, same as
+before this stack dropped privileges anywhere; `run --rm` starts a fresh
+one-off container through the entrypoint and so runs as the same derived
+non-root user the long-running services do. Neither writes through the
+bind mount either way — everything under `tests/` that touches disk uses
+`node:os`'s `tmpdir()`, not a path under `/app` — so it makes no difference
+to file ownership on the host. It does change what the process *is
+allowed* to do, which is what "Known caveats" below is about.
+
 ## Opting into the docker socket
 
 By default nothing here can see the host's Docker daemon: the `docker` CLI is
@@ -147,23 +205,27 @@ as a default for a shared or CI box.
   few minutes before `backend`/`worker`/`frontend` report ready. Every run
   after that is seconds, because the named volumes and `init`'s own
   idempotence carry over.
-- **The container runs as root** (the base `oven/bun` image's default user;
-  this stack creates no other). Two known, deterministic consequences for
-  `bun test tests/` run inside `backend` — neither is a bug this stack
-  introduces, and neither is something to fix by adding packages here:
+- **`docker compose exec` runs as root** even though the long-running
+  services themselves do not (see "Container user" above — `exec` attaches
+  to a container already started by the entrypoint, bypassing it). One
+  known, deterministic consequence for `bun test tests/` run that way inside
+  `backend` — not a bug this stack introduces, and not something to fix by
+  adding packages here:
   - `tests/ssh-keys.test.ts`'s "an unreadable key says so rather than looking
-    like a rejection" fails: it simulates an unreadable file with
-    `chmod 0o000`, which root ignores.
+    like a rejection" fails under `exec`: it simulates an unreadable file
+    with `chmod 0o000`, which root ignores. It passes under
+    `docker compose run --rm backend bun test tests/ssh-keys.test.ts`
+    instead, since `run` starts a fresh container through the entrypoint and
+    so runs as the same derived non-root user as `backend` itself.
   - `tests/idea-loop.test.ts` (all of it) and one summary test in
-    `tests/idea-handoff-recovery.test.ts` fail: both spin up a throwaway
-    Postgres cluster via `initdb` for a handful of scenarios, and `initdb`
-    refuses outright to run as root. Installing a Postgres server in the
-    image would not fix this — it would only turn other files' current
-    graceful `test.skip` (no server binaries found) into the same hard
-    failure, since the refusal is about the *user*, not the *binary*. Run
-    those two files natively, on the host, if you need them exercised.
+    `tests/idea-handoff-recovery.test.ts` fail regardless of `exec` vs.
+    `run`: both spin up a throwaway Postgres cluster via `initdb`, and there
+    is no Postgres server in this image at all (see dev.Dockerfile's own
+    comment on why installing one would not help — the two files' failure
+    mode would just change, not go away). Run those two files natively, on
+    the host, if you need them exercised.
   Everything else in `bun test tests/` (both packages) passes the same as it
-  does outside the container.
+  does outside the container, either way.
 - **Claude credentials.** No `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`
   is ever baked into the image or the compose file. The API boots and reports
   `claudeCredential: false` in `/api/health` without one; agents simply
