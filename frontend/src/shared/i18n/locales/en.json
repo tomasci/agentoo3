@@ -186,6 +186,7 @@
     "heading": "Sessions",
     "backToProjects": "All projects",
     "backToIdea": "Back to Idea",
+    "docker": "Docker",
     "empty": "No sessions yet. Create one above — it gets its own git worktree and branch, so it will not collide with anything else running on this project.",
     "loadFailed": "Could not load the session",
     "createFailed": "Could not create the session",
@@ -514,6 +515,14 @@
   "docker": {
     "heading": "Docker",
     "lead": "Run this project's Docker or Docker Compose setup without a terminal: see what was detected, start, stop, restart or clean it up, watch live logs, and find every address a published port can be reached by.",
+    "scope": {
+      "switcherLabel": "Scope",
+      "repoOption": "Project checkout (repo/)",
+      "repoBanner": "Viewing the project's own repo/ checkout.",
+      "sessionBanner": "Viewing {{name}}'s own worktree — separate from the project checkout and from every other session.",
+      "unknownSession": "This session",
+      "errorTitle": "This scope isn't available"
+    },
     "loadFailed": "Could not load the docker status",
     "appServiceName": "Application",
     "composeFileUnknown": "the compose file",

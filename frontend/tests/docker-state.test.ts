@@ -36,7 +36,9 @@ const container = (o: Partial<DockerContainer> & { id: string }): DockerContaine
 
 const baseStatus = (o: Partial<DockerStatus> = {}): DockerStatus => ({
   projectId: 'p1',
+  sessionId: null,
   projectPath: '/srv/p1',
+  scopePath: '/srv/p1',
   composeProject: null,
   daemon: { cliInstalled: true, available: true, version: '27.0.0', composeVersion: '2.29.0', error: null },
   detection: {

@@ -21,10 +21,19 @@ import { postApiProjectsIdDockerUpMutationOptions } from '@/shared/api/generated
  * conditional-`refetchInterval` idiom as `useProjects`
  * (features/projects/hooks/use-projects.ts) and `useStorageSummary`
  * (features/storage/hooks/use-storage.ts).
+ *
+ * `sessionId` omitted means the project's own repo/ checkout, exactly like
+ * omitting it on the wire (scope.ts, backend) — passed on to the generated
+ * query only when present, so the request (and its cache entry, see
+ * `useInvalidateDockerStatus` below) never carries an empty `sessionId` for
+ * repo scope.
  */
-export function useDockerStatus(projectId: string) {
+export function useDockerStatus(projectId: string, sessionId?: string) {
   return useQuery({
-    ...getApiProjectsIdDockerQueryOptions({ path: { id: projectId } }),
+    ...getApiProjectsIdDockerQueryOptions({
+      path: { id: projectId },
+      query: sessionId ? { sessionId } : undefined,
+    }),
     refetchInterval: (query) => (query.state.data?.activeOperationId ? 2000 : 10_000),
   })
 }
@@ -40,11 +49,18 @@ export function useDockerDetection() {
   return useQuery({ ...getApiDockerDetectionQueryOptions(), staleTime: 30_000 })
 }
 
-export function useInvalidateDockerStatus(projectId: string) {
+// `sessionId` has to match whatever the status query for this scope was
+// actually built with (getApiProjectsIdDockerQueryKey folds `query` into the
+// key — see that generated file — so the repo scope and each session's own
+// scope are cached, and invalidated, independently of one another).
+export function useInvalidateDockerStatus(projectId: string, sessionId?: string) {
   const queryClient = useQueryClient()
   return () =>
     queryClient.invalidateQueries({
-      queryKey: getApiProjectsIdDockerQueryKey({ path: { id: projectId } }),
+      queryKey: getApiProjectsIdDockerQueryKey({
+        path: { id: projectId },
+        query: sessionId ? { sessionId } : undefined,
+      }),
     })
 }
 
@@ -56,32 +72,32 @@ export function useInvalidateDockerStatus(projectId: string) {
  * (use-operation-stream.ts, which invalidates again there) are what actually
  * catch the real "it's done".
  */
-export function useDockerUp(projectId: string) {
-  const invalidate = useInvalidateDockerStatus(projectId)
+export function useDockerUp(projectId: string, sessionId?: string) {
+  const invalidate = useInvalidateDockerStatus(projectId, sessionId)
   return useMutation({
     ...postApiProjectsIdDockerUpMutationOptions(),
     onSuccess: () => invalidate(),
   })
 }
 
-export function useDockerStop(projectId: string) {
-  const invalidate = useInvalidateDockerStatus(projectId)
+export function useDockerStop(projectId: string, sessionId?: string) {
+  const invalidate = useInvalidateDockerStatus(projectId, sessionId)
   return useMutation({
     ...postApiProjectsIdDockerStopMutationOptions(),
     onSuccess: () => invalidate(),
   })
 }
 
-export function useDockerRestart(projectId: string) {
-  const invalidate = useInvalidateDockerStatus(projectId)
+export function useDockerRestart(projectId: string, sessionId?: string) {
+  const invalidate = useInvalidateDockerStatus(projectId, sessionId)
   return useMutation({
     ...postApiProjectsIdDockerRestartMutationOptions(),
     onSuccess: () => invalidate(),
   })
 }
 
-export function useDockerDown(projectId: string) {
-  const invalidate = useInvalidateDockerStatus(projectId)
+export function useDockerDown(projectId: string, sessionId?: string) {
+  const invalidate = useInvalidateDockerStatus(projectId, sessionId)
   return useMutation({
     ...postApiProjectsIdDockerDownMutationOptions(),
     onSuccess: () => invalidate(),

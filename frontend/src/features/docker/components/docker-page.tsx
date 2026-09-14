@@ -24,6 +24,7 @@ import {
 import { hasDockerConfig, isOperationConflict } from '../lib/state'
 import { AccessUrls } from './access-urls'
 import styles from './docker-page.module.scss'
+import { DockerScopeBar } from './docker-scope-bar'
 import { OperationConsole } from './operation-console'
 import { ServiceList, type StartOptions } from './service-list'
 
@@ -35,14 +36,21 @@ import { ServiceList, type StartOptions } from './service-list'
  * Always reachable from the project sidebar (sidebar.tsx's `nav.docker`
  * link never hides) — this page is what explains an unavailable state, not
  * the nav.
+ *
+ * `sessionId` scopes every request here to that session's own git worktree
+ * instead of the project's repo/ checkout (backend/src/features/docker/scope.ts)
+ * — omitted (the project-level `/docker` route, project-routes.tsx) means the
+ * repo/ checkout, exactly like omitting the query param on the wire.
+ * `DockerScopeBar` below is what a reader actually uses to tell the two apart
+ * and move between them; this component only has to thread the id through.
  */
-export function DockerPage({ projectId }: { projectId: string }) {
+export function DockerPage({ projectId, sessionId }: { projectId: string; sessionId?: string }) {
   const { t } = useTranslation()
-  const status = useDockerStatus(projectId)
-  const up = useDockerUp(projectId)
-  const stop = useDockerStop(projectId)
-  const restart = useDockerRestart(projectId)
-  const down = useDockerDown(projectId)
+  const status = useDockerStatus(projectId, sessionId)
+  const up = useDockerUp(projectId, sessionId)
+  const stop = useDockerStop(projectId, sessionId)
+  const restart = useDockerRestart(projectId, sessionId)
+  const down = useDockerDown(projectId, sessionId)
 
   const [operationId, setOperationId] = useState<string | null>(null)
   const [confirmCleanup, setConfirmCleanup] = useState(false)
@@ -67,22 +75,36 @@ export function DockerPage({ projectId }: { projectId: string }) {
       tone: 'danger',
     })
 
+  // Every mutation carries the same scope the status query above reads —
+  // never separately decided, or a stack could be started in one scope and
+  // the page could go on believing it belongs to the other.
+  const scopeQuery = sessionId ? { sessionId } : undefined
+
   const triggerUp = (services: string[], options?: StartOptions) =>
     up.mutate(
       {
         path: { id: projectId },
+        query: scopeQuery,
         body: { services: services.length ? services : undefined, ...options },
       },
       { onSuccess: (op) => setOperationId(op.id), onError: fail('docker.errors.startFailed') },
     )
   const triggerStop = (services: string[]) =>
     stop.mutate(
-      { path: { id: projectId }, body: services.length ? { services } : undefined },
+      {
+        path: { id: projectId },
+        query: scopeQuery,
+        body: services.length ? { services } : undefined,
+      },
       { onSuccess: (op) => setOperationId(op.id), onError: fail('docker.errors.stopFailed') },
     )
   const triggerRestart = (services: string[]) =>
     restart.mutate(
-      { path: { id: projectId }, body: services.length ? { services } : undefined },
+      {
+        path: { id: projectId },
+        query: scopeQuery,
+        body: services.length ? { services } : undefined,
+      },
       { onSuccess: (op) => setOperationId(op.id), onError: fail('docker.errors.restartFailed') },
     )
   const triggerCleanup = () =>
@@ -90,7 +112,7 @@ export function DockerPage({ projectId }: { projectId: string }) {
       // Stack-wide only (no per-service cleanup), and deliberately no
       // `removeVolumes`/`removeImages` — cleanup removes containers and the
       // compose-created network, never a volume or an image, unasked.
-      { path: { id: projectId }, body: undefined },
+      { path: { id: projectId }, query: scopeQuery, body: undefined },
       {
         onSuccess: (op) => setOperationId(op.id),
         onError: fail('docker.errors.cleanupFailed'),
@@ -98,9 +120,32 @@ export function DockerPage({ projectId }: { projectId: string }) {
       },
     )
 
-  if (status.isPending) return <Spinner label={t('common.loading')} block />
+  // The scope bar renders through every state below, loading and error
+  // included — a scope that 400s/404s/409s (an unknown session, one that
+  // shares the project checkout, or a worktree that is no longer on disk;
+  // see scope.ts) is exactly when a reader most needs the switcher to pick
+  // a different one, not the moment to hide it.
+  const scopeBar = <DockerScopeBar projectId={projectId} sessionId={sessionId} />
+
+  if (status.isPending) {
+    return (
+      <Stack gap={6}>
+        <PageHeader title={t('docker.heading')} description={t('docker.lead')} />
+        {scopeBar}
+        <Spinner label={t('common.loading')} block />
+      </Stack>
+    )
+  }
   if (status.isError || !status.data) {
-    return <Alert>{apiErrorMessage(status.error, t('docker.loadFailed'))}</Alert>
+    return (
+      <Stack gap={6}>
+        <PageHeader title={t('docker.heading')} description={t('docker.lead')} />
+        {scopeBar}
+        <Alert tone="danger" title={sessionId ? t('docker.scope.errorTitle') : undefined}>
+          {apiErrorMessage(status.error, t('docker.loadFailed'))}
+        </Alert>
+      </Stack>
+    )
   }
 
   const data = status.data
@@ -120,11 +165,17 @@ export function DockerPage({ projectId }: { projectId: string }) {
   return (
     <Stack gap={6}>
       <PageHeader title={t('docker.heading')} description={t('docker.lead')} />
+      {scopeBar}
 
       {!configFound ? (
         <EmptyState
           title={t('docker.empty.title')}
-          description={t('docker.empty.description', { path: data.projectPath })}
+          // `scopePath`, not `projectPath`: at session scope this is the
+          // session's own worktree, and a fresh worktree holds only
+          // *tracked* files — a gitignored `.env` compose needs is not
+          // there yet, which is exactly what this path tells the reader to
+          // go create.
+          description={t('docker.empty.description', { path: data.scopePath })}
         />
       ) : (
         <>
@@ -227,6 +278,7 @@ export function DockerPage({ projectId }: { projectId: string }) {
 
           <ServiceList
             projectId={projectId}
+            sessionId={sessionId}
             status={data}
             startDisabled={startDisabled}
             stopDisabled={stopDisabled}

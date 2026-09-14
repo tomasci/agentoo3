@@ -10,6 +10,7 @@ import type { DockerCli, DockerResult, DockerStream } from '../src/features/dock
 
 const FIXTURES = join(import.meta.dir, 'fixtures', 'docker')
 const FILES = { base: '/opt/agentoo/projects/demo/repo/compose.yaml' }
+const RUN = { cwd: '/opt/agentoo/projects/demo/repo', env: {} }
 
 const UNSET: DockerResult = { ok: false, stdout: '', stderr: 'unset', exitCode: 1 }
 
@@ -39,7 +40,7 @@ test('parses services, ports (short and long), depends_on as a map or an array, 
   const configJson = await readFile(join(FIXTURES, 'compose-config.json'), 'utf8')
   const cli = fakeCli({ config: ok(configJson) })
 
-  const result = await getComposeConfig('agentoo-demo', FILES, '/opt/agentoo/projects/demo/repo', cli)
+  const result = await getComposeConfig('agentoo-demo', FILES, RUN, cli)
   expect(result.ok).toBe(true)
   expect(result.configError).toBeNull()
 
@@ -68,7 +69,7 @@ test('a broken compose file degrades to a trimmed configError and (if possible) 
     config: fail('yaml: line 4: mapping values are not allowed in this context'),
     services: ok('web\nworker\n'),
   })
-  const result = await getComposeConfig('agentoo-demo', FILES, '/opt/agentoo/projects/demo/repo', cli)
+  const result = await getComposeConfig('agentoo-demo', FILES, RUN, cli)
   expect(result.ok).toBe(false)
   expect(result.configError).toContain('mapping values are not allowed')
   expect(result.services.map((s) => s.name)).toEqual(['web', 'worker'])
@@ -78,13 +79,13 @@ test('a broken compose file degrades to a trimmed configError and (if possible) 
 
 test('configError is truncated to 2000 characters', async () => {
   const cli = fakeCli({ config: fail('x'.repeat(5000)), services: fail('also broken') })
-  const result = await getComposeConfig('agentoo-demo', FILES, '/opt/agentoo/projects/demo/repo', cli)
+  const result = await getComposeConfig('agentoo-demo', FILES, RUN, cli)
   expect(result.configError?.length).toBe(2000)
 })
 
 test('an unparseable JSON response also degrades rather than throwing', async () => {
   const cli = fakeCli({ config: ok('not json'), services: ok('web\n') })
-  const result = await getComposeConfig('agentoo-demo', FILES, '/opt/agentoo/projects/demo/repo', cli)
+  const result = await getComposeConfig('agentoo-demo', FILES, RUN, cli)
   expect(result.ok).toBe(false)
   expect(result.services.map((s) => s.name)).toEqual(['web'])
 })

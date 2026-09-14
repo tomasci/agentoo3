@@ -53,6 +53,8 @@ const testEnv = { ...real.env, PROJECTS_DIR: TEST_PROJECTS_DIR, DOCKER_ENABLED: 
 mock.module(`${B}/env.ts`, () => ({ env: testEnv, hasClaudeCredential: real.hasClaudeCredential }))
 afterAll(async () => {
   mock.module(`${B}/env.ts`, () => real)
+  mock.module(`${B}/features/projects/service.ts`, () => realProjects)
+  mock.module(`${B}/features/docker/operations.ts`, () => realOperations)
   await rm(TEST_PROJECTS_DIR, { recursive: true, force: true })
 })
 
@@ -81,7 +83,16 @@ const projectDto = {
   updatedAt: '2024-01-01T00:00:00.000Z',
 }
 
+// Spread from the real module, not hand-rolled: `mock.module` replaces this
+// specifier for the whole test process, and projects/service.ts has real
+// consumers elsewhere in this suite that need every one of its exports.
+// Restored in afterAll for the same reason.
+const realProjects = { ...(await import(`${B}/features/projects/service.ts`)) } as Record<
+  string,
+  unknown
+>
 mock.module(`${B}/features/projects/service.ts`, () => ({
+  ...realProjects,
   getProject: async (id: string) => {
     if (id !== PROJECT_ID) throw notFound('Project')
     return projectDto
@@ -135,8 +146,21 @@ mock.module(`${B}/queue/index.ts`, () => ({
   enqueueDockerOp: async () => ({}),
 }))
 
+// Spread from the real module (not a bare replace) and restored in afterAll:
+// operations.ts exports far more than the handful this file's own tests
+// reach, and leaving this un-restored is the same class of hazard Defect 2
+// was -- whichever test file happens to run after this one (including one
+// that asks for the *real* operations.ts, like a lock-key test) would
+// otherwise get this file's partial stand-in instead.
+const realOperations = { ...(await import(`${B}/features/docker/operations.ts`)) } as Record<
+  string,
+  unknown
+>
 mock.module(`${B}/features/docker/operations.ts`, () => ({
-  activeOperationForProject: async () => undefined,
+  ...realOperations,
+  activeOperationForScope: async () => undefined,
+  dockerLockScope: (projectId: string, sessionId: string | null) =>
+    sessionId === null ? projectId : `${projectId}:s-${sessionId}`,
   createOperation: async () => {
     throw new Error('not used in this test')
   },
@@ -216,7 +240,7 @@ test('a compose project assembles daemon, services, containers, foreignStacks an
   await mkdir(PROJECT_REPO, { recursive: true })
   await writeFile(COMPOSE_FILE, '# placeholder — detection only stats existence\n')
 
-  const state = await getProjectDockerState(PROJECT_ID, fakeCli())
+  const state = await getProjectDockerState(PROJECT_ID, undefined, fakeCli())
 
   expect(state.projectId).toBe(PROJECT_ID)
   expect(state.projectPath).toBe(PROJECT_REPO)
@@ -262,7 +286,7 @@ test('a broken compose file still answers with configError set and containers st
   await writeFile(COMPOSE_FILE, '# placeholder\n')
 
   const cli = fakeCli({ config: { stderr: 'yaml: line 3: did not find expected key' } })
-  const state = await getProjectDockerState(PROJECT_ID, cli)
+  const state = await getProjectDockerState(PROJECT_ID, undefined, cli)
 
   expect(state.configError).toContain('did not find expected key')
   expect(state.services).toEqual([])
@@ -289,7 +313,7 @@ test('a project with no compose file and no Dockerfile reports an empty, quiet s
     },
   }
 
-  const state = await getProjectDockerState(PROJECT_ID, cli)
+  const state = await getProjectDockerState(PROJECT_ID, undefined, cli)
   expect(state.detection.hasCompose).toBe(false)
   expect(state.detection.hasDockerfile).toBe(false)
   expect(state.composeProject).toBeNull()

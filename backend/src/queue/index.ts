@@ -69,10 +69,19 @@ export interface IdeaHandoffSweepJob {
  * because the worker re-validates rather than trusting a queue payload (see
  * app.ts's own comment on why: a queue payload is data, from a process that
  * may not be this one).
+ *
+ * `sessionId` (null at repo scope) is what the worker rebuilds a
+ * `DockerScopeRef` from for every naming/label/env call it makes — see
+ * features/docker/scope.ts for how it was resolved, and names.ts for why the
+ * two fields always travel together rather than a single scoped name.
+ * `projectPath` is the directory this operation actually runs in: the
+ * project's repo/ checkout at repo scope, a session's own worktree once one
+ * is in play — never the repo path unconditionally.
  */
 export interface DockerOpJob {
   operationId: string
   projectId: string
+  sessionId: string | null
   slug: string
   mode: 'compose' | 'dockerfile'
   kind: 'up' | 'stop' | 'restart' | 'down'

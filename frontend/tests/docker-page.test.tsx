@@ -1,12 +1,24 @@
 // The Docker page's own gating and wiring: what renders for each of the
 // backend's real states (no config, daemon down, broken compose, foreign
 // stacks), the stack-wide and per-service controls, the 409-conflict toast,
-// the plain-Dockerfile port form, and the access-URL list — everything this
-// file can prove without a real docker daemon, which this host does not
-// have. The stream hooks (use-operation-stream.ts, use-container-logs.ts)
-// are exercised here only enough to prove they connect to the right URL at
-// the right time; their frame parsing is the same boundary-validation idiom
-// as sessions/lib/streamed-message.ts and is not re-proven per file.
+// the plain-Dockerfile port form, the access-URL list, and — the reason this
+// file mounts through the real router rather than rendering `<DockerPage>`
+// directly the way it used to — worktree scope: the scope bar's switcher,
+// the banner, and that a mutation/status call carries `sessionId` only at
+// session scope, never at repo scope. Everything this file can prove without
+// a real docker daemon, which this host does not have. The stream hooks
+// (use-operation-stream.ts, use-container-logs.ts) are exercised here only
+// enough to prove they connect to the right URL at the right time; their
+// frame parsing is the same boundary-validation idiom as
+// sessions/lib/streamed-message.ts and is not re-proven per file.
+//
+// Router-mounted, same shape as tests/session-idea-link.test.tsx: a memory
+// history, the generated clients mocked per-file through ./mock-module, and
+// the project-shell queries seeded so nothing reaches for a backend. Needed
+// here (this file used to render `<DockerPage>` directly) because the scope
+// bar (docker-scope-bar.tsx) uses `useNavigate`, which throws outside a
+// `RouterProvider` — and because switching scope is, correctly, a real
+// navigation this file should be able to observe landing on the right route.
 //
 // A real i18next instance, not raw keys: `bun test` runs every file in one
 // shared process (see this suite's own hazard note), and whichever file
@@ -42,9 +54,13 @@ plugin({
 
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
+import { Provider as JotaiProvider } from 'jotai'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { routeTree } from '../src/app/router'
 import type { GetApiProjectsIdDockerStatus200 as Status } from '../src/shared/api/generated/types/GetApiProjectsIdDocker'
+import type { GetApiProjectsIdSessionsStatus200 as SessionsStatus } from '../src/shared/api/generated/types/GetApiProjectsIdSessions'
 import { mockModule } from './mock-module'
 
 // Real translations from here on — see the header comment above.
@@ -57,6 +73,7 @@ const UP_CLIENT = '@/shared/api/generated/clients/postApiProjectsIdDockerUp'
 const STOP_CLIENT = '@/shared/api/generated/clients/postApiProjectsIdDockerStop'
 const RESTART_CLIENT = '@/shared/api/generated/clients/postApiProjectsIdDockerRestart'
 const DOWN_CLIENT = '@/shared/api/generated/clients/postApiProjectsIdDockerDown'
+const SESSIONS_CLIENT = '@/shared/api/generated/clients/getApiProjectsIdSessions'
 
 const daemon = (o: Partial<Status['daemon']> = {}): Status['daemon'] => ({
   cliInstalled: true,
@@ -68,11 +85,15 @@ const daemon = (o: Partial<Status['daemon']> = {}): Status['daemon'] => ({
 })
 
 /** A compose project with one running service (`web`, one container
- *  publishing a tcp and a udp port) and one never-started service (`db`). */
+ *  publishing a tcp and a udp port) and one never-started service (`db`).
+ *  Repo scope by default (`sessionId: null`, `scopePath` == `projectPath`) —
+ *  the scope tests below override both together. */
 function composeStatus(overrides: Partial<Status> = {}): Status {
   return {
     projectId: 'p1',
+    sessionId: null,
     projectPath: '/srv/p1',
+    scopePath: '/srv/p1',
     composeProject: 'p1',
     daemon: daemon(),
     detection: {
@@ -142,8 +163,10 @@ function composeStatus(overrides: Partial<Status> = {}): Status {
 function dockerfileStatus(overrides: Partial<Status> = {}): Status {
   return {
     projectId: 'p1',
-    projectPath: '/srv/p1',
+    sessionId: null,
     composeProject: null,
+    projectPath: '/srv/p1',
+    scopePath: '/srv/p1',
     daemon: daemon(),
     detection: {
       hasCompose: false,
@@ -179,6 +202,7 @@ const noConfigStatus = (): Status =>
 const operation = (o: Partial<Record<string, unknown>> = {}) => ({
   id: 'op1',
   projectId: 'p1',
+  sessionId: null,
   kind: 'up',
   services: [],
   status: 'queued',
@@ -190,13 +214,52 @@ const operation = (o: Partial<Record<string, unknown>> = {}) => ({
   ...o,
 })
 
+type SessionDto = SessionsStatus[number]
+
+const sessionFixture = (o: Partial<SessionDto> & { id: string }): SessionDto => ({
+  projectId: 'p1',
+  ideaId: null,
+  title: null,
+  status: 'idle',
+  orchestrator: null,
+  worktreePath: null,
+  branch: null,
+  baseBranch: null,
+  baseSha: null,
+  baseNote: null,
+  workingDir: '/srv/p1',
+  isolated: false,
+  sdkSessionId: null,
+  maxBudgetUsd: null,
+  lastError: null,
+  messageCount: 0,
+  totalCostUsd: 0,
+  pendingPrompts: 0,
+  createdAt: T,
+  updatedAt: T,
+  ...o,
+})
+
 let currentStatus: Status = composeStatus()
+let statusReject: unknown = null
+let currentSessions: SessionDto[] = []
+
+type StatusCall = { path: { id: string }; query?: { sessionId?: string } }
+let statusCalls: StatusCall[] = []
 
 await mockModule(STATUS_CLIENT, () => ({
-  getApiProjectsIdDocker: async () => ({ data: currentStatus }),
+  getApiProjectsIdDocker: async (opts: StatusCall) => {
+    statusCalls.push(opts)
+    if (statusReject) throw statusReject
+    return { data: currentStatus }
+  },
 }))
 
-type Call = { path: { id: string }; body?: unknown }
+await mockModule(SESSIONS_CLIENT, () => ({
+  getApiProjectsIdSessions: async () => ({ data: currentSessions }),
+}))
+
+type Call = { path: { id: string }; query?: { sessionId?: string }; body?: unknown }
 
 let upCalls: Call[] = []
 let upReject: unknown = null
@@ -232,7 +295,7 @@ await mockModule(DOWN_CLIENT, () => ({
   },
 }))
 
-const { DockerPage } = await import('../src/features/docker/components/docker-page')
+const { REPO_SCOPE } = await import('../src/features/docker/components/docker-scope-bar')
 const { Toaster, toaster } = await import('../src/shared/ui/overlay/toast')
 
 /** happy-dom ships no `EventSource` (verified in
@@ -255,31 +318,67 @@ afterAll(() => {
   ;(globalThis as { EventSource?: unknown }).EventSource = realEventSource
 })
 
+const project = {
+  id: 'p1',
+  name: 'Alpha',
+  slug: 'alpha',
+  source: 'clone',
+  remoteUrl: null,
+  sourceName: null,
+  sshKeyId: null,
+  defaultBranch: 'main',
+  status: 'ready',
+  lastError: null,
+  recoveryCommands: null,
+  path: '/srv/p1',
+  createdAt: T,
+  updatedAt: T,
+}
+
 let client: QueryClient
 let container: HTMLDivElement
 let root: Root
 
-async function mount() {
+/** Mounts the real router at `path` — see the header comment for why this
+ *  file needs one at all now. Returns the router itself so a scope-switch
+ *  test can confirm where a navigation actually landed. */
+async function mount(path = '/projects/p1/docker') {
   ;(globalThis as { EventSource?: unknown }).EventSource = TrackedEventSource
   TrackedEventSource.opened = []
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
+  })
+  client.setQueryData([{ url: '/api/projects' }], [project])
+  client.setQueryData([{ url: '/api/ssh-keys' }], [])
+  client.setQueryData([{ url: '/api/health' }], { claudeCredential: true, version: '0.1.41' })
+
   container = document.createElement('div')
   document.body.append(container)
+
+  const router = createRouter({
+    routeTree,
+    history: createMemoryHistory({ initialEntries: [path] }),
+  })
+  await router.load()
+
   root = createRoot(container)
   await act(async () => {
     root.render(
-      <QueryClientProvider client={client}>
-        <Toaster />
-        <DockerPage projectId="p1" />
-      </QueryClientProvider>,
+      <JotaiProvider>
+        <QueryClientProvider client={client}>
+          <Toaster />
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </JotaiProvider>,
     )
   })
-  // The status query resolves over its own chain of microtasks.
-  for (let i = 0; i < 5; i++) {
+  // The status/sessions queries resolve over their own chain of microtasks.
+  for (let i = 0; i < 8; i++) {
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0))
     })
   }
+  return router
 }
 
 const unmount = async () => {
@@ -294,7 +393,13 @@ const unmount = async () => {
 }
 
 beforeEach(() => {
+  // tabsAtom (shared/store/tabs.ts) is backed by real localStorage, and
+  // persists across every test in this shared `bun test` process otherwise.
+  localStorage.clear()
   currentStatus = composeStatus()
+  statusReject = null
+  currentSessions = []
+  statusCalls = []
   upCalls = []
   upReject = null
   stopCalls = []
@@ -336,6 +441,24 @@ const dialogButtons = () => {
   return dialog ? ([...dialog.querySelectorAll('button')] as HTMLElement[]) : []
 }
 const findDialogButton = (text: string) => dialogButtons().find((b) => b.textContent?.includes(text))
+
+/** The scope switcher's own hidden native `<select>` (see select.tsx's
+ *  `ArkSelect.HiddenSelect`) — one per page, always present once the page has
+ *  data, so no further scoping is needed. Its `<option value>`s are real
+ *  session ids (or `REPO_SCOPE`), never translated text, so a test can drive
+ *  it without depending on copy. */
+const scopeSelect = () => {
+  const select = container.querySelector('select')
+  if (!select) throw new Error('no scope select rendered')
+  return select as HTMLSelectElement
+}
+const chooseScope = async (value: string) => {
+  const select = scopeSelect()
+  select.value = value
+  await act(async () => {
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+}
 
 // --- 1. no config detected ------------------------------------------------------
 
@@ -409,9 +532,9 @@ test('a stack running under another name is named as a warning, not adopted', as
   expect(container.textContent).toContain('p1-manual')
 })
 
-// --- 6. stack-wide start/stop/restart send whole-stack bodies --------------------
+// --- 6. stack-wide start/stop/restart send whole-stack bodies, repo scope sends no sessionId ---
 
-test('Start all sends no services key at all — the whole-stack request', async () => {
+test('Start all sends no services key and no sessionId — the whole-stack, repo-scope request', async () => {
   await mount()
   const start = findButton('Start all')
   if (!start) throw new Error('no Start all button')
@@ -419,6 +542,7 @@ test('Start all sends no services key at all — the whole-stack request', async
 
   expect(upCalls).toHaveLength(1)
   expect(upCalls[0]?.path).toEqual({ id: 'p1' })
+  expect(upCalls[0]?.query).toBeUndefined()
   expect((upCalls[0]?.body as { services?: string[] })?.services).toBeUndefined()
 })
 
@@ -430,6 +554,7 @@ test('Stop all sends no body at all', async () => {
 
   expect(stopCalls).toHaveLength(1)
   expect(stopCalls[0]?.body).toBeUndefined()
+  expect(stopCalls[0]?.query).toBeUndefined()
 })
 
 // --- 7. per-service start is scoped to that one service ---------------------------
@@ -545,4 +670,110 @@ test("a container's logs only start streaming once its own pane is opened", asyn
 
   expect(logStreams()).toHaveLength(1)
   expect(logStreams()[0]).toContain('/projects/p1/docker/containers/c-web/logs')
+})
+
+// --- 13. worktree scope: the switcher, the banner, and what each scope sends -----
+
+test('at repo scope, the switcher offers only the project checkout when no session is isolated', async () => {
+  currentSessions = [sessionFixture({ id: 's2', title: 'Shared session', isolated: false })]
+  await mount()
+
+  expect(container.textContent).toContain("the project's own repo/ checkout")
+  const options = [...scopeSelect().querySelectorAll('option')]
+  expect(options).toHaveLength(1)
+  expect(options[0]?.value).toBe(REPO_SCOPE)
+  expect(scopeSelect().value).toBe(REPO_SCOPE)
+})
+
+test('an isolated session is offered in the switcher; a shared-checkout one is not', async () => {
+  currentSessions = [
+    sessionFixture({ id: 's1', title: 'Refactor auth', branch: 'feature/refactor-auth', isolated: true }),
+    sessionFixture({ id: 's2', title: 'Shared session', isolated: false }),
+  ]
+  await mount()
+
+  const values = [...scopeSelect().querySelectorAll('option')].map((o) => o.value)
+  expect(values).toEqual([REPO_SCOPE, 's1'])
+})
+
+test("session scope's status call, and every mutation it triggers, carry that session's id — repo scope never does", async () => {
+  currentSessions = [sessionFixture({ id: 's1', title: 'Refactor auth', isolated: true })]
+  currentStatus = composeStatus({ sessionId: 's1', scopePath: '/srv/worktrees/s1' })
+  await mount('/projects/p1/sessions/s1/docker')
+
+  expect(statusCalls.at(-1)?.query).toEqual({ sessionId: 's1' })
+
+  const start = findButton('Start all')
+  if (!start) throw new Error('no Start all button')
+  await click(start)
+
+  expect(upCalls).toHaveLength(1)
+  expect(upCalls[0]?.query).toEqual({ sessionId: 's1' })
+})
+
+test('the banner names the session and its branch at session scope, distinct from the repo-scope wording', async () => {
+  currentSessions = [
+    sessionFixture({ id: 's1', title: 'Refactor auth', branch: 'feature/refactor-auth', isolated: true }),
+  ]
+  currentStatus = composeStatus({ sessionId: 's1', scopePath: '/srv/worktrees/s1' })
+  await mount('/projects/p1/sessions/s1/docker')
+
+  expect(container.textContent).toContain('Refactor auth (feature/refactor-auth)')
+  expect(container.textContent).not.toContain("the project's own repo/ checkout")
+})
+
+test('the empty state shows scopePath, not projectPath, so a reader knows where to drop a gitignored .env', async () => {
+  currentSessions = [sessionFixture({ id: 's1', isolated: true })]
+  currentStatus = noConfigStatus()
+  currentStatus = { ...currentStatus, sessionId: 's1', scopePath: '/srv/worktrees/s1' }
+  await mount('/projects/p1/sessions/s1/docker')
+
+  expect(container.textContent).toContain('/srv/worktrees/s1')
+  expect(container.textContent).not.toContain('/srv/p1 ')
+})
+
+test('picking a session from the switcher navigates to that session\'s own Docker page and re-scopes every call', async () => {
+  currentSessions = [sessionFixture({ id: 's1', title: 'Refactor auth', isolated: true })]
+  const router = await mount('/projects/p1/docker')
+
+  await chooseScope('s1')
+  await settle()
+
+  expect(router.state.location.pathname).toBe('/projects/p1/sessions/s1/docker')
+  expect(statusCalls.at(-1)?.query).toEqual({ sessionId: 's1' })
+})
+
+test('picking the project checkout from a session scope navigates back to the project-level Docker page', async () => {
+  currentSessions = [sessionFixture({ id: 's1', title: 'Refactor auth', isolated: true })]
+  currentStatus = composeStatus({ sessionId: 's1', scopePath: '/srv/worktrees/s1' })
+  const router = await mount('/projects/p1/sessions/s1/docker')
+
+  await chooseScope(REPO_SCOPE)
+  await settle()
+
+  expect(router.state.location.pathname).toBe('/projects/p1/docker')
+})
+
+test('a session the project no longer lists still shows a selectable placeholder, not a blank trigger', async () => {
+  currentSessions = []
+  currentStatus = composeStatus({ sessionId: 'ghost', scopePath: '/srv/worktrees/ghost' })
+  await mount('/projects/p1/sessions/ghost/docker')
+
+  expect(scopeSelect().value).toBe('ghost')
+  expect(container.textContent).toContain('This session')
+})
+
+test('a session that shares the project checkout (no worktree) is reported plainly, not as a generic load failure', async () => {
+  currentSessions = [sessionFixture({ id: 's1', isolated: true })]
+  statusReject = {
+    response: {
+      status: 400,
+      data: { error: 'This session shares the project checkout; it has no worktree of its own to run docker in' },
+    },
+  }
+  await mount('/projects/p1/sessions/s1/docker')
+
+  expect(container.textContent).toContain(
+    'This session shares the project checkout; it has no worktree of its own to run docker in',
+  )
 })

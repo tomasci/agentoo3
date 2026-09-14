@@ -51,6 +51,13 @@ export function SessionRoute() {
   return <SessionPage projectId={projectId} sessionId={sessionId} />
 }
 
+export function SessionDockerRoute() {
+  const { projectId, sessionId } = useParams({
+    from: '/projects/$projectId/sessions/$sessionId/docker',
+  })
+  return <DockerPage projectId={projectId} sessionId={sessionId} />
+}
+
 /**
  * An empty tab: choose what it is for.
  *

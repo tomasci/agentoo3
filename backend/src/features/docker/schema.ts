@@ -112,7 +112,20 @@ export const dockerImageSchema = z.object({
 
 export const dockerStateSchema = z.object({
   projectId: z.string().uuid(),
-  projectPath: z.string(),
+  sessionId: z.string().uuid().nullable().openapi({
+    description:
+      "null = the project's own repo/ checkout; a session id = that session's own worktree.",
+  }),
+  projectPath: z.string().openapi({
+    description:
+      "Always the project's repo/ checkout, regardless of scope — see scopePath for the " +
+      'directory this state was actually read from.',
+  }),
+  scopePath: z.string().openapi({
+    description:
+      'The directory this state was read from: equal to projectPath at repo scope, or the ' +
+      "session's own worktree once ?sessionId is given.",
+  }),
   composeProject: z.string().nullable(),
   daemon: daemonSchema,
   detection: detectionSchema,
@@ -149,6 +162,7 @@ export const dockerOperationStatusSchema = z.enum(['queued', 'running', 'succeed
 export const dockerOperationSchema = z.object({
   id: z.string().uuid(),
   projectId: z.string().uuid(),
+  sessionId: z.string().uuid().nullable(),
   kind: dockerOperationKindSchema,
   services: z.array(z.string()).openapi({ description: 'Empty means the whole stack.' }),
   status: dockerOperationStatusSchema,

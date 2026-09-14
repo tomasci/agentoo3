@@ -8,6 +8,13 @@
 // Persist-then-publish throughout, exactly like lib/events.ts: a reconnecting
 // SSE client replays the list it missed rather than this module trying to
 // make pub/sub itself reliable.
+//
+// The per-operation record and its oplog stay project-wide (`op`, `oplog`,
+// `project-ops` below): GET /projects/{id}/docker/operations answers every
+// scope's history in one list, and each record now carries `sessionId` so a
+// consumer can filter it client-side. Only the per-operation *lock* is scoped
+// narrower than the project, because that is the one thing that actually has
+// to serialize independently per session's worktree — see `dockerLockScope`.
 
 import Redis from 'ioredis'
 import { env } from '@/env'
@@ -18,7 +25,7 @@ const OPERATION_TTL_SECONDS = 3600
 /** Matches the brief's `LTRIM … -2000 -1` — the oplog's own ring-buffer cap. */
 const OPLOG_MAX_LINES = 2000
 
-const lockKey = (projectId: string) => `agentoo:docker:lock:${projectId}`
+const lockKey = (scope: string) => `agentoo:docker:lock:${scope}`
 const operationKey = (operationId: string) => `agentoo:docker:op:${operationId}`
 const oplogKey = (operationId: string) => `agentoo:docker:oplog:${operationId}`
 const projectOpsKey = (projectId: string) => `agentoo:docker:project-ops:${projectId}`
@@ -57,12 +64,14 @@ function redis(): Redis {
 export async function createOperation(input: {
   id: string
   projectId: string
+  sessionId: string | null
   kind: DockerOperationKind
   services: string[]
 }): Promise<DockerOperationDto> {
   const record: DockerOperationDto = {
     id: input.id,
     projectId: input.projectId,
+    sessionId: input.sessionId,
     kind: input.kind,
     services: input.services,
     status: 'queued',
@@ -82,7 +91,16 @@ export async function getOperation(operationId: string): Promise<DockerOperation
   const raw = await redis().get(operationKey(operationId))
   if (!raw) return undefined
   try {
-    return JSON.parse(raw) as DockerOperationDto
+    const parsed = JSON.parse(raw) as Partial<DockerOperationDto>
+    // dockerOperationSchema requires `sessionId` (nullable, not optional), but
+    // a record `createOperation` wrote before this feature's worktree scope
+    // existed never had the field at all. Defaulting it here, at the one
+    // place a stored record is parsed back, is what keeps GET
+    // .../docker/operations honouring its own documented shape for the up-to
+    // -OPERATION_TTL_SECONDS a pre-migration record can still be read back —
+    // every such record predates sessions having worktrees, so it was always
+    // repo scope.
+    return { ...parsed, sessionId: parsed.sessionId ?? null } as DockerOperationDto
   } catch {
     logger.warn(`Docker operation ${operationId} had a malformed record in Redis`)
     return undefined
@@ -151,27 +169,43 @@ export async function finishOperation(
   return updated
 }
 
-// --- the per-project lock ----------------------------------------------------
+// --- the per-scope lock -------------------------------------------------------
 //
 // Claim-don't-check, the same discipline session-run.worker.ts's `claimTurn`
 // uses for a different mutex: the POST route below only *peeks* at this key to
 // give a fast, friendly 409 naming the operation already running, but the
 // worker's own SET NX is what actually serializes two operations on one
-// project — a route-side check-then-enqueue would leave a window between the
+// scope — a route-side check-then-enqueue would leave a window between the
 // check and the job actually running where a second request could slip through.
 
+/**
+ * The Redis-key identity of one project's (or one session's) serialization
+ * boundary: the bare project id at repo scope — BYTE-IDENTICAL to the key
+ * this feature has always used, so a lock held across a deploy is still found
+ * under it — and `<projectId>:s-<sessionId>` once a session's own worktree is
+ * in play, a key nothing before this feature ever wrote (nothing migrates).
+ *
+ * The full session id, not the truncated form names.ts's `scopeKey` computes
+ * for docker resource names: a Redis key has no length or charset limit, so
+ * there is nothing here for that truncation to protect against, and the full
+ * id is easier to recognise when reading keys by hand.
+ */
+export function dockerLockScope(projectId: string, sessionId: string | null): string {
+  return sessionId === null ? projectId : `${projectId}:s-${sessionId}`
+}
+
 /** Best-effort read for the POST routes' 409 — not the mutex itself. */
-export async function activeOperationForProject(projectId: string): Promise<string | undefined> {
-  const value = await redis().get(lockKey(projectId))
+export async function activeOperationForScope(scope: string): Promise<string | undefined> {
+  const value = await redis().get(lockKey(scope))
   return value ?? undefined
 }
 
 export async function claimOperationLock(
-  projectId: string,
+  scope: string,
   operationId: string,
   ttlMs: number,
 ): Promise<boolean> {
-  const result = await redis().set(lockKey(projectId), operationId, 'PX', ttlMs, 'NX')
+  const result = await redis().set(lockKey(scope), operationId, 'PX', ttlMs, 'NX')
   return result === 'OK'
 }
 
@@ -189,8 +223,8 @@ else
 end
 `
 
-export async function releaseOperationLock(projectId: string, operationId: string): Promise<void> {
-  await redis().eval(RELEASE_LOCK_SCRIPT, 1, lockKey(projectId), operationId)
+export async function releaseOperationLock(scope: string, operationId: string): Promise<void> {
+  await redis().eval(RELEASE_LOCK_SCRIPT, 1, lockKey(scope), operationId)
 }
 
 // --- the output log -----------------------------------------------------------

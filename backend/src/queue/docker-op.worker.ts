@@ -18,11 +18,14 @@ import {
   runArgs,
 } from '@/features/docker/args'
 import { type DockerCli, realDockerCli } from '@/features/docker/cli'
+import { composeEnvFor } from '@/features/docker/compose-env'
 import { inspectImage } from '@/features/docker/inspect'
+import type { DockerScopeRef } from '@/features/docker/names'
 import { containerName, imageReference } from '@/features/docker/names'
 import {
   appendOperationOutput,
   claimOperationLock,
+  dockerLockScope,
   finishOperation,
   markOperationRunning,
   releaseOperationLock,
@@ -45,6 +48,7 @@ interface Step {
   label: string
   args: string[]
   cwd?: string
+  env?: Record<string, string>
 }
 
 /** The argv sequence for one operation. Async because the dockerfile `up`
@@ -52,6 +56,8 @@ interface Step {
  * already exists — a read, done here rather than by the route, since only
  * the worker knows the operation is actually about to run. */
 async function stepsFor(job: DockerOpJob, cli: DockerCli): Promise<Step[]> {
+  const ref: DockerScopeRef = { slug: job.slug, sessionId: job.sessionId }
+
   if (job.mode === 'compose') {
     if (!job.composeProjectName || !job.composeFiles) {
       throw new Error(
@@ -61,6 +67,10 @@ async function stepsFor(job: DockerOpJob, cli: DockerCli): Promise<Step[]> {
     const name = job.composeProjectName
     const files = job.composeFiles
     const services = job.services
+    // Same env `getComposeConfig` (the read path) resolves the file with, so
+    // a `${AGENTOO_*}` substitution never binds differently for `up` than it
+    // did for whatever access URL the dashboard already showed.
+    const composeEnv = composeEnvFor(ref)
 
     switch (job.kind) {
       case 'up':
@@ -74,6 +84,7 @@ async function stepsFor(job: DockerOpJob, cli: DockerCli): Promise<Step[]> {
               removeOrphans: job.removeOrphans,
             }),
             cwd: job.projectPath,
+            env: composeEnv,
           },
         ]
       case 'stop':
@@ -82,6 +93,7 @@ async function stepsFor(job: DockerOpJob, cli: DockerCli): Promise<Step[]> {
             label: 'compose stop',
             args: composeStopArgs(name, files, services),
             cwd: job.projectPath,
+            env: composeEnv,
           },
         ]
       case 'restart':
@@ -90,6 +102,7 @@ async function stepsFor(job: DockerOpJob, cli: DockerCli): Promise<Step[]> {
             label: 'compose restart',
             args: composeRestartArgs(name, files, services),
             cwd: job.projectPath,
+            env: composeEnv,
           },
         ]
       case 'down':
@@ -101,13 +114,15 @@ async function stepsFor(job: DockerOpJob, cli: DockerCli): Promise<Step[]> {
               removeImages: job.removeImages,
             }),
             cwd: job.projectPath,
+            env: composeEnv,
           },
         ]
     }
   }
 
-  // The plain-Dockerfile path.
-  const name = containerName(job.slug)
+  // The plain-Dockerfile path. No env: compose-style substitution has no
+  // meaning for a bare `docker build`/`docker run`.
+  const name = containerName(ref)
 
   if (job.kind === 'stop') return [{ label: 'docker stop', args: dockerStopArgs(name) }]
   if (job.kind === 'restart') return [{ label: 'docker restart', args: dockerRestartArgs(name) }]
@@ -125,19 +140,19 @@ async function stepsFor(job: DockerOpJob, cli: DockerCli): Promise<Step[]> {
     throw new Error(`Docker operation ${job.operationId}: up job missing containerPort/protocol`)
   }
   const steps: Step[] = []
-  const image = await inspectImage(imageReference(job.slug), cli)
+  const image = await inspectImage(imageReference(ref), cli)
   if (job.build || !image.exists) {
     if (!job.dockerfileAbsPath) {
       throw new Error(`Docker operation ${job.operationId}: up job missing dockerfileAbsPath`)
     }
     steps.push({
       label: 'docker build',
-      args: buildArgs(job.slug, job.dockerfileAbsPath, job.projectPath),
+      args: buildArgs(ref, job.dockerfileAbsPath, job.projectPath),
     })
   }
   steps.push({
     label: 'docker run',
-    args: runArgs(job.slug, {
+    args: runArgs(ref, {
       hostPort: job.hostPort,
       containerPort: job.containerPort,
       protocol: job.protocol,
@@ -150,7 +165,10 @@ async function stepsFor(job: DockerOpJob, cli: DockerCli): Promise<Step[]> {
  * oplog as it arrives — not buffered until the step finishes, which is the
  * whole point of streaming a `compose up --build` that can run for minutes. */
 async function runStep(step: Step, operationId: string, cli: DockerCli): Promise<number> {
-  const stream = cli.stream(step.args, step.cwd ? { cwd: step.cwd } : {})
+  const stream = cli.stream(step.args, {
+    ...(step.cwd ? { cwd: step.cwd } : {}),
+    ...(step.env ? { env: step.env } : {}),
+  })
   try {
     for await (const line of stream.lines) {
       await appendOperationOutput(operationId, { stream: line.stream, text: line.line })
@@ -162,11 +180,12 @@ async function runStep(step: Step, operationId: string, cli: DockerCli): Promise
 }
 
 export async function runDockerOp(job: DockerOpJob, cli: DockerCli = realDockerCli): Promise<void> {
-  const claimed = await claimOperationLock(job.projectId, job.operationId, env.DOCKER_OP_TIMEOUT_MS)
+  const lockScope = dockerLockScope(job.projectId, job.sessionId)
+  const claimed = await claimOperationLock(lockScope, job.operationId, env.DOCKER_OP_TIMEOUT_MS)
   if (!claimed) {
-    // The route's own check (activeOperationForProject) is best-effort, not
+    // The route's own check (activeOperationForScope) is best-effort, not
     // the mutex — this is: a second job that lost the race to actually claim
-    // the per-project lock ends here rather than running alongside another
+    // the per-scope lock ends here rather than running alongside another
     // operation against the same containers.
     await finishOperation(
       job.operationId,
@@ -201,7 +220,7 @@ export async function runDockerOp(job: DockerOpJob, cli: DockerCli = realDockerC
     logger.error(`Docker operation ${job.operationId} failed unexpectedly: ${message}`)
     await finishOperation(job.operationId, 'failed', null, message)
   } finally {
-    await releaseOperationLock(job.projectId, job.operationId)
+    await releaseOperationLock(lockScope, job.operationId)
   }
 }
 

@@ -1,0 +1,10 @@
+// The banner's own text sits directly on Alert's tinted background (see
+// alert.tsx), so it needs no styling of its own beyond spacing between the
+// sentence and the control — both handled by the `Stack` in
+// docker-scope-bar.tsx. This file exists only for the width cap below.
+
+.switcher {
+  // A session's title can run long; the control must not stretch to match
+  // an Alert that itself grows to fill the page.
+  max-width: 22rem;
+}

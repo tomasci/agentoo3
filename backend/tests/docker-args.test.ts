@@ -29,6 +29,7 @@ const FILES_WITH_OVERRIDE = {
   base: '/opt/agentoo/projects/demo/repo/compose.yaml',
   override: '/opt/agentoo/projects/demo/repo/compose.override.yaml',
 }
+const REPO_SCOPE = { slug: 'demo', sessionId: null }
 
 test('compose config always carries -f and -p explicitly', () => {
   expect(composeConfigArgs('agentoo-demo', FILES)).toEqual([
@@ -210,7 +211,9 @@ test('image inspect', () => {
 })
 
 test('build: -t before -f before the context, exactly as documented', () => {
-  expect(buildArgs('demo', '/opt/agentoo/projects/demo/repo/Dockerfile', '/opt/agentoo/projects/demo/repo')).toEqual([
+  expect(
+    buildArgs(REPO_SCOPE, '/opt/agentoo/projects/demo/repo/Dockerfile', '/opt/agentoo/projects/demo/repo'),
+  ).toEqual([
     'build',
     '-t',
     'agentoo/demo:latest',
@@ -221,7 +224,7 @@ test('build: -t before -f before the context, exactly as documented', () => {
 })
 
 test('run: no --restart policy, ever', () => {
-  const args = runArgs('demo', { containerPort: 3000, protocol: 'tcp' })
+  const args = runArgs(REPO_SCOPE, { containerPort: 3000, protocol: 'tcp' })
   expect(args).not.toContain('--restart')
   expect(args).toEqual([
     'run',
@@ -239,12 +242,12 @@ test('run: no --restart policy, ever', () => {
 })
 
 test('run: an explicit hostPort is honoured, not 0', () => {
-  const args = runArgs('demo', { hostPort: 8080, containerPort: 3000, protocol: 'udp' })
+  const args = runArgs(REPO_SCOPE, { hostPort: 8080, containerPort: 3000, protocol: 'udp' })
   expect(args).toContain('8080:3000/udp')
 })
 
 test('run: hostPort omitted means the daemon allocates (0)', () => {
-  const args = runArgs('demo', { containerPort: 3000, protocol: 'tcp' })
+  const args = runArgs(REPO_SCOPE, { containerPort: 3000, protocol: 'tcp' })
   expect(args).toContain('0:3000/tcp')
 })
 

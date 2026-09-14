@@ -135,11 +135,12 @@ export interface ComposeConfigResult {
 export async function getComposeConfig(
   composeProjectName: string,
   files: ComposeFiles,
-  cwd: string,
+  run: { cwd: string; env: Record<string, string> },
   cli: DockerCli = realDockerCli,
 ): Promise<ComposeConfigResult> {
   const result = await cli.run(composeConfigArgs(composeProjectName, files), {
-    cwd,
+    cwd: run.cwd,
+    env: run.env,
     timeoutMs: DOCKER_READ_TIMEOUT_MS,
   })
 
@@ -163,7 +164,8 @@ export async function getComposeConfig(
   // for these services come from running containers downstream, never from a
   // hand-rolled YAML parse.
   const names = await cli.run(composeConfigServicesArgs(composeProjectName, files), {
-    cwd,
+    cwd: run.cwd,
+    env: run.env,
     timeoutMs: DOCKER_READ_TIMEOUT_MS,
   })
   const services = names.ok
@@ -226,9 +228,14 @@ export interface ForeignStack {
 /**
  * Stacks compose already knows about that use *our* compose file but are not
  * *our* stack — compose's default project name is the compose file's
- * directory basename, which for every project on this box is `repo` (see
- * lib/paths.ts's `projectRepo`), so a human who ran a bare `docker compose up`
- * made a stack this feature must detect and never adopt.
+ * directory basename, so a human who ran a bare `docker compose up` made a
+ * stack this feature must detect and never adopt. At repo scope that basename
+ * is `repo` for every project on this box (see lib/paths.ts's `projectRepo`);
+ * at worktree scope it is the session's own uuid (`projectWorktree`'s leaf
+ * directory), so the foreign name to watch for differs by scope even though
+ * this function's own signature does not need to change to know it — both
+ * `composeProjectName` and `composeFileAbsPath` already carry the scope by
+ * the time they reach here.
  *
  * Best-effort by contract: any failure here — a parse error, `ls` itself
  * failing — logs a warning and returns `[]`. GET /projects/{id}/docker must

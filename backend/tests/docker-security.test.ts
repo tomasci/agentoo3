@@ -66,12 +66,54 @@ const projectRow = (id: string, slug: string, path: string) => ({
   updatedAt: '2024-01-01T00:00:00.000Z',
 })
 
+// A session of project A, with its own worktree on disk -- for the
+// `?sessionId` coverage this file used to have none of. The suffix
+// names.ts's naming layer derives from this id is also what the Defect 1
+// regression test below reuses to build a slug that used to collide with it.
+const SESSION_A = '33333333-3333-4333-8333-333333333333'
+const SESSION_A_SUFFIX = SESSION_A.replace(/-/g, '').slice(0, 12)
+const WORKTREE_A = join(TEST_PROJECTS_DIR, SLUG_A, 'worktrees', SESSION_A)
+
+// Defect 1 regression: a project whose own slug is shaped exactly like
+// `<other slug>-s-<hex12>` -- an entirely ordinary slug toSlug() produces
+// from nothing more suspicious than a project named "demo s <hex12>". Before
+// the `_` join (see names.ts), this slug's *repo* scope produced the exact
+// same compose-project/container name as session A's *worktree* scope.
+const ATTACKER_PROJECT = '55555555-5555-4555-8555-555555555555'
+const ATTACKER_SLUG = `demo-s-${SESSION_A_SUFFIX}`
+const REPO_ATTACKER = join(TEST_PROJECTS_DIR, ATTACKER_SLUG, 'repo')
+
 const projects = [
   projectRow(PROJECT_A, SLUG_A, REPO_A),
   projectRow(PROJECT_B, SLUG_B, REPO_B),
+  projectRow(ATTACKER_PROJECT, ATTACKER_SLUG, REPO_ATTACKER),
 ]
 
+// Spread from the real module, not hand-rolled: sessions/service.ts has real
+// consumers elsewhere in this suite. Restored in afterAll for the same
+// reason as projects/service.ts above.
+const realSessions = { ...(await import(`${B}/features/sessions/service.ts`)) } as Record<
+  string,
+  unknown
+>
+mock.module(`${B}/features/sessions/service.ts`, () => ({
+  ...realSessions,
+  getSessionLocation: async (id: string) => {
+    if (id !== SESSION_A) throw notFound('Session')
+    return { id: SESSION_A, projectId: PROJECT_A, worktreePath: WORKTREE_A }
+  },
+}))
+
+// Spread from the real module, not hand-rolled: `mock.module` replaces this
+// specifier for the whole test process, and projects/service.ts has real
+// consumers elsewhere in this suite that need every one of its exports.
+// Restored in afterAll for the same reason.
+const realProjects = { ...(await import(`${B}/features/projects/service.ts`)) } as Record<
+  string,
+  unknown
+>
 mock.module(`${B}/features/projects/service.ts`, () => ({
+  ...realProjects,
   getProject: async (id: string) => {
     const found = projects.find((p) => p.id === id)
     if (!found) throw notFound('Project')
@@ -126,8 +168,21 @@ mock.module(`${B}/queue/index.ts`, () => ({
 
 const operationRecords = new Map<string, Record<string, unknown>>()
 let activeOperation: string | undefined
+// Spread from the real module (not a bare replace) and restored in afterAll:
+// operations.ts exports far more than the handful this file's own tests
+// reach, and leaving this un-restored is the same class of hazard Defect 2
+// was -- whichever test file happens to run after this one (including one
+// that asks for the *real* operations.ts, like a lock-key test) would
+// otherwise get this file's partial stand-in instead.
+const realOperations = { ...(await import(`${B}/features/docker/operations.ts`)) } as Record<
+  string,
+  unknown
+>
 mock.module(`${B}/features/docker/operations.ts`, () => ({
-  activeOperationForProject: async () => activeOperation,
+  ...realOperations,
+  activeOperationForScope: async () => activeOperation,
+  dockerLockScope: (projectId: string, sessionId: string | null) =>
+    sessionId === null ? projectId : `${projectId}:s-${sessionId}`,
   createOperation: async (input: { id: string; projectId: string; kind: string; services: string[] }) => {
     const record = {
       ...input,
@@ -169,6 +224,7 @@ const streamCalls: RunCall[] = []
 const closedStreams: string[] = []
 
 let containerLabelsById: Record<string, Record<string, string>> = {}
+let containerNamesById: Record<string, string> = {}
 let composeServiceNames: string[] = ['web', 'db']
 
 const VERSION_JSON = JSON.stringify({ Client: { Version: '26.1.4' }, Server: { Version: '26.1.4' } })
@@ -182,7 +238,8 @@ const fakeRealCli = {
       const id = args[args.length - 1] ?? ''
       const labels = containerLabelsById[id]
       if (!labels) return { ok: false, stdout: '', stderr: 'No such object', exitCode: 1 }
-      return ok(JSON.stringify({ Id: id, Name: `/${id.slice(0, 6)}`, Config: { Labels: labels } }))
+      const name = containerNamesById[id] ?? id.slice(0, 6)
+      return ok(JSON.stringify({ Id: id, Name: `/${name}`, Config: { Labels: labels } }))
     }
     if (args[0] === 'compose' && args.includes('version')) return ok('{"version":"v2.24.0"}')
     if (args[0] === 'compose' && args.includes('config') && args.includes('--format')) {
@@ -221,12 +278,17 @@ app.route('/api', dockerRouter)
 afterAll(async () => {
   mock.module(`${B}/features/docker/cli.ts`, () => realCliModule)
   mock.module(`${B}/env.ts`, () => realEnv)
+  mock.module(`${B}/features/projects/service.ts`, () => realProjects)
+  mock.module(`${B}/features/sessions/service.ts`, () => realSessions)
   mock.module(`${B}/features/docker/hosts.ts`, () => realHosts)
+  mock.module(`${B}/features/docker/operations.ts`, () => realOperations)
   await rm(TEST_PROJECTS_DIR, { recursive: true, force: true })
 })
 
 await mkdir(REPO_A, { recursive: true })
 await mkdir(REPO_B, { recursive: true })
+await mkdir(REPO_ATTACKER, { recursive: true })
+await mkdir(WORKTREE_A, { recursive: true })
 await writeFile(join(REPO_A, 'compose.yaml'), 'services:\n  web:\n    image: nginx\n')
 await writeFile(join(REPO_B, 'compose.yaml'), 'services:\n  web:\n    image: nginx\n')
 
@@ -247,6 +309,24 @@ beforeEach(() => {
     ['c'.repeat(64)]: { 'com.docker.compose.project': 'agentoo-other', 'com.docker.compose.service': 'web' },
     // Somebody else's container entirely.
     ['d'.repeat(64)]: { 'org.opencontainers.image.title': 'postgres' },
+    // Session A's (project A's worktree scope) compose container.
+    ['f'.repeat(64)]: {
+      'com.docker.compose.project': `agentoo-demo_s-${SESSION_A_SUFFIX}`,
+      'com.docker.compose.service': 'web',
+    },
+    // Session A's plain-Dockerfile container -- carries the session label
+    // this file's Defect 1 regression and worktree-scope tests both depend
+    // on to tell it apart from project A's own repo-scope container above.
+    ['1'.repeat(64)]: {
+      'com.agentoo.project': 'demo',
+      'com.agentoo.managed': '1',
+      'com.agentoo.session': SESSION_A,
+    },
+  }
+  containerNamesById = {
+    [`${'b'.repeat(64)}`]: 'agentoo-demo',
+    [`${'f'.repeat(64)}`]: `agentoo-demo_s-${SESSION_A_SUFFIX}-web-1`,
+    [`${'1'.repeat(64)}`]: `agentoo-demo_s-${SESSION_A_SUFFIX}`,
   }
 })
 
@@ -309,6 +389,62 @@ test('a container that does not exist and one that belongs to another project ar
   const missing = await app.request(logsUrl(PROJECT_A, 'e'.repeat(64)))
   expect(foreign.status).toBe(missing.status)
   expect(await foreign.text()).toBe(await missing.text())
+})
+
+// --- worktree scope (?sessionId) ------------------------------------------------
+
+test("project A's session container streams its logs when the request names that session", async () => {
+  const res = await app.request(logsUrl(PROJECT_A, 'f'.repeat(64), `sessionId=${SESSION_A}`))
+  expect(res.status).toBe(200)
+  await drain(res)
+})
+
+test('the same container is unreachable at repo scope (no ?sessionId at all)', async () => {
+  const res = await app.request(logsUrl(PROJECT_A, 'f'.repeat(64)))
+  expect(res.status).toBe(404)
+})
+
+test('the same container is unreachable under an unrelated session id', async () => {
+  const otherSession = '44444444-4444-4444-8444-444444444444'
+  const res = await app.request(logsUrl(PROJECT_A, 'f'.repeat(64), `sessionId=${otherSession}`))
+  expect(res.status).toBe(404)
+})
+
+test("the plain-Dockerfile container of session A's worktree also streams, by its session label", async () => {
+  const res = await app.request(logsUrl(PROJECT_A, '1'.repeat(64), `sessionId=${SESSION_A}`))
+  expect(res.status).toBe(200)
+  await drain(res)
+})
+
+test("project A's own repo-scope plain-Dockerfile container is not session A's, and vice versa", async () => {
+  // 'b'.repeat(64) carries com.agentoo.project=demo with no session label at
+  // all (repo scope); '1'.repeat(64) carries the same project label plus
+  // com.agentoo.session=SESSION_A. Each must answer only for its own scope.
+  const bAtSession = await app.request(logsUrl(PROJECT_A, 'b'.repeat(64), `sessionId=${SESSION_A}`))
+  expect(bAtSession.status).toBe(404)
+  const oneAtRepo = await app.request(logsUrl(PROJECT_A, '1'.repeat(64)))
+  expect(oneAtRepo.status).toBe(404)
+})
+
+// --- Defect 1 regression: a colliding slug must not reach the session it used to ---
+
+test("Defect 1: a project slug shaped like the victim session's own name cannot read its container", async () => {
+  // ATTACKER_SLUG is exactly `demo-s-<hex12>` for SESSION_A's own suffix --
+  // before the `_` join, ATTACKER_PROJECT's *repo* scope and PROJECT_A's
+  // *session A* scope produced the identical compose project name, so this
+  // request used to succeed.
+  const res = await app.request(logsUrl(ATTACKER_PROJECT, 'f'.repeat(64)))
+  expect(res.status).toBe(404)
+})
+
+test('Defect 1: the same holds for the plain-Dockerfile container, via the session label', async () => {
+  const res = await app.request(logsUrl(ATTACKER_PROJECT, '1'.repeat(64)))
+  expect(res.status).toBe(404)
+})
+
+test('Defect 1: the attacker project cannot reach it by naming session A either (cross-project 404)', async () => {
+  const res = await app.request(logsUrl(ATTACKER_PROJECT, 'f'.repeat(64), `sessionId=${SESSION_A}`))
+  expect(res.status).toBe(404)
 })
 
 test('the ownership check inspects exactly the requested id, as its own argv element', async () => {

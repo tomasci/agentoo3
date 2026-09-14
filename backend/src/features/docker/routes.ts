@@ -21,7 +21,7 @@ import {
   upRequestSchema,
 } from './schema'
 import {
-  containerBelongsToProject,
+  containerBelongsToScope,
   getDockerOperation,
   getProjectDockerState,
   listDockerDetections,
@@ -44,6 +44,28 @@ const operationIdParam = idParam.extend({
     .string()
     .uuid()
     .openapi({ param: { name: 'operationId', in: 'path' } }),
+})
+
+/**
+ * Selects a *row*, never a path: `sessionId` picks which of a project's
+ * scopes (its own repo/ checkout, or one session's independent worktree) a
+ * request targets, but never supplies a directory or a flag itself — every
+ * path this feature ever touches is still derived server-side from the
+ * resolved scope (see scope.ts). That is what keeps this a query param and
+ * not a body field: a body field could plausibly be read as "steer the
+ * compose invocation", which docker-security.test.ts pins can never happen.
+ */
+const scopeQuery = z.object({
+  sessionId: z
+    .string()
+    .uuid()
+    .optional()
+    .openapi({
+      param: { name: 'sessionId', in: 'query' },
+      description:
+        "Scope to this session's own git worktree instead of the project's repo/ checkout. " +
+        'Omitted means the repo/ checkout.',
+    }),
 })
 
 const json = <T extends z.ZodTypeAny>(schema: T, description: string) => ({
@@ -88,24 +110,35 @@ dockerRouter.openapi(
       'broken or absent setup is a legitimate project state, not a server fault. `containers` is ' +
       'populated from `docker ps` independently of whether compose config parsed, so stop/down ' +
       'stay meaningful even when start/restart would not be.',
-    request: { params: idParam },
+    request: { params: idParam, query: scopeQuery },
     responses: {
       200: json(dockerStateSchema, 'Current state'),
+      400: json(errorSchema, 'The named session has no worktree of its own'),
       404: json(errorSchema, 'Not found'),
+      409: json(errorSchema, "The session's worktree is no longer on disk"),
     },
   }),
-  async (c) => c.json(await getProjectDockerState(c.req.valid('param').id), 200),
+  async (c) => {
+    const { id } = c.req.valid('param')
+    const { sessionId } = c.req.valid('query')
+    return c.json(await getProjectDockerState(id, sessionId), 200)
+  },
 )
 
 const operationResponses = {
   202: json(dockerOperationSchema, 'Queued'),
   400: json(
     errorSchema,
-    'Unknown service name, or a Dockerfile-only field sent for a compose project',
+    'Unknown service name, a Dockerfile-only field sent for a compose project, or the named ' +
+      'session has no worktree of its own',
   ),
   403: json(errorSchema, 'Docker controls are disabled'),
-  404: json(errorSchema, 'Not found'),
-  409: json(errorSchema, 'Another operation is already running for this project'),
+  404: json(errorSchema, 'Not found (project, or the named session)'),
+  409: json(
+    errorSchema,
+    "Another operation is already running for this scope, or the session's worktree is no " +
+      'longer on disk',
+  ),
   503: json(errorSchema, 'docker (or the daemon) is unavailable'),
 }
 
@@ -122,10 +155,14 @@ dockerRouter.openapi(
       '`containerPort` is required when neither an EXPOSE nor a built image declares one. Returns ' +
       '202 immediately; the mutation itself runs on the worker — poll ' +
       'GET .../operations/{operationId} or open its SSE stream.',
-    request: { params: idParam, body: json(upRequestSchema, 'Up options') },
+    request: { params: idParam, query: scopeQuery, body: json(upRequestSchema, 'Up options') },
     responses: operationResponses,
   }),
-  async (c) => c.json(await requestDockerUp(c.req.valid('param').id, c.req.valid('json')), 202),
+  async (c) => {
+    const { id } = c.req.valid('param')
+    const { sessionId } = c.req.valid('query')
+    return c.json(await requestDockerUp(id, sessionId, c.req.valid('json')), 202)
+  },
 )
 
 dockerRouter.openapi(
@@ -134,10 +171,18 @@ dockerRouter.openapi(
     path: '/projects/{id}/docker/stop',
     tags: ['docker'],
     summary: 'Stop the stack, or one or more services/the container, without removing anything',
-    request: { params: idParam, body: json(serviceSelectionSchema, 'Which services to stop') },
+    request: {
+      params: idParam,
+      query: scopeQuery,
+      body: json(serviceSelectionSchema, 'Which services to stop'),
+    },
     responses: operationResponses,
   }),
-  async (c) => c.json(await requestDockerStop(c.req.valid('param').id, c.req.valid('json')), 202),
+  async (c) => {
+    const { id } = c.req.valid('param')
+    const { sessionId } = c.req.valid('query')
+    return c.json(await requestDockerStop(id, sessionId, c.req.valid('json')), 202)
+  },
 )
 
 dockerRouter.openapi(
@@ -146,11 +191,18 @@ dockerRouter.openapi(
     path: '/projects/{id}/docker/restart',
     tags: ['docker'],
     summary: 'Restart the stack, or one or more services/the container',
-    request: { params: idParam, body: json(serviceSelectionSchema, 'Which services to restart') },
+    request: {
+      params: idParam,
+      query: scopeQuery,
+      body: json(serviceSelectionSchema, 'Which services to restart'),
+    },
     responses: operationResponses,
   }),
-  async (c) =>
-    c.json(await requestDockerRestart(c.req.valid('param').id, c.req.valid('json')), 202),
+  async (c) => {
+    const { id } = c.req.valid('param')
+    const { sessionId } = c.req.valid('query')
+    return c.json(await requestDockerRestart(id, sessionId, c.req.valid('json')), 202)
+  },
 )
 
 dockerRouter.openapi(
@@ -163,10 +215,18 @@ dockerRouter.openapi(
       'Compose: `docker compose down`, which removes containers and the compose-created network ' +
       'only — `removeVolumes`/`removeImages` default to false and must be asked for explicitly. ' +
       'Plain Dockerfile: `docker stop` then `docker rm`; never removes the built image.',
-    request: { params: idParam, body: json(downRequestSchema, 'Cleanup options') },
+    request: {
+      params: idParam,
+      query: scopeQuery,
+      body: json(downRequestSchema, 'Cleanup options'),
+    },
     responses: operationResponses,
   }),
-  async (c) => c.json(await requestDockerDown(c.req.valid('param').id, c.req.valid('json')), 202),
+  async (c) => {
+    const { id } = c.req.valid('param')
+    const { sessionId } = c.req.valid('query')
+    return c.json(await requestDockerDown(id, sessionId, c.req.valid('json')), 202)
+  },
 )
 
 dockerRouter.openapi(
@@ -320,6 +380,11 @@ const containerLogsQuery = z.object({
     .string()
     .refine((v) => !Number.isNaN(Date.parse(v)), 'since must be an RFC3339 timestamp')
     .optional(),
+  // Same query param and the same reasoning as scopeQuery above — hand-parsed
+  // rather than reused directly because this route lives outside the OpenAPI
+  // router (see this file's own header) and validates every query key in one
+  // schema, the same way the operation-events route above already does.
+  sessionId: z.string().uuid().optional(),
 })
 
 /**
@@ -496,6 +561,7 @@ dockerRouter.get('/projects/:id/docker/containers/:containerId/logs', async (c) 
   const parsedQuery = containerLogsQuery.safeParse({
     tail: c.req.query('tail'),
     since: c.req.query('since'),
+    sessionId: c.req.query('sessionId'),
   })
   if (!parsedParams.success || !parsedQuery.success) {
     throw validationFailed([
@@ -506,11 +572,13 @@ dockerRouter.get('/projects/:id/docker/containers/:containerId/logs', async (c) 
   const { id, containerId } = parsedParams.data
   const tail = parsedQuery.data.tail ?? 500
   const since = parsedQuery.data.since
+  const sessionId = parsedQuery.data.sessionId
 
-  // 404s the same way an unknown project would (getProject, inside this),
-  // and ALSO 404s a container that exists but isn't ours — never distinguished
-  // in the response, so this cannot be used to probe what else is running.
-  const owned = await containerBelongsToProject(id, containerId)
+  // 404s the same way an unknown project (or an unknown/cross-project
+  // session) would, and ALSO 404s a container that exists but isn't ours —
+  // never distinguished in the response, so this cannot be used to probe
+  // what else is running.
+  const owned = await containerBelongsToScope(id, sessionId, containerId)
   if (!owned) throw notFound('Container')
 
   if (!acquireLogStreamSlot())
