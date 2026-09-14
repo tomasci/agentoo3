@@ -241,6 +241,41 @@ as_root ufw status verbose 2>&1 | while IFS= read -r line; do
   printf '  %s\n' "$line" >&2
 done
 
+# ------------------------------------------------------- docker (DOCKER-USER) --
+# Docker inserts its own iptables rules ahead of ufw's, in a chain ufw does not
+# manage (/etc/default/ufw has MANAGE_BUILTINS=no), so `ufw reload/enable`
+# above never touches it. This step is a caller and a reporter only, never an
+# author of those rules: the docker step (65) owns them because it runs long
+# before this one, and if *this* step re-authored them, every host between
+# `--only docker` and here — and every host run with `--skip ufw` — would sit
+# with a published container port open to the internet in the meantime.
+DOCKER_FIREWALL_SCRIPT="/usr/local/sbin/${APP_NAME}-docker-firewall"
+# Respect DOCKER_FIREWALL rather than always self-healing: an operator who
+# explicitly turned the block off (65-install-docker.sh's DOCKER_FIREWALL=0,
+# which itself tears the rules down) must not have this step silently put
+# them back just because the script file still exists.
+if [[ "$DOCKER_FIREWALL" != "1" ]]; then
+  log_info "DOCKER_FIREWALL=$DOCKER_FIREWALL — leaving DOCKER-USER exactly as the docker step left it."
+elif [[ -x "$DOCKER_FIREWALL_SCRIPT" ]]; then
+  log_info "Re-applying the Docker firewall block (idempotent self-heal)"
+  as_root "$DOCKER_FIREWALL_SCRIPT" apply
+  log_info "DOCKER-USER:"
+  # Captured before printing, not piped straight into `while read`: iptables
+  # exits non-zero when the chain is missing (daemon down), and under
+  # `set -o pipefail` (on for this whole script) that would otherwise abort
+  # the entire install run here — same trap as the SIGPIPE sweep in
+  # 65-install-docker.sh, just triggered by a failing producer instead of an
+  # early-exiting consumer.
+  docker_user_rules="$(as_root iptables -w 5 -S DOCKER-USER 2>&1 || true)"
+  printf '%s\n' "$docker_user_rules" | while IFS= read -r line; do
+    printf '  %s\n' "$line" >&2
+  done
+elif have docker; then
+  log_warn "docker is installed but $DOCKER_FIREWALL_SCRIPT is missing — DOCKER-USER is unmanaged."
+  log_warn "A published container port may be reachable from the public internet. Run:"
+  log_warn "    sudo $INSTALL_SH --only docker"
+fi
+
 if (( lockdown )); then
   log_ok "SSH is now reachable only over Tailscale."
   [[ -n "$tailscale_ip" ]] && log_info "Reconnect with:  ssh $(id -un)@$tailscale_ip"

@@ -100,6 +100,50 @@ svc_report api      "${APP_NAME}-api"
 svc_report worker   "${APP_NAME}-worker"
 printf '\n' >&2
 
+# --- docker (optional; outside report/svc_report on purpose) -------------------
+# Both of those count toward missing_count, which this script treats as fatal
+# by default (see the bottom of the file) — but Docker not being here is a
+# supported choice (DOCKER_ENABLE=0), not a broken install, so it gets its own
+# lines instead.
+if have docker; then
+  # `|| true` on both: short_version() above already ends the same way, for
+  # the same reason -- a broken CLI or missing compose plugin must degrade to
+  # "?" here, not abort the one step whose whole job is reporting that.
+  docker_ver="$(docker --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+  compose_ver="$(docker compose version --format json 2>/dev/null | jq -r '.version // empty' 2>/dev/null || true)"
+  printf '  %s%-10s%s %s\n' "$C_GRN" "docker" "$C_RESET" "${docker_ver:-?} (compose ${compose_ver:-?})" >&2
+  if has_systemd; then
+    if svc_is_active docker; then
+      printf '  %s%-10s%s %s\n' "$C_GRN" "docker.service" "$C_RESET" \
+        "active$(svc_is_enabled docker && printf ', enabled at boot' || printf ', NOT enabled at boot')" >&2
+    else
+      printf '  %s%-10s%s %s\n' "$C_RED" "docker.service" "$C_RESET" "installed but not running" >&2
+    fi
+  fi
+
+  # The drift detector for the one property this whole design exists to hold:
+  # DOCKER-USER narrowed by source address, not interface. A daemon restart
+  # that happened before the ExecStartPost drop-in existed, a hand-run
+  # `iptables -F`, or DOCKER_FIREWALL=0 on some later run would all show up
+  # here rather than silently leaving a published container port reachable
+  # from the public internet.
+  # Captured before grepping, not piped straight into `grep -q`: a live pipe
+  # into a tool that exits the instant it matches can SIGPIPE the producer,
+  # which `set -o pipefail` (on for this whole script) turns into a spurious
+  # non-zero status even though the match was genuinely found.
+  docker_user_rules="$(${_SUDO[@]+"${_SUDO[@]}"} iptables -w 5 -S DOCKER-USER 2>/dev/null || true)"
+  if grep -q -- '-j DROP' <<<"$docker_user_rules"; then
+    log_ok "DOCKER-USER firewall block present (published container ports are not public)"
+  else
+    log_warn "docker is installed but DOCKER-USER has NO managed DROP rule."
+    log_warn "A published container port may be reachable from the public internet. Run:"
+    log_warn "    sudo $INSTALL_SH --only docker"
+  fi
+else
+  printf '  %s%-10s%s %s\n' "$C_DIM" "docker" "$C_RESET" "not installed (DOCKER_ENABLE=0, or the step has not run)" >&2
+fi
+printf '\n' >&2
+
 # --- network ------------------------------------------------------------------
 if have ufw; then
   if ${_SUDO[@]+"${_SUDO[@]}"} ufw status 2>/dev/null | head -1 | grep -q active; then
