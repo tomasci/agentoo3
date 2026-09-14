@@ -91,6 +91,8 @@ scripts/
   90-summary.sh         verify everything and report
 backend/                Hono API + worker driving the Claude Agent SDK
 frontend/               React + Vite SPA, served by Bun — see frontend/README.md
+docker/                 dev/test compose stack for this repo — see docker/README.md
+compose.yaml            entry point for that stack (`docker compose up --build`)
 library.example/        seed agents/skills/prompts, copied to LIBRARY_DIR on first install
 config/  docs/
 logs/                   install.log (gitignored)

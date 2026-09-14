@@ -39,7 +39,13 @@ export default defineConfig({
     // The backend is behind nginx in production; mirror that in dev.
     proxy: {
       '/api': {
-        target: `http://127.0.0.1:${process.env.BACKEND_PORT ?? 8000}`,
+        // BACKEND_PROXY_TARGET overrides the default so this also works
+        // cross-container (see compose.yaml): 127.0.0.1 there is the
+        // frontend's own container, not the backend's, so /api would 404
+        // without an explicit target naming the backend's service.
+        target:
+          process.env.BACKEND_PROXY_TARGET ??
+          `http://127.0.0.1:${process.env.BACKEND_PORT ?? 8000}`,
         changeOrigin: true,
       },
     },

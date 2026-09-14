@@ -1,0 +1,231 @@
+# Dev/test stack for agentoo itself — NOT the stack agentoo runs for the
+# *projects* it manages (that one is per-project, detected by
+# backend/src/features/docker/detect.ts). This file lives at the repo root,
+# named exactly `compose.yaml`, for the same reason: it is what that detector
+# looks for, so agentoo can discover and drive its own dev stack too.
+#
+# The whole point is hot reload against whatever worktree this was launched
+# from: the repo is bind-mounted at /app in every service below, never COPYed
+# into an image (see docker/dev.Dockerfile). Only `node_modules` is a named
+# volume, not a bind mount — see the comment on those volumes for why.
+#
+# Quick start (from the repo root):
+#   docker compose up --build
+# Full walkthrough, port overrides, test commands and caveats: docker/README.md
+
+x-app-build: &app-build
+  build:
+    context: ./docker
+    dockerfile: dev.Dockerfile
+
+# Shared by every service that runs application code (init/backend/worker/
+# frontend): the bind-mounted repo, shadowed at the two node_modules
+# directories by named volumes. The host worktree usually has no
+# node_modules at all, and if it does, the Agent SDK's per-platform optional
+# dependency may not match the container's platform — a named volume gives
+# each stack its own, populated once by the `init` service below.
+x-app-volumes: &app-volumes
+  - .:/app
+  - backend_node_modules:/app/backend/node_modules
+  - frontend_node_modules:/app/frontend/node_modules
+
+services:
+  # --- data stores -------------------------------------------------------------
+
+  postgres:
+    image: postgres:16.4
+    environment:
+      POSTGRES_USER: agentoo
+      POSTGRES_PASSWORD: agentoo_dev
+      POSTGRES_DB: agentoo
+    ports:
+      # Distinct from the host install's own 5432 (see docker/README.md) —
+      # compose has no arithmetic, so this is a whole port, not an offset.
+      - "${AGENTOO_POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      # $$ escapes compose's own ${...} substitution so POSTGRES_USER/DB are
+      # read from the container's environment at run time, not this file's.
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7.4.11
+    # requirepass, matching scripts/62-install-redis.sh's own reasoning: the
+    # password matters even bound to the compose network alone, since it stops
+    # any other container reachable on it from talking to Redis unauthenticated.
+    command: ["redis-server", "--requirepass", "agentoo_dev"]
+    ports:
+      - "${AGENTOO_REDIS_PORT:-56379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a agentoo_dev ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # --- one-shot bootstrap -------------------------------------------------------
+  #
+  # `bun install` (both packages) + render openapi.json + generate the kubb
+  # client + apply migrations, in that order — the same order
+  # scripts/68-setup-backend.sh and scripts/70-setup-frontend.sh use, and the
+  # same script the project's own hooks call for a fresh git worktree (see
+  # scripts/gen-api-client.sh's own comment on why every worktree starts with
+  # neither openapi.json nor generated/). Every step here is safe to re-run:
+  # `bun install --frozen-lockfile` no-ops on an already-installed
+  # node_modules, gen-api-client.sh's own regeneration is unconditional but
+  # cheap (~1s), and `drizzle-kit migrate` only ever applies migrations it
+  # has not applied yet. `service_completed_successfully` below is what makes
+  # this a gate rather than a race: backend/worker/frontend do not start
+  # until this exits 0.
+  init:
+    <<: *app-build
+    working_dir: /app
+    environment:
+      DATABASE_URL: postgresql://agentoo:agentoo_dev@postgres:5432/agentoo
+      REDIS_URL: redis://:agentoo_dev@redis:6379/0
+    volumes: *app-volumes
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command:
+      - bash
+      - -euc
+      - |
+        mkdir -p projects sources library/agents library/skills library/prompts attachments keys
+
+        # gen-api-client.sh below only installs a package's dependencies when
+        # its node_modules directory does not already exist — right on a bare
+        # checkout, wrong here: the named volumes shadowing backend/node_modules
+        # and frontend/node_modules (see x-app-volumes) always present that path
+        # as an existing, empty directory on a volume's first use, so that check
+        # sees "exists" and skips straight past a real install. Installing
+        # explicitly here, every run, is what actually populates the volume the
+        # first time and is a cheap no-op every time after — never
+        # --frozen-lockfile with optional deps omitted: the Agent SDK ships its
+        # runtime as a per-platform optional dependency (see
+        # scripts/68-setup-backend.sh's own comment on that).
+        echo "[init] bun install (backend)"
+        (cd backend && bun install --frozen-lockfile)
+        echo "[init] bun install (frontend)"
+        (cd frontend && bun install --frozen-lockfile)
+
+        echo "[init] rendering openapi.json + generating the frontend API client"
+        bash scripts/gen-api-client.sh
+
+        echo "[init] applying database migrations"
+        (cd backend && bun run db:migrate)
+
+        echo "[init] done"
+
+  # --- application ---------------------------------------------------------------
+
+  backend:
+    <<: *app-build
+    working_dir: /app/backend
+    command: ["bun", "--watch", "src/index.ts"]
+    environment: &backend-env
+      NODE_ENV: development
+      # 0.0.0.0, not env.ts's own 127.0.0.1 default: that default is right for
+      # a bare-metal install (nginx and the process share localhost) and wrong
+      # in a container, where 127.0.0.1 is only reachable from inside this
+      # same container. See docker/README.md.
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_PORT: 8000
+      DATABASE_URL: postgresql://agentoo:agentoo_dev@postgres:5432/agentoo
+      REDIS_URL: redis://:agentoo_dev@redis:6379/0
+      PROJECTS_DIR: /app/projects
+      LIBRARY_DIR: /app/library
+      ATTACHMENTS_DIR: /app/attachments
+      SOURCES_DIR: /app/sources
+      SSH_KEYS_DIR: /app/keys
+      # z.coerce.number() on env.ts's LOG_LEVEL: the .env.example's own
+      # LOG_LEVEL=info would coerce to NaN and the process would exit(1) — a
+      # number, not that placeholder, has to land here. 3 is env.ts's default.
+      LOG_LEVEL: "3"
+      WORKER_CONCURRENCY: "2"
+      DOCKER_ENABLED: "true"
+      # Anthropic credentials are never baked in here — see docker/README.md's
+      # "Claude credentials" caveat. Passed through only if set in the shell
+      # or an .env file compose reads; empty is a valid, supported value
+      # (env.ts's hasClaudeCredential just goes false and the API logs a
+      # warning rather than refusing to boot).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+    ports:
+      - "${AGENTOO_API_PORT:-8100}:8000"
+    volumes: *app-volumes
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Opt-in only — mounting the host's docker.sock hands this container the
+    # same control over the host that dockerd itself has. See docker/README.md
+    # ("Opting into the docker socket") for what it costs before uncommenting.
+    # Replace the `volumes: *app-volumes` line above with the block below —
+    # a YAML alias cannot be spliced into a second, longer sequence.
+    # volumes:
+    #   - .:/app
+    #   - backend_node_modules:/app/backend/node_modules
+    #   - frontend_node_modules:/app/frontend/node_modules
+    #   - /var/run/docker.sock:/var/run/docker.sock
+
+  worker:
+    <<: *app-build
+    working_dir: /app/backend
+    command: ["bun", "--watch", "src/worker.ts"]
+    environment:
+      <<: *backend-env
+    volumes: *app-volumes
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # Same trade-off as the backend service above — see docker/README.md.
+    # volumes:
+    #   - .:/app
+    #   - backend_node_modules:/app/backend/node_modules
+    #   - frontend_node_modules:/app/frontend/node_modules
+    #   - /var/run/docker.sock:/var/run/docker.sock
+
+  frontend:
+    <<: *app-build
+    working_dir: /app/frontend
+    command: ["bun", "run", "dev"]
+    environment:
+      NODE_ENV: development
+      FRONTEND_HOST: 0.0.0.0
+      FRONTEND_PORT: 3000
+      BACKEND_PORT: 8000
+      # vite.config.ts:41-44 hardcodes the proxy target to
+      # 127.0.0.1:$BACKEND_PORT, which inside this container is the frontend
+      # container itself, not the backend one. BACKEND_PROXY_TARGET is the
+      # backward-compatible override that file now reads first — see its own
+      # comment for the fallback. `backend` is this compose file's own
+      # service name, resolved on the compose network's embedded DNS.
+      BACKEND_PROXY_TARGET: http://backend:8000
+    ports:
+      - "${AGENTOO_FRONTEND_PORT:-3100}:3000"
+    volumes: *app-volumes
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+  redis_data:
+  # Named, not bind-mounted — see x-app-volumes above.
+  backend_node_modules:
+  frontend_node_modules:

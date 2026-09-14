@@ -1,0 +1,7 @@
+# Build context here is ./docker (see compose.yaml's build.context), which
+# never holds application source — this file is mostly a guard against that
+# ever changing by accident, plus the usual noise if anyone edits in place.
+**/.git
+**/node_modules
+*.log
+.DS_Store
