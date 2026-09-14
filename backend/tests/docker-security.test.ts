@@ -235,11 +235,18 @@ const fakeRealCli = {
     const ok = (stdout: string) => ({ ok: true, stdout, stderr: '', exitCode: 0 })
     if (args[0] === 'version') return ok(VERSION_JSON)
     if (args[0] === 'inspect') {
-      const id = args[args.length - 1] ?? ''
-      const labels = containerLabelsById[id]
-      if (!labels) return { ok: false, stdout: '', stderr: 'No such object', exitCode: 1 }
-      const name = containerNamesById[id] ?? id.slice(0, 6)
-      return ok(JSON.stringify({ Id: id, Name: `/${name}`, Config: { Labels: labels } }))
+      const queried = args[args.length - 1] ?? ''
+      // Resolved by prefix, exactly as real `docker inspect` resolves either
+      // a short or a full id against the same container -- not an exact
+      // match. This is what lets the short-id test below prove
+      // `containerBelongsToScope` actually works for the id shape a UI built
+      // off `DockerContainer.shortId` would send, rather than merely for the
+      // full id this file's other tests happen to use as their keys.
+      const fullId = Object.keys(containerLabelsById).find((full) => full.startsWith(queried))
+      const labels = fullId ? containerLabelsById[fullId] : undefined
+      if (!fullId || !labels) return { ok: false, stdout: '', stderr: 'No such object', exitCode: 1 }
+      const name = containerNamesById[fullId] ?? fullId.slice(0, 6)
+      return ok(JSON.stringify({ Id: fullId, Name: `/${name}`, Config: { Labels: labels } }))
     }
     if (args[0] === 'compose' && args.includes('version')) return ok('{"version":"v2.24.0"}')
     if (args[0] === 'compose' && args.includes('config') && args.includes('--format')) {
@@ -458,6 +465,24 @@ test('the ownership check inspects exactly the requested id, as its own argv ele
     '{{json .}}',
     'c'.repeat(64),
   ])
+})
+
+// --- a client sending the short id it was shown, not the full one -----------------
+
+test('a container is still reachable by the 12-char short id `DockerContainer.shortId` carries, not only the full id', async () => {
+  // `CONTAINER_ID_RE` accepts anything from 12 to 64 hex chars, and real
+  // `docker inspect` resolves a short id to the same container it would
+  // resolve the full id to -- a dashboard built off `DockerContainer.shortId`
+  // (12 chars) relies on exactly this. `containerBelongsToScope` never lists
+  // via `ps` for this check (see its own comment in service.ts), so there is
+  // no id-set-membership step here at all to get wrong the way
+  // containers.ts's `listScopeContainers` once did; the daemon's own prefix
+  // resolution is the only thing being trusted, and this test is what pins
+  // that trust is warranted.
+  const shortId = 'a'.repeat(12)
+  const res = await app.request(logsUrl(PROJECT_A, shortId))
+  expect(res.status).toBe(200)
+  await drain(res)
 })
 
 test('the logs argv places --follow/--timestamps/--tail before the id, each its own element', async () => {

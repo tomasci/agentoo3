@@ -220,7 +220,20 @@ function fakeCli(overrides: { config?: Partial<FakeResult> } = {}) {
       }
       if (args[0] === 'ps') {
         const filter = args[args.indexOf('--filter') + 1] ?? ''
-        if (filter.includes('com.docker.compose.project')) return ok(`${webRaw!.Id}\n${workerRaw!.Id}\n`)
+        // `ps -aq` prints docker's 12-char short id, never the 64-char id
+        // `inspect` reports back as `.Id` below -- kept deliberately distinct
+        // here for fidelity to the real CLI. Note this alone does not catch
+        // containers.ts's former `composeIds.has(raw.Id)` defect: at REPO
+        // scope (all calls in this file) the id mismatch sends a compose
+        // container down the same fallback a genuinely-owned container takes
+        // (no `com.agentoo.session` label, `ref.sessionId === null`, so
+        // `session === undefined` was still true), so it stayed listed by
+        // coincidence. Worktree scope has no such coincidence -- see
+        // docker-scope-isolation.test.ts and docker-containers-listing.test.ts,
+        // which exercise a real session id and do fail against the old code.
+        if (filter.includes('com.docker.compose.project')) {
+          return ok(`${webRaw!.Id.slice(0, 12)}\n${workerRaw!.Id.slice(0, 12)}\n`)
+        }
         return ok('') // no plain-Dockerfile-managed container for this project
       }
       if (args[0] === 'inspect') return ok(`${JSON.stringify(webRaw)}\n${JSON.stringify(workerRaw)}\n`)

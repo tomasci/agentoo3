@@ -9,7 +9,7 @@ import { type DockerCli, realDockerCli } from './cli'
 import type { DockerContainer } from './inspect'
 import { inspectContainersRaw, listContainerIds, toDockerContainer } from './inspect'
 import type { DockerScopeRef } from './names'
-import { composeProjectLabelFilter, projectLabelFilter } from './names'
+import { composeProjectLabelFilter, composeProjectName, projectLabelFilter } from './names'
 
 /**
  * Every container that belongs to one scope: the union of containers labelled
@@ -22,6 +22,23 @@ import { composeProjectLabelFilter, projectLabelFilter } from './names'
  * label at all" — so without it, a worktree scope's `projectLabelFilter`
  * query would also return the repo scope's plain-Dockerfile container, and
  * vice versa.
+ *
+ * Membership is decided entirely from each container's own *labels*, read
+ * back off `inspect`'s own output — never from whether a container's id
+ * happened to appear in one of the `ps -aq` results this function also
+ * issues. Two ids that name the same container are not the same *string*:
+ * `docker ps -aq` prints 12-char short ids, `docker inspect` reports `.Id` as
+ * the 64-char full id, and a set built from the one is never a member of the
+ * other by simple equality. `listContainerIds`+`Set.has(raw.Id)` used to be
+ * exactly that comparison, which made it silently, permanently false — every
+ * compose container matched by `composeProjectLabelFilter` fell through to
+ * the plain-Dockerfile check below, which compose containers never pass (we
+ * never label the user's compose file), so every compose container vanished
+ * from every scope's listing. `ps`'s two id lists are still queried and
+ * still fetched by `inspectContainersRaw` below — that remains the cheapest
+ * way to ask the daemon "which containers might be ours" — they are just
+ * never compared against an id again once `inspect` has answered; from there
+ * everything is decided by the label `inspect` itself reports.
  *
  * Narrowed by the `com.agentoo.session` label, not by name. A name comparison
  * (`c.name === containerName(ref)`) used to do this and was wrong two ways:
@@ -41,17 +58,23 @@ export async function listScopeContainers(
   ref: DockerScopeRef,
   cli: DockerCli = realDockerCli,
 ): Promise<DockerContainer[]> {
-  const composeIds = new Set(await listContainerIds(composeProjectLabelFilter(ref), cli))
+  const composeIds = await listContainerIds(composeProjectLabelFilter(ref), cli)
   const projectIds = await listContainerIds(projectLabelFilter(ref.slug), cli)
   const allIds = new Set([...composeIds, ...projectIds])
   const rawContainers = await inspectContainersRaw([...allIds], cli)
+  const composeName = composeProjectName(ref)
   const owned = rawContainers.filter((raw) => {
-    if (composeIds.has(raw.Id)) return true
-    // Already known to carry `com.agentoo.project=<slug>` — that is what
-    // `projectIds` was filtered on — so the only thing left to check is
-    // whether it belongs to *this* scope's session, or (repo scope) no
-    // session at all.
-    const session = raw.Config?.Labels?.['com.agentoo.session']
+    const labels = raw.Config?.Labels ?? {}
+    if (labels['com.docker.compose.project'] === composeName) return true
+    // Already known to carry `com.agentoo.project=<slug>` if this container
+    // arrived here via `projectIds` — but read the label itself, not the id
+    // list that produced it, for the same reason the compose arm above does:
+    // a container that only matched the compose filter never had its
+    // `com.agentoo.project` label checked at all, and deciding "must be
+    // project-labelled" from *which query found this id* is the same
+    // id-provenance assumption that caused the bug this function now avoids.
+    if (labels['com.agentoo.project'] !== ref.slug) return false
+    const session = labels['com.agentoo.session']
     return ref.sessionId === null ? session === undefined : session === ref.sessionId
   })
   return owned.map(toDockerContainer)

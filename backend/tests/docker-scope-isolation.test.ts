@@ -5,6 +5,17 @@
 // cross-scope container reachability and the read/write env parity that a
 // pure-argv test (docker-args.test.ts) or a router-level test
 // (docker-security.test.ts) cannot reach on their own.
+//
+// The fake CLI below is keyed by a single letter per container, from which
+// both a `ps -aq`-shaped 12-char short id (`SHORT`) and an `inspect`-shaped
+// 64-char full id (`FULL`) are derived -- deliberately never the same string,
+// matching real docker. `inspect` resolves whichever of the two it is asked
+// for by prefix, exactly as the real CLI does. A version of this fake that
+// handed back the same id from both calls (as this file once did) cannot
+// exercise -- or catch a regression in -- any code that correlates the two,
+// which is exactly how containers.ts's `composeIds.has(raw.Id)` defect (a
+// `ps` short id tested against an `inspect` full id, always false) shipped
+// with every test in this file green.
 
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -54,31 +65,38 @@ mock.module(`${B}/features/sessions/service.ts`, () => ({
   },
 }))
 
+/** What `docker ps -aq` prints for container `c` -- docker's 12-char prefix. */
+const SHORT = (c: string) => c.repeat(12)
+/** What `docker inspect` reports back as `.Id` for that same container --
+ * always the 64-char full id, never the short id it may have been looked up
+ * by. `SHORT(c)` is a true prefix of `FULL(c)`, matching real docker. */
+const FULL = (c: string) => c.repeat(64)
+
 // Five containers: repo-scope compose, repo-scope plain, session A compose,
-// session A plain, session B plain. `f`.repeat(64) is deliberately named
-// nothing like `containerName(ref)` (hand-labelled / renamed after the fact)
-// -- see Defect 4 below.
+// session A plain, session B plain. `f` is deliberately named nothing like
+// `containerName(ref)` (hand-labelled / renamed after the fact) -- see
+// Defect 4 below.
 const CONTAINERS: Record<string, { name: string; labels: Record<string, string> }> = {
-  ['a'.repeat(64)]: {
+  a: {
     name: `/agentoo-${SLUG}`,
     labels: { 'com.docker.compose.project': `agentoo-${SLUG}`, 'com.docker.compose.service': 'web' },
   },
-  ['b'.repeat(64)]: {
+  b: {
     name: `/agentoo-${SLUG}`,
     labels: { 'com.agentoo.project': SLUG, 'com.agentoo.managed': '1' },
   },
-  ['c'.repeat(64)]: {
+  c: {
     name: `/agentoo-${SLUG}_s-${SUF(SESSION_A)}-web-1`,
     labels: {
       'com.docker.compose.project': `agentoo-${SLUG}_s-${SUF(SESSION_A)}`,
       'com.docker.compose.service': 'web',
     },
   },
-  ['d'.repeat(64)]: {
+  d: {
     name: `/agentoo-${SLUG}_s-${SUF(SESSION_A)}`,
     labels: { 'com.agentoo.project': SLUG, 'com.agentoo.managed': '1', 'com.agentoo.session': SESSION_A },
   },
-  ['e'.repeat(64)]: {
+  e: {
     name: `/agentoo-${SLUG}_s-${SUF(SESSION_B)}`,
     labels: { 'com.agentoo.project': SLUG, 'com.agentoo.managed': '1', 'com.agentoo.session': SESSION_B },
   },
@@ -86,10 +104,16 @@ const CONTAINERS: Record<string, { name: string; labels: Record<string, string> 
   // session label) but was renamed/hand-labelled after the fact, so its name
   // does not match `containerName({ slug, sessionId: null })` at all. A name
   // comparison used to drop this from repo-scope's own listing.
-  ['f'.repeat(64)]: {
+  f: {
     name: '/some-operator-renamed-this',
     labels: { 'com.agentoo.project': SLUG, 'com.agentoo.managed': '1' },
   },
+}
+
+/** Resolve an `inspect` argument (short or full id, exactly as docker itself
+ * resolves either) to the container whose full id it is a prefix of. */
+function findByQueryId(query: string): [string, (typeof CONTAINERS)[string]] | undefined {
+  return Object.entries(CONTAINERS).find(([c]) => FULL(c).startsWith(query))
 }
 
 const runCalls: { args: string[]; env?: Record<string, string>; cwd?: string }[] = []
@@ -100,17 +124,16 @@ const fakeCli = {
   async run(args: string[], options: { cwd?: string; env?: Record<string, string> } = {}) {
     runCalls.push({ args, env: options.env, cwd: options.cwd })
     if (args[0] === 'inspect' && args.includes('--type')) {
-      const ids = args.slice(5)
-      const found = ids.map((id) => CONTAINERS[id]).filter(Boolean)
+      const queried = args.slice(5)
+      const found = queried.map((q) => findByQueryId(q)).filter((e) => e !== undefined)
       if (found.length === 0) return { ok: false, stdout: '', stderr: 'No such object', exitCode: 1 }
       return ok(
-        ids
-          .filter((id) => CONTAINERS[id])
-          .map((id) =>
+        found
+          .map(([c, data]) =>
             JSON.stringify({
-              Id: id,
-              Name: CONTAINERS[id]?.name,
-              Config: { Labels: CONTAINERS[id]?.labels },
+              Id: FULL(c),
+              Name: data.name,
+              Config: { Labels: data.labels },
               State: { Status: 'running' },
             }),
           )
@@ -129,7 +152,7 @@ const fakeCli = {
           }
           return false
         })
-        .map(([id]) => id)
+        .map(([c]) => SHORT(c))
       return ok(ids.join('\n'))
     }
     if (args[0] === 'version') return ok('{"Client":{"Version":"26.1.4"},"Server":{"Version":"26.1.4"}}')
@@ -190,12 +213,12 @@ beforeEach(() => {
   streamCalls.length = 0
 })
 
-const REPO_COMPOSE = 'a'.repeat(64)
-const REPO_PLAIN = 'b'.repeat(64)
-const A_COMPOSE = 'c'.repeat(64)
-const A_PLAIN = 'd'.repeat(64)
-const B_PLAIN = 'e'.repeat(64)
-const REPO_PLAIN_RENAMED = 'f'.repeat(64)
+const REPO_COMPOSE = FULL('a')
+const REPO_PLAIN = FULL('b')
+const A_COMPOSE = FULL('c')
+const A_PLAIN = FULL('d')
+const B_PLAIN = FULL('e')
+const REPO_PLAIN_RENAMED = FULL('f')
 
 // --- CLAIM 2: ownership across scopes ------------------------------------------
 
@@ -220,6 +243,15 @@ test('each scope can still reach its own containers', async () => {
   expect(await containerBelongsToScope(PROJECT, SESSION_A, A_COMPOSE, fakeCli)).toBe(true)
   expect(await containerBelongsToScope(PROJECT, SESSION_A, A_PLAIN, fakeCli)).toBe(true)
   expect(await containerBelongsToScope(PROJECT, SESSION_B, B_PLAIN, fakeCli)).toBe(true)
+})
+
+test('each scope can still reach its own containers when asked by the SHORT id a `DockerContainer.shortId` field would carry', async () => {
+  // A UI built off `DockerContainer.shortId` sends the 12-char prefix, not
+  // the full id -- `CONTAINER_ID_RE` (routes.ts) accepts both shapes, and
+  // real docker resolves either against the same container, which is what
+  // `findByQueryId`'s prefix match above models.
+  expect(await containerBelongsToScope(PROJECT, undefined, SHORT('a'), fakeCli)).toBe(true)
+  expect(await containerBelongsToScope(PROJECT, SESSION_A, SHORT('c'), fakeCli)).toBe(true)
 })
 
 test('listScopeContainers returns only that scope containers', async () => {
