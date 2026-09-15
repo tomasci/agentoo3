@@ -39,9 +39,55 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   exit 0
 fi
 
+# --- resolve the npm global prefix --------------------------------------------
+# Needed up front: whether @playwright/mcp is already installed is answered
+# below by reading *this* install's own package.json, not by parsing
+# `npm ls`'s human-oriented tree output. `npm ls` was the first draft of that
+# check and had two problems: (1) it exits 1 for "not installed" — that is
+# information here, not a fault, but scripts/lib/common.sh turns on
+# `pipefail`, so that 1 becomes the pipeline's exit status and `set -e` aborts
+# the script right here, on exactly the fresh-install path the check exists to
+# handle (this is the bug a real run hit); and (2) its tree format is
+# npm-version-dependent, a second thing to keep in sync with npm releases on
+# top of the version pin. A file's own package.json has neither problem: `-f`/
+# `-d` are filesystem tests, immune to the exit-code-as-answer trap, and the
+# "version" field's shape is a Node/npm guarantee, not a text format that can
+# reflow.
+#
+# Verified rather than assumed. NODE_PREFIX/npm's global prefix is /usr on this
+# box (set by 40-install-node.sh via the NodeSource package), so the bin lands
+# at /usr/bin/playwright-mcp — but that is a fact about this box, not a
+# guarantee, so read it back instead of hardcoding it. systemd units here do
+# not set Environment=PATH=, so they inherit the default PATH, and a bin that
+# lands outside it is a silent failure that would only surface the first time
+# an agent's session tries to connect to the browser skill.
+#
+# `|| true`: not observed to fail in practice, but a bare command substitution
+# here would abort under set -e at this line rather than at the
+# `[[ -n ... ]] || die` immediately below — the same pre-emption bug `npm ls`
+# had above, just waiting for an npm that ever exits non-zero on a config read.
+npm_prefix="$(npm -g config get prefix 2>/dev/null || true)"
+[[ -n "$npm_prefix" ]] || die "Could not read the npm global prefix (npm -g config get prefix)."
+mcp_pkg_dir="$npm_prefix/lib/node_modules/@playwright/mcp"
+
 # --- the MCP server itself ----------------------------------------------------
-current="$(npm -g list @playwright/mcp --depth=0 2>/dev/null \
-  | sed -n 's/.*@playwright\/mcp@\([0-9][0-9A-Za-z.+-]*\).*/\1/p')"
+# Absent is the common case on a fresh box, not an error: leave $current empty
+# (satisfies `set -u` via ${current:-none} below) and fall through to install.
+current=""
+if [[ -f "$mcp_pkg_dir/package.json" ]]; then
+  # `|| true`: a malformed or version-field-less package.json would otherwise
+  # make an uncaught exception's exit status abort the script here instead of
+  # just being treated as "couldn't confirm the version — reinstall", which is
+  # the safe direction to fail in (reinstalling a good copy costs time; wrongly
+  # skipping a needed reinstall does not).
+  current="$(node -e "
+try {
+  process.stdout.write(require('$mcp_pkg_dir/package.json').version)
+} catch (e) {
+  process.exit(1)
+}
+" 2>/dev/null)" || true
+fi
 if [[ "$current" == "$PLAYWRIGHT_MCP_VERSION" ]]; then
   log_ok "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION} already installed"
 else
@@ -51,16 +97,6 @@ else
 fi
 
 # --- verify it landed where PATH expects it -----------------------------------
-# Verified rather than assumed. NODE_PREFIX/npm's global prefix is /usr on this
-# box (set by 40-install-node.sh via the NodeSource package), so the bin lands
-# at /usr/bin/playwright-mcp — but that is a fact about this box, not a
-# guarantee, so read it back instead of hardcoding it. systemd units here do
-# not set Environment=PATH=, so they inherit the default PATH, and a bin that
-# lands outside it is a silent failure that would only surface the first time
-# an agent's session tries to connect to the browser skill.
-npm_prefix="$(npm -g config get prefix 2>/dev/null)"
-[[ -n "$npm_prefix" ]] || die "Could not read the npm global prefix (npm -g config get prefix)."
-mcp_pkg_dir="$npm_prefix/lib/node_modules/@playwright/mcp"
 [[ -d "$mcp_pkg_dir" ]] || die "@playwright/mcp did not install into $mcp_pkg_dir as expected."
 
 hash -r
@@ -114,7 +150,13 @@ as_root node "$playwright_cli" install-deps chromium \
 # the default (~/.cache/ms-playwright) already resolves correctly once HOME is
 # set for that account, and a second path to keep in sync is not worth adding.
 ensure_service_user "$APP_USER" "/home/$APP_USER"
-app_home="$(getent passwd "$APP_USER" | cut -d: -f6)"
+# getent exits 2 when the account has no entry. Should not happen right after
+# ensure_service_user, but if it ever did, a bare command substitution under
+# set -e would abort here rather than at the `|| die` below — same class of
+# bug as the two probes above. `|| true` matches app_home in
+# 55-install-claude-code.sh, 68-setup-backend.sh, 70-setup-frontend.sh and
+# 90-summary.sh, which all read this the same way.
+app_home="$(getent passwd "$APP_USER" 2>/dev/null | cut -d: -f6 || true)"
 [[ -n "$app_home" ]] || die "No home directory for '$APP_USER'."
 
 log_info "Installing the chromium browser as '$APP_USER'"
