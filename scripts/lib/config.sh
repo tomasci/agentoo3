@@ -377,3 +377,12 @@ CLAUDE_CODE_MIN_RAM_MB="${CLAUDE_CODE_MIN_RAM_MB:-4096}"
 # the launcher (rather than the versioned binary) survives auto-updates.
 CLAUDE_CODE_SYMLINK="${CLAUDE_CODE_SYMLINK:-1}"
 CLAUDE_CODE_SYMLINK_PATH="${CLAUDE_CODE_SYMLINK_PATH:-/usr/local/bin/claude}"
+
+# --------------------------------------------------------------- playwright --
+
+# Backs the browser skill: the official Playwright MCP server, installed
+# globally and pinned exactly like CLAUDE_CODE_VERSION above rather than
+# resolved at connect time via `bunx @playwright/mcp@latest` — see
+# scripts/57-install-playwright.sh for why that shortcut does not survive
+# contact with this box.
+PLAYWRIGHT_MCP_VERSION="${PLAYWRIGHT_MCP_VERSION:-0.0.80}"

@@ -33,6 +33,7 @@ STEPS=(
   "node:40-install-node.sh:Node.js LTS + npm"
   "bun:50-install-bun.sh:Bun (latest stable)"
   "claude:55-install-claude-code.sh:Claude Code CLI"
+  "playwright:57-install-playwright.sh:Playwright MCP server (browser skill), chromium only"
   "postgres:60-install-postgres.sh:PostgreSQL + role/database (+ pgvector)"
   "redis:62-install-redis.sh:Redis, localhost-only, password-protected"
   "tailscale:64-install-tailscale.sh:Tailscale VPN"

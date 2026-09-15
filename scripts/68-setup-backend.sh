@@ -157,17 +157,65 @@ if [[ -n "$attachments_mount" && "$attachments_mount" == "$pg_mount" ]]; then
   log_warn "XFS/ext4 project quota if the database sharing that disk matters to you."
 fi
 
-# Seed example agents and skills, but only into an empty library — never
-# overwrite prompts the operator has written.
-if [[ -d "$REPO_ROOT/library.example" ]] \
-   && [[ -z "$(ls -A "$LIBRARY_DIR/agents" 2>/dev/null)" ]] \
-   && [[ -z "$(ls -A "$LIBRARY_DIR/skills" 2>/dev/null)" ]] \
-   && [[ -z "$(ls -A "$LIBRARY_DIR/prompts" 2>/dev/null)" ]]; then
-  as_root cp -r "$REPO_ROOT/library.example/agents/." "$LIBRARY_DIR/agents/"
-  as_root cp -r "$REPO_ROOT/library.example/skills/." "$LIBRARY_DIR/skills/"
-  as_root cp -r "$REPO_ROOT/library.example/prompts/." "$LIBRARY_DIR/prompts/"
-  as_root chown -R "$APP_USER:$APP_USER" "$LIBRARY_DIR"
-  log_ok "Seeded $LIBRARY_DIR with example agents and skills"
+# Seed example agents, skills and prompts per item, not per library. The old
+# gate ("seed only when agents/, skills/ AND prompts/ are all empty") meant an
+# item added to library.example after someone's very first install could
+# never reach a box that already had a library — which by now is every box,
+# since this step runs on every `install.sh` and `install.sh --only backend`,
+# and a new library.example item ships after the initial install, not before
+# it. See backend/src/library/idea-prompt.ts:27, which documents the same gap
+# and works around it with a code-level fallback — an option available to a
+# singleton prompt loaded by one call site, not to a library item that has to
+# be listable and assignable in the UI like any operator-authored one.
+#
+# Per item, "never overwrite" still means what it always did: nothing already
+# present in $LIBRARY_DIR is touched, so an operator's edits are safe. What
+# changes is the granularity — an existing agents/foo.md no longer blocks a
+# brand-new skills/browser/ from being seeded alongside it.
+#
+# Accepted cost, stated plainly: an item an operator deliberately deleted
+# reappears on the next `install.sh --only backend`, because "absent because
+# never seeded" and "absent because deleted on purpose" look identical on
+# disk. That trade is what makes new shipped skills reach existing boxes at
+# all; the $LIBRARY_DIR git init below at least makes the reappearance visible
+# as a diff instead of a silent surprise.
+seeded=0
+if [[ -d "$REPO_ROOT/library.example" ]]; then
+  # agents/<name>.md and prompts/<name>.md are single files; skills/<name>/ is
+  # copied whole (`cp -a`, not just the *.md), because a skill's SKILL.md is
+  # routinely accompanied by sibling files — scripts, references — the app
+  # expects to find alongside it.
+  #
+  # Globs, not `ls -A`: pathname expansion hands each match to the loop as its
+  # own word even when the name has spaces, and — nullglob is not set on
+  # purpose, so it's consistent with the rest of this file's style — a
+  # missing or empty library.example subdirectory just leaves the pattern
+  # unexpanded, which the `-e` check below skips over without erroring.
+  for src in "$REPO_ROOT/library.example/agents/"*.md; do
+    [[ -e "$src" ]] || continue
+    dest="$LIBRARY_DIR/agents/$(basename "$src")"
+    [[ -e "$dest" ]] && continue
+    as_root cp -a "$src" "$dest" && seeded=$(( seeded + 1 ))
+  done
+  for src in "$REPO_ROOT/library.example/skills/"*/; do
+    [[ -e "$src" ]] || continue
+    dest="$LIBRARY_DIR/skills/$(basename "$src")"
+    [[ -e "$dest" ]] && continue
+    as_root cp -a "$src" "$dest" && seeded=$(( seeded + 1 ))
+  done
+  for src in "$REPO_ROOT/library.example/prompts/"*.md; do
+    [[ -e "$src" ]] || continue
+    dest="$LIBRARY_DIR/prompts/$(basename "$src")"
+    [[ -e "$dest" ]] && continue
+    as_root cp -a "$src" "$dest" && seeded=$(( seeded + 1 ))
+  done
+
+  if (( seeded > 0 )); then
+    as_root chown -R "$APP_USER:$APP_USER" "$LIBRARY_DIR"
+    log_ok "Seeded $seeded new item(s) into $LIBRARY_DIR from library.example"
+  else
+    log_debug "Nothing new in library.example to seed into $LIBRARY_DIR"
+  fi
 fi
 
 # The library is worth versioning: agent prompts are the part you iterate on.

@@ -1220,6 +1220,20 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
             .set({ sdkSessionId: message.session_id, updatedAt: new Date() })
             .where(eq(sessions.id, sessionId))
         }
+        if (message.subtype === 'init') {
+          // A missing `playwright-mcp` binary (or any other MCP server a
+          // skill declared) otherwise fails silently: the tools it would have
+          // offered just aren't there, and nothing in the transcript says
+          // why. This is the one place the CLI reports server-by-server
+          // connection status at all.
+          for (const server of message.mcp_servers) {
+            if (server.status !== 'connected') {
+              logger.warn(
+                `Session ${sessionId}: MCP server "${server.name}" did not connect (status: ${server.status})`,
+              )
+            }
+          }
+        }
         if (message.subtype === 'task_started') {
           const started = message as typeof message & {
             tool_use_id?: string
