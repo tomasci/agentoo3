@@ -10,6 +10,9 @@
 /keys/
 # user-uploaded session attachments — never
 /attachments/
+# browser skill's screenshots/output — only pollutes a self-hosting box's own
+# checkout (repo root at /opt/agentoo), same reasoning as the siblings above
+/browser-output/
 
 # generated secrets
 config/*.local

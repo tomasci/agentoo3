@@ -40,9 +40,16 @@ test('mcp.json invokes the bin name @playwright/mcp actually installs', async ()
 })
 
 test('every flag mcp.json passes exists in @playwright/mcp@0.0.80', async () => {
-  // Verified against `playwright-mcp --help` for the pinned version. Kept as
-  // a list rather than a live --help call because the package is not a
-  // backend dependency and is not installed in CI.
+  // Verified against `playwright-mcp --help` for the pinned version, and the
+  // full shipped argv was confirmed to bring the server up (a real stdio
+  // `initialize` answered with serverInfo Playwright/1.63.0-alpha-2026-08-31).
+  // Kept as a list rather than a live --help call because the package is not
+  // a backend dependency and is not installed in CI.
+  //
+  // What a bad flag costs, precisely: commander exits with
+  // `error: unknown option '--x'` before the server ever speaks MCP — so the
+  // session simply has no `mcp__playwright__*` tools, with nothing in the
+  // transcript naming the typo. Loud at the process, silent to the agent.
   const known = new Set([
     '--headless',
     '--isolated',
@@ -51,6 +58,7 @@ test('every flag mcp.json passes exists in @playwright/mcp@0.0.80', async () => 
     '--no-sandbox',
     '--user-data-dir',
     '--output-dir',
+    '--output-max-size',
     '--caps',
     '--device',
     '--timeout-action',
@@ -227,4 +235,62 @@ test('the installer resolves playwright/package.json, never the unexported cli.j
   // ...and checked to exist, so a future layout change fails here, naming the
   // path, rather than three lines later inside `node <empty>`.
   expect(code).toMatch(/\[\[ -f "\$playwright_cli" \]\] \|\| die/)
+})
+
+// --- where screenshots land ----------------------------------------------
+//
+// `browser_take_screenshot` with an explicit `filename` goes through a
+// different code path from the one `--output-dir` feeds
+// (resolveClientFilename -> workspaceFile(filename, cwd)), so in 0.0.80 it
+// writes to the MCP server process's cwd — the session's own git worktree —
+// and returns no inline image. `--output-dir` fixes the *default*-named
+// artifacts; SKILL.md telling agents not to pass `filename` is what covers
+// the rest. Both halves are load-bearing and neither is self-evident from
+// reading mcp.json, so both are pinned here.
+
+test('mcp.json sends default-named output somewhere outside any project checkout', async () => {
+  const args = await playwrightArgs()
+  const outputDir = args[args.indexOf('--output-dir') + 1]
+  expect(args).toContain('--output-dir')
+  expect(outputDir).toBeDefined()
+  // Absolute: a relative path would resolve against the server process's cwd,
+  // which is the very worktree this flag exists to keep clean.
+  expect(outputDir?.startsWith('/')).toBe(true)
+  // And an eviction threshold, so the directory cannot grow without bound on
+  // a long-lived box.
+  const maxSize = args[args.indexOf('--output-max-size') + 1]
+  expect(Number(maxSize)).toBeGreaterThan(0)
+  expect(Number.isInteger(Number(maxSize))).toBe(true)
+})
+
+test('the output directory is gitignored at the repo root — this box self-hosts', async () => {
+  // The repo root of a self-hosting install *is* /opt/agentoo, so an output
+  // dir at /opt/agentoo/browser-output lands inside this very checkout. The
+  // .gitignore entry is what keeps screenshots out of `git status`; change
+  // --output-dir without it and they start showing up as untracked files in
+  // every session's diff.
+  const args = await playwrightArgs()
+  const outputDir = args[args.indexOf('--output-dir') + 1] as string
+  const leaf = outputDir.slice(outputDir.lastIndexOf('/') + 1)
+  const ignored = (await readFile(join(REPO, '.gitignore'), 'utf8'))
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith('#'))
+
+  // Root-anchored, like its siblings /keys/ and /attachments/, so it cannot
+  // accidentally ignore a same-named directory deeper in a project.
+  expect(ignored).toContain(`/${leaf}/`)
+})
+
+test('SKILL.md tells the agent not to pass an explicit filename', async () => {
+  // The only mitigation for the upstream bug --output-dir does not reach.
+  // Drop this guidance and screenshots silently return no image *and* land in
+  // the worktree again.
+  const text = await readFile(SKILL_MD, 'utf8')
+  expect(text).toContain('`filename`')
+  expect(text).toMatch(/no `filename`|not? `filename`|without .*`filename`/)
+  // And it says what goes wrong, not just "don't": the two symptoms an agent
+  // would otherwise have to diagnose from nothing.
+  expect(text).toContain('no image')
+  expect(text.toLowerCase()).toContain('working directory')
 })

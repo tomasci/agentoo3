@@ -58,7 +58,23 @@ test('the shipped skills directory yields exactly the playwright server, no warn
       // Chrome channel, which the installer never puts on the box. That
       // coupling is owned by browser-skill-contract.test.ts; this literal is
       // here so the reader of *this* file sees the exact argv a session gets.
-      args: ['--headless', '--isolated', '--browser', 'chromium', '--viewport-size', '1280x720'],
+      args: [
+        '--headless',
+        '--isolated',
+        '--browser',
+        'chromium',
+        '--viewport-size',
+        '1280x720',
+        // Default-named artifacts land here instead of the MCP server
+        // process's cwd, which is the session's own git worktree. (An
+        // explicit `filename` still escapes to cwd in 0.0.80 — a different
+        // code path that outputDir does not feed — which is why SKILL.md
+        // tells agents not to pass one; see browser-skill-contract.test.ts.)
+        '--output-dir',
+        '/opt/agentoo/browser-output',
+        '--output-max-size',
+        '209715200',
+      ],
     },
   })
   expect(warnings).toEqual([])
