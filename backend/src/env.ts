@@ -146,3 +146,32 @@ if (!parsed.success) {
 export const env = parsed.data
 
 export const hasClaudeCredential = Boolean(env.ANTHROPIC_API_KEY || env.CLAUDE_CODE_OAUTH_TOKEN)
+
+/**
+ * How a process on this box dials our own API — the docker skill shells out
+ * to this over HTTP rather than reaching into the database or the compose
+ * CLI's own state directly, and runner-options.ts hands the same value to
+ * every session as AGENTOO_API_BASE so a session's own shell-outs agree with
+ * it. Route prefix is `/api` (`app.route('/api', dockerRouter)` in app.ts).
+ *
+ * BACKEND_HOST is a *bind* address, not a dial one: `0.0.0.0` (every IPv4
+ * interface), `::` (every IPv6 interface) and `''` all mean "listen on
+ * everything", and none of them is a host a client socket can connect *to* —
+ * dialing the literal string back would fail or connect to the wrong thing.
+ * 127.0.0.1 is what every one of those binds also accepts, and is the only
+ * host any of this app's own processes ever need: they run on the same box
+ * they are dialing.
+ */
+export const apiBaseUrl = (): string => {
+  const host = env.BACKEND_HOST
+  const rewritten = host === '' || host === '0.0.0.0' || host === '::' ? '127.0.0.1' : host
+  // RFC 3986's authority grammar only permits a bare ':' inside "[" IPv6address
+  // "]" — an unbracketed literal (this app is tailnet-first, so a `fd7a:...`
+  // bind is ordinary, not exotic) makes `new URL(...)` misparse the first ':'
+  // as the port separator and throw. Guard against double-bracketing an
+  // already-bracketed value; anything without a ':' (hostname or IPv4) is
+  // untouched.
+  const dialHost =
+    rewritten.includes(':') && !rewritten.startsWith('[') ? `[${rewritten}]` : rewritten
+  return `http://${dialHost}:${env.BACKEND_PORT}/api`
+}

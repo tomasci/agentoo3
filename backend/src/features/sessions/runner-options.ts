@@ -7,9 +7,10 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk'
 import { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from '@anthropic-ai/claude-agent-sdk'
 import type { sessions } from '@/db/schema'
-import { env } from '@/env'
+import { apiBaseUrl, env } from '@/env'
 import { attachmentsSystemPromptBlock } from '@/features/attachments/manifest'
 import { sessionAttachmentsSummary } from '@/features/attachments/service'
+import { composeEnvFor } from '@/features/docker/compose-env'
 import { syncProjectPlugin } from '@/features/library/service'
 import { keyPathFor } from '@/features/ssh-keys/service'
 import { configureRepoSsh, isGitRepo } from '@/lib/git'
@@ -17,6 +18,7 @@ import { logger } from '@/lib/logger'
 import { projectPlugin, projectRepo } from '@/lib/paths'
 import { gitSshCommand, keyProblem } from '@/lib/ssh'
 import { getAgent, listAgents, subagents } from '@/library/index'
+import { skillMcpServers } from '@/library/mcp'
 import {
   composeOrchestratorPrompt,
   delegationEnv,
@@ -334,6 +336,13 @@ export async function optionsFor(
       }))
     : []
 
+  // Same principle as `specialists` above, applied to MCP: read from the
+  // plugin copy, not the library, so the servers a session actually gets
+  // cannot disagree with the skills the project was assigned. This runs after
+  // `syncProjectPlugin` above has already refreshed that directory for this
+  // turn.
+  const mcpServers = await skillMcpServers(join(pluginRoot, 'skills'))
+
   // The cap covers the session, not the turn, so what is already spent has to
   // come off it — otherwise a $20 ceiling permits $20 per turn indefinitely.
   // Clamped at zero rather than skipped when overspent: a session past its
@@ -382,7 +391,21 @@ export async function optionsFor(
   return {
     cwd,
     abortController,
-    plugins: [{ type: 'local', path: pluginRoot }],
+    // `skipMcpDiscovery: true` is what keeps this plugin load from ever
+    // reading a plugin-level `.mcp.json` or manifest `mcpServers` at all —
+    // not that we ship one, but a directory-loaded plugin's own MCP servers
+    // are approval-gated and silently dropped in a headless session, so
+    // relying on "we just don't write one" would be one accidental file away
+    // from a skill's tools quietly vanishing. `Options.mcpServers` below is
+    // the ungated path, and `strictMcpConfig: true` makes it the *only* path:
+    // together they mean the skills this project was assigned *are* the
+    // session's MCP servers, by construction, not by convention. One line
+    // (`strictMcpConfig: true`) to revert if a future `claude mcp add` on
+    // this box is ever meant to reach a session — it deliberately will not
+    // today.
+    plugins: [{ type: 'local', path: pluginRoot, skipMcpDiscovery: true }],
+    strictMcpConfig: true,
+    ...(Object.keys(mcpServers).length > 0 && { mcpServers }),
     // 'project' is what loads the repo's own CLAUDE.md, which is usually the
     // most useful context a project has.
     settingSources: ['project'],
@@ -444,6 +467,31 @@ export async function optionsFor(
       // Belt and braces alongside core.sshCommand: this also covers a remote
       // added during the session, and any bare `ssh` the agent runs.
       ...(keyPath ? { GIT_SSH_COMMAND: gitSshCommand(keyPath) } : {}),
+      // The docker skill's own identity: which project and scope a `docker
+      // compose` it runs by hand, or a request it sends to our own API,
+      // targets. Reused from composeEnvFor rather than re-derived so the env
+      // an agent sees when it runs `docker compose` itself is byte-identical
+      // to the env the docker-op worker uses for the same scope — one
+      // function decides AGENTOO_PROJECT_SLUG/AGENTOO_SCOPE/
+      // AGENTOO_COMPOSE_PROJECT/AGENTOO_PORT_0..9, so the two cannot drift.
+      //
+      // The load-bearing part is what it omits: `sessionId: null` when this
+      // session has no worktree of its own (see composeEnvFor's own comment)
+      // means AGENTOO_SESSION_ID is left out of the object entirely here too,
+      // not set to ''. `resolveDockerScope` (features/docker/scope.ts) 400s a
+      // `?sessionId=` naming a session with no worktree, so "send that query
+      // param iff the variable is set" is a rule the docker skill can follow
+      // with a plain `[ -n "$AGENTOO_SESSION_ID" ]` and never construct a
+      // request that 400s — an empty-but-present variable would break that.
+      //
+      // None of this is a new capability: the agent already runs
+      // `bypassPermissions` with `Bash` and the full `process.env` above, so
+      // it could always shell out to curl this API or run docker compose by
+      // hand. This only saves it the trouble of re-deriving the identity
+      // itself.
+      ...composeEnvFor({ slug, sessionId: session.worktreePath ? session.id : null }),
+      AGENTOO_PROJECT_ID: session.projectId,
+      AGENTOO_API_BASE: apiBaseUrl(),
     },
   }
 }

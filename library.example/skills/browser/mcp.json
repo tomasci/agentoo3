@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "playwright-mcp",
+      "args": ["--headless", "--isolated", "--browser", "chromium", "--viewport-size", "1280x720"]
+    }
+  }
+}
