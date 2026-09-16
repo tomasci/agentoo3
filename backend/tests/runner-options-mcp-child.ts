@@ -64,6 +64,9 @@ for (const c of cases) {
       Object.entries(env).filter(([k]) => k.startsWith('AGENTOO_')),
     ),
     hasSessionIdKey: 'AGENTOO_SESSION_ID' in env,
+    // Proof the AGENTOO_* strip is not over-broad: an ordinary inherited
+    // variable has to survive into the session untouched.
+    unrelatedVar: env.UNRELATED_TEST_VAR ?? null,
   }
 }
 

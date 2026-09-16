@@ -273,6 +273,71 @@ export function attachmentsHook(ownUploadsDir: string | null): HookCallbackMatch
 }
 
 /**
+ * Delete, from a just-assembled session env, any `AGENTOO_*` key that
+ * `composeEnvFor` did not emit for this scope — `scoped` being that
+ * function's own return value for the same `DockerScopeRef`, never a
+ * hardcoded list of names, so the next `AGENTOO_*` variable it grows is
+ * covered here automatically rather than one more place that has to
+ * remember to.
+ *
+ * Why this has to *delete* rather than the object literal simply *not
+ * setting* the key: `env: { ...process.env, ...scoped }` is a plain object
+ * merge, and a key `scoped` omits is not overwritten by that spread — it is
+ * only skipped — so whatever `...process.env` already supplied for it
+ * survives into the session untouched. On a box that self-hosts this app
+ * that is not a corner case: a worker process (or anything it spawns) is
+ * itself running inside a session, so its own `AGENTOO_SESSION_ID`,
+ * `AGENTOO_SCOPE`, `AGENTOO_PORT_0`..`9` etc. are already sitting in
+ * `process.env` for every child it launches, including the one building
+ * *this* session's options. `composeEnvFor`'s own comment promises "omitted
+ * entirely at repo scope, not set to an empty string" — that promise is
+ * about its return value; only clearing the inherited key here makes it true
+ * of the env the child process actually receives.
+ *
+ * Concretely, what an unfixed gap here costs: the docker skill's contract is
+ * "send `?sessionId=$AGENTOO_SESSION_ID` iff the variable is set". A
+ * repo-scope session that inherited a stale, truthy id sends *another
+ * session's* id — `resolveDockerScope` (features/docker/scope.ts) then
+ * either 404s (the stale session belongs to a different project) or, worse,
+ * resolves successfully and operates on that other session's worktree. The
+ * same inheritance problem applies to a stale `AGENTOO_SCOPE=worktree` or
+ * stale `AGENTOO_PORT_0..9` reaching a repo-scope session that should have
+ * none of them.
+ *
+ * `delete`, not `env[key] = undefined`: `Options.env` is typed
+ * `Record<string, string>`, which does not admit `undefined` as a value
+ * without a cast — and even set that way it would not be a no-op by
+ * accident, since `node:child_process` (which the SDK's own spawn call is
+ * built on; see `sdk.mjs`) drops any env entry whose value is `undefined`
+ * before building the child process's environment block, same as an absent
+ * key. `delete` is simply the spelling of that removal the type checker
+ * accepts without a cast — verified directly: a child spawned with
+ * `{ ...process.env, FOO: undefined }` sees no `FOO` in its own
+ * `process.env` at all, not `FOO=""` or `FOO="undefined"`.
+ *
+ * `AGENTOO_PROJECT_ID` and `AGENTOO_API_BASE` deliberately never reach this
+ * function at all: `optionsFor` calls this only on `process.env` plus the
+ * few keys it always adds itself, and spreads `scoped`, `AGENTOO_PROJECT_ID`
+ * and `AGENTOO_API_BASE` in *afterwards* — a call site this function does
+ * not control has to keep that order, since passing an object that already
+ * contains those two in here would delete them right back out again (they
+ * are `AGENTOO_*` keys `scoped` never emits either). Object-literal
+ * "last write wins" is what makes the *later* spread of the real
+ * `AGENTOO_PROJECT_ID`/`AGENTOO_API_BASE` win regardless of anything
+ * `process.env` supplied — no clearing needed for those two, only for the
+ * inherited leftovers this function actually targets.
+ */
+function withoutInheritedAgentooKeys(
+  processEnv: Record<string, string>,
+  scoped: Record<string, string>,
+): Record<string, string> {
+  for (const key of Object.keys(processEnv)) {
+    if (key.startsWith('AGENTOO_') && !(key in scoped)) delete processEnv[key]
+  }
+  return processEnv
+}
+
+/**
  * Build the SDK options for this session.
  *
  * The orchestrator's markdown body becomes the system prompt, composed between
@@ -388,6 +453,15 @@ export async function optionsFor(
           ]
         : composed
 
+  // Computed once, ahead of the `return` below, so the object literal that
+  // spreads it and `withoutInheritedAgentooKeys` (which needs the same set
+  // to know what is authoritative) cannot see two different answers for the
+  // same scope.
+  const agentooEnv = composeEnvFor({
+    slug,
+    sessionId: session.worktreePath ? session.id : null,
+  })
+
   return {
     cwd,
     abortController,
@@ -461,12 +535,27 @@ export async function optionsFor(
     forwardSubagentText: true,
     ...(session.sdkSessionId && { resume: session.sdkSessionId }),
     env: {
-      ...process.env,
-      ...delegationEnv(MAX_SPAWN_DEPTH, MAX_CONCURRENT_SUBAGENTS),
-      CLAUDE_AGENT_SDK_CLIENT_APP: 'agentoo/1.0.0',
-      // Belt and braces alongside core.sshCommand: this also covers a remote
-      // added during the session, and any bare `ssh` the agent runs.
-      ...(keyPath ? { GIT_SSH_COMMAND: gitSshCommand(keyPath) } : {}),
+      // Stripped down to `process.env` plus the process-level extras this
+      // function always sets, *before* `agentooEnv` and the two explicit
+      // `AGENTOO_*` keys below are added back — see
+      // `withoutInheritedAgentooKeys`'s own comment for why the stripping has
+      // to happen on this narrower object rather than on the env this whole
+      // literal produces: AGENTOO_PROJECT_ID and AGENTOO_API_BASE are
+      // themselves `AGENTOO_*` keys `agentooEnv` never emits, so stripping
+      // after they were added would delete the ones this function just set,
+      // not just the ones `process.env` supplied.
+      ...withoutInheritedAgentooKeys(
+        {
+          ...process.env,
+          ...delegationEnv(MAX_SPAWN_DEPTH, MAX_CONCURRENT_SUBAGENTS),
+          CLAUDE_AGENT_SDK_CLIENT_APP: 'agentoo/1.0.0',
+          // Belt and braces alongside core.sshCommand: this also covers a
+          // remote added during the session, and any bare `ssh` the agent
+          // runs.
+          ...(keyPath ? { GIT_SSH_COMMAND: gitSshCommand(keyPath) } : {}),
+        },
+        agentooEnv,
+      ),
       // The docker skill's own identity: which project and scope a `docker
       // compose` it runs by hand, or a request it sends to our own API,
       // targets. Reused from composeEnvFor rather than re-derived so the env
@@ -475,21 +564,26 @@ export async function optionsFor(
       // function decides AGENTOO_PROJECT_SLUG/AGENTOO_SCOPE/
       // AGENTOO_COMPOSE_PROJECT/AGENTOO_PORT_0..9, so the two cannot drift.
       //
-      // The load-bearing part is what it omits: `sessionId: null` when this
-      // session has no worktree of its own (see composeEnvFor's own comment)
-      // means AGENTOO_SESSION_ID is left out of the object entirely here too,
-      // not set to ''. `resolveDockerScope` (features/docker/scope.ts) 400s a
-      // `?sessionId=` naming a session with no worktree, so "send that query
-      // param iff the variable is set" is a rule the docker skill can follow
-      // with a plain `[ -n "$AGENTOO_SESSION_ID" ]` and never construct a
-      // request that 400s — an empty-but-present variable would break that.
+      // What it omits at repo scope (`sessionId: null`) is the whole point,
+      // but a plain object spread cannot make an omission stick on its own —
+      // see `withoutInheritedAgentooKeys` above for why this alone was not
+      // enough and what closes the gap. `resolveDockerScope`
+      // (features/docker/scope.ts) 400s a `?sessionId=` naming a session
+      // with no worktree, so "send that query param iff the variable is
+      // set" is a rule the docker skill can follow with a plain
+      // `[ -n "$AGENTOO_SESSION_ID" ]` and never construct a request that
+      // 400s — an empty-but-present variable would break that; a stale,
+      // truthy one (see above) breaks it worse.
       //
       // None of this is a new capability: the agent already runs
       // `bypassPermissions` with `Bash` and the full `process.env` above, so
       // it could always shell out to curl this API or run docker compose by
       // hand. This only saves it the trouble of re-deriving the identity
       // itself.
-      ...composeEnvFor({ slug, sessionId: session.worktreePath ? session.id : null }),
+      ...agentooEnv,
+      // Set unconditionally, so these two always win over whatever
+      // `...process.env` carried for them — no stripping needed here, unlike
+      // the rest of the AGENTOO_* set above.
       AGENTOO_PROJECT_ID: session.projectId,
       AGENTOO_API_BASE: apiBaseUrl(),
     },

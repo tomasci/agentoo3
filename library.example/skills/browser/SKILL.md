@@ -35,6 +35,16 @@ pixels to an expectation, so a screenshot only ever tells you "something
 rendered," never "the right thing rendered." Use it to attach evidence to a
 report, not as the check itself.
 
+Call it with no `filename`. Leaving `filename` unset returns the image inline,
+in the same response you get back — the only copy that actually reaches your
+transcript and your report. Passing an explicit `filename` does the opposite
+of what it looks like it does: the call still reports success, but it returns
+no image at all, and the file it silently writes lands in the server
+process's own working directory — the project checkout you are working
+in — not anywhere you named. A screenshot you cannot see is worth nothing,
+and a stray PNG dropped into the repo you are checked out into is worse than
+nothing.
+
 A page that loads is not a passing page. Load it, then check the specific
 thing you were asked to check — an element, its text, a value on the page —
 in the snapshot. "It came back with a 200" and "the page loaded" are not

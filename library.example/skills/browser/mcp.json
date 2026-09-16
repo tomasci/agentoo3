@@ -2,7 +2,7 @@
   "mcpServers": {
     "playwright": {
       "command": "playwright-mcp",
-      "args": ["--headless", "--isolated", "--browser", "chromium", "--viewport-size", "1280x720"]
+      "args": ["--headless", "--isolated", "--browser", "chromium", "--viewport-size", "1280x720", "--output-dir", "/opt/agentoo/browser-output", "--output-max-size", "209715200"]
     }
   }
 }
