@@ -191,22 +191,39 @@ if [[ -d "$REPO_ROOT/library.example" ]]; then
   # purpose, so it's consistent with the rest of this file's style — a
   # missing or empty library.example subdirectory just leaves the pattern
   # unexpanded, which the `-e` check below skips over without erroring.
+  # A skip is silent by design (see above); this makes a differing skip
+  # visible without changing what gets overwritten. There is no way to tell
+  # "operator edited this on purpose" apart from "the shipped file moved on
+  # since this was seeded" — both just look like dest exists and its content
+  # differs — so this warns either way rather than guessing which one it is.
   for src in "$REPO_ROOT/library.example/agents/"*.md; do
     [[ -e "$src" ]] || continue
     dest="$LIBRARY_DIR/agents/$(basename "$src")"
-    [[ -e "$dest" ]] && continue
+    if [[ -e "$dest" ]]; then
+      diff -q "$src" "$dest" >/dev/null 2>&1 \
+        || log_warn "$dest differs from the shipped version (not overwritten) — diff against $src"
+      continue
+    fi
     as_root cp -a "$src" "$dest" && seeded=$(( seeded + 1 ))
   done
   for src in "$REPO_ROOT/library.example/skills/"*/; do
     [[ -e "$src" ]] || continue
     dest="$LIBRARY_DIR/skills/$(basename "$src")"
-    [[ -e "$dest" ]] && continue
+    if [[ -e "$dest" ]]; then
+      diff -rq "$src" "$dest" >/dev/null 2>&1 \
+        || log_warn "$dest differs from the shipped version (not overwritten) — diff against $src"
+      continue
+    fi
     as_root cp -a "$src" "$dest" && seeded=$(( seeded + 1 ))
   done
   for src in "$REPO_ROOT/library.example/prompts/"*.md; do
     [[ -e "$src" ]] || continue
     dest="$LIBRARY_DIR/prompts/$(basename "$src")"
-    [[ -e "$dest" ]] && continue
+    if [[ -e "$dest" ]]; then
+      diff -q "$src" "$dest" >/dev/null 2>&1 \
+        || log_warn "$dest differs from the shipped version (not overwritten) — diff against $src"
+      continue
+    fi
     as_root cp -a "$src" "$dest" && seeded=$(( seeded + 1 ))
   done
 

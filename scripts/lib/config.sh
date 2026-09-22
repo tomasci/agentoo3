@@ -6,6 +6,23 @@
 #   NODE_MAJOR=22 ./install.sh
 #
 # Source this file; do not execute it.
+#
+# The policy every step is expected to follow: converge the box to the
+# version its own configuration declares, on every run, not just the first.
+# An exact pin (a version number) converges exactly; a declared channel (e.g.
+# CLAUDE_CODE_CHANNEL=stable) converges to whatever that channel resolves to
+# right now. "Already present" is never by itself a reason to skip — that was
+# the bug in 55-install-claude-code.sh that left the CLI at 2.1.236 for three
+# weeks on a box that was re-provisioned constantly.
+#
+# Two steps do not yet follow this and are known, deliberate exceptions rather
+# than oversights: 50-install-bun.sh (skips whenever the installed bun is >=
+# MIN_BUN_VERSION, so it never moves once past that floor) and
+# 30-install-python.sh's uv install (`have uv` skips forever). Both are left
+# alone here on purpose — bun runs both live services, and changing when it
+# upgrades in the same change that changes when the CLI upgrades would make a
+# bad outcome un-bisectable. apt-installed steps already converge on their own,
+# via 10-system-upgrade.sh's full-upgrade, so they need no equivalent change.
 
 [[ -n "${_AGENTOO_CONFIG_LOADED:-}" ]] && return 0
 _AGENTOO_CONFIG_LOADED=1
@@ -363,9 +380,13 @@ UFW_LOGGING="${UFW_LOGGING:-low}"
 # 'stable' trails 'latest' by about a week and skips releases with major
 # regressions — the right default for a server that is not babysat.
 CLAUDE_CODE_CHANNEL="${CLAUDE_CODE_CHANNEL:-stable}"          # stable | latest
-# native: per-user in ~/.local/bin, and updates itself in the background —
-# which matters, because Claude Code ships often.
-# apt: system-wide and signed, but only moves on a system upgrade.
+# native: per-user in ~/.local/bin. Its own installer auto-updates in the
+# background on a laptop where something runs `claude` regularly; nothing on
+# a server does, so here it is 55-install-claude-code.sh re-running (on every
+# install.sh invocation, per the convergence policy above) that keeps it
+# current, not the installer's own background updater.
+# apt: system-wide and signed; converges via 10-system-upgrade.sh's
+# full-upgrade instead, like any other apt package.
 CLAUDE_CODE_INSTALL_METHOD="${CLAUDE_CODE_INSTALL_METHOD:-native}"
 CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-}"                # native only, e.g. 2.1.89
 # Anthropic's release signing key, from https://code.claude.com/docs/en/setup.
@@ -373,8 +394,11 @@ CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-}"                # native only, e.g
 CLAUDE_CODE_GPG_FINGERPRINT="${CLAUDE_CODE_GPG_FINGERPRINT:-31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE}"
 CLAUDE_CODE_MIN_RAM_MB="${CLAUDE_CODE_MIN_RAM_MB:-4096}"
 # A native install lands in the user's home, which is not on the PATH of cron,
-# systemd, or a non-login shell. /usr/local/bin is on all of them, and linking
-# the launcher (rather than the versioned binary) survives auto-updates.
+# systemd, or a non-login shell. /usr/local/bin is on all of them, so this
+# gives it a stable path there, re-pointed at whatever the install location
+# currently resolves to on every run — see 55-install-claude-code.sh's
+# claude_path() for why that resolution has to start from the install
+# location rather than from PATH.
 CLAUDE_CODE_SYMLINK="${CLAUDE_CODE_SYMLINK:-1}"
 CLAUDE_CODE_SYMLINK_PATH="${CLAUDE_CODE_SYMLINK_PATH:-/usr/local/bin/claude}"
 

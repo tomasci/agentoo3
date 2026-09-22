@@ -2,7 +2,7 @@
   "name": "agentoo-backend",
   "private": true,
   "type": "module",
-  "version": "0.1.100",
+  "version": "0.1.102",
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "dev:worker": "bun --watch src/worker.ts",
@@ -19,7 +19,7 @@
     "test": "bun test tests/"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.252",
+    "@anthropic-ai/claude-agent-sdk": "0.3.280",
     "@hono/zod-openapi": "1.6.1",
     "bullmq": "6.3.4",
     "consola": "3.4.2",

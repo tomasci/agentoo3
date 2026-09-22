@@ -3,8 +3,8 @@
 // The seeding block is extracted verbatim from the shipped script (by line
 // range, re-derived from its own markers so an edit above it cannot silently
 // make this test exercise the wrong lines) and sourced into a harness that
-// stubs only `as_root`, `log_ok` and `log_debug` — the three things that need
-// privilege or a terminal. `set -Eeuo pipefail` matches scripts/lib/common.sh
+// stubs only `as_root`, `log_ok`, `log_debug` and `log_warn` — the things that
+// need privilege or a terminal. `set -Eeuo pipefail` matches scripts/lib/common.sh
 // line 10, so a failure mode that depends on errexit behaves here as it does
 // on a real box.
 //
@@ -57,6 +57,7 @@ async function runSeeding(libraryDir: string, repoRoot = REPO): Promise<SeedResu
     // The real as_root is `run ${_SUDO[@]+...} "$@"`; unprivileged here.
     'as_root() { "$@"; }',
     'log_ok()    { echo "OK: $*"; }',
+    'log_warn()  { echo "WARN: $*"; }',
     'log_debug() { echo "DEBUG: $*"; }',
     block,
     '',

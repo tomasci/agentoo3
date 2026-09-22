@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
-# Claude Code CLI.
+# Claude Code CLI — the SYSTEM install, used only for `claude setup-token` and
+# `claude doctor`. The agent runtime never touches this: it runs the CLI
+# bundled inside @anthropic-ai/claude-agent-sdk under node_modules, so
+# upgrading this install changes nothing about which Claude Code a session
+# actually runs.
 #
-# Uses Anthropic's native installer, which updates itself in the background —
-# worth having, because Claude Code ships often.
+# Anthropic's native installer updates itself in the background — on a laptop
+# where something runs `claude` regularly. Nothing on this server ever
+# invokes the system CLI, so that background update never fires here; this
+# step is what moves the version forward instead, and — per the convergence
+# policy in lib/config.sh — it now does that on every run, not just the first.
 #
 # The native install is per-user (~/.local/bin/claude), so it runs as APP_USER,
 # not root: provisioning runs as root, and a root-owned install would sit in
 # /root where the account that actually runs the app cannot see it.
 #
 # CLAUDE_CODE_INSTALL_METHOD=apt switches to Anthropic's signed apt repository:
-# system-wide and GPG-verified, but it only moves on a system upgrade.
+# system-wide and GPG-verified, and converges through 10-system-upgrade.sh's
+# full-upgrade like any other apt package, so it needs no re-run logic of its
+# own.
 #
 # Docs: https://code.claude.com/docs/en/setup
 
@@ -154,15 +163,27 @@ report_auth() {
 app_home="$(getent passwd "$APP_USER" 2>/dev/null | cut -d: -f6 || true)"
 
 claude_path() {
-  if have claude; then command -v claude; return 0; fi
+  # The install location wins over PATH, not the other way round. Once the
+  # symlink below exists, /usr/local/bin is on root's PATH, `have claude` is
+  # true and `command -v claude` returns the symlink itself — so checking PATH
+  # first turns the `ln -sfn` further down into
+  # `ln -sfn /usr/local/bin/claude /usr/local/bin/claude`, a symlink pointing
+  # at itself that `readlink -f` cannot resolve. That is what broke this box.
+  # An empty app_home (the getent above swallows its own failure with
+  # `|| true`) must not fall through to the PATH branch either — for the apt
+  # method there is no per-user path and this is a no-op, but for native it
+  # would silently reopen the same loop.
   if [[ -n "$app_home" && -x "$app_home/.local/bin/claude" ]]; then
     printf '%s' "$app_home/.local/bin/claude"; return 0
   fi
+  if have claude; then command -v claude; return 0; fi
   return 1
 }
 
+before_version=""
 if claude_bin="$(claude_path)"; then
-  log_ok "claude $("$claude_bin" --version 2>/dev/null | head -1) already installed at $claude_bin"
+  before_version="$("$claude_bin" --version 2>/dev/null | head -1)"
+  log_ok "claude $before_version already installed at $claude_bin"
   installed_already=1
 else
   installed_already=0
@@ -174,34 +195,73 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   exit 0
 fi
 
-if (( ! installed_already )); then
-  case "$CLAUDE_CODE_INSTALL_METHOD" in
-    apt)
-      if ! install_claude_apt; then
-        log_warn "apt install failed; falling back to the native installer."
-        install_claude_native || die "Could not install Claude Code."
-      fi
-      ;;
-    native)
-      install_claude_native || die "Could not install Claude Code."
-      ;;
-  esac
-  hash -r
+# Runs every time, installed or not — installed_already only picks the log
+# wording below. Both branches are already upgrade mechanisms on their own:
+# the native installer's own install.sh has no already-installed check, so
+# re-running it against 'stable'/'latest' moves to whatever that channel
+# currently resolves to; `apt-get install` on an already-installed package
+# upgrades it. The guard that used to wrap this case statement is the reason
+# a re-run never moved the version at all.
+if (( installed_already )); then
+  log_info "Upgrading claude-code via '$CLAUDE_CODE_INSTALL_METHOD' (${CLAUDE_CODE_CHANNEL} channel)"
+else
+  log_info "Installing claude-code via '$CLAUDE_CODE_INSTALL_METHOD' (${CLAUDE_CODE_CHANNEL} channel)"
 fi
+case "$CLAUDE_CODE_INSTALL_METHOD" in
+  apt)
+    if ! install_claude_apt; then
+      log_warn "apt install failed; falling back to the native installer."
+      install_claude_native || die "Could not install Claude Code."
+    fi
+    ;;
+  native)
+    install_claude_native || die "Could not install Claude Code."
+    ;;
+esac
+hash -r
 
 claude_bin="$(claude_path)" || die "claude not found after install (looked on PATH and in $app_home/.local/bin)."
-log_ok "claude $("$claude_bin" --version 2>/dev/null | head -1) at $claude_bin"
+after_version="$("$claude_bin" --version 2>/dev/null | head -1)"
+if [[ -z "$before_version" ]]; then
+  log_ok "claude installed: $after_version at $claude_bin"
+elif [[ "$before_version" == "$after_version" ]]; then
+  log_ok "claude already current ($after_version) at $claude_bin"
+else
+  log_ok "claude upgraded: $before_version -> $after_version at $claude_bin"
+fi
 
 # --- make it reachable --------------------------------------------------------
-# The native installer puts the launcher in the user's home. That is fine for an
-# interactive login shell, but cron, systemd and any non-login shell have their
-# own PATH and will not find it.
+# ~/.local/bin/claude is not a launcher wrapping a separately-versioned binary
+# — it is itself a symlink straight into ~/.local/share/claude/versions/<ver>,
+# repointed in place whenever the CLI updates. That is fine for an interactive
+# login shell, but cron, systemd and any non-login shell have their own PATH
+# and will not find it there, so this links it into /usr/local/bin, which is
+# on all of theirs.
 if [[ "$CLAUDE_CODE_INSTALL_METHOD" == "native" && "$CLAUDE_CODE_SYMLINK" == "1" ]]; then
-  # Link the launcher, not the versioned binary: auto-updates replace what the
-  # launcher points to, so this link keeps working.
+  # A broken link here — self-referential or merely dangling — is damage left
+  # by a version of this script whose claude_path() checked PATH before the
+  # install location: once /usr/local/bin/claude was on root's PATH, this step
+  # pointed it at itself. `ln -sfn` below overwrites a broken symlink same as
+  # any other file, so this repair is not load-bearing for the fix — that is
+  # claude_path() above, which no longer resolves to this path — but a box
+  # already carrying the damage should say so rather than heal silently, the
+  # same way the unconditional "Linked" log below used to hide it.
+  if [[ -L "$CLAUDE_CODE_SYMLINK_PATH" && ! -e "$CLAUDE_CODE_SYMLINK_PATH" ]]; then
+    log_warn "$CLAUDE_CODE_SYMLINK_PATH is a broken symlink (self-referential or dangling) — removing it"
+    as_root rm -f "$CLAUDE_CODE_SYMLINK_PATH"
+    hash -r
+    claude_bin="$(claude_path)" || die "claude not found after removing the broken symlink at $CLAUDE_CODE_SYMLINK_PATH."
+  fi
+
   as_root ln -sfn "$claude_bin" "$CLAUDE_CODE_SYMLINK_PATH"
-  log_ok "Linked $CLAUDE_CODE_SYMLINK_PATH -> $claude_bin"
   hash -r
+
+  # Verify rather than assume: an unconditional "Linked" log with no check
+  # that the link actually resolves is exactly how the self-loop above went
+  # unnoticed for three weeks.
+  link_version="$("$CLAUDE_CODE_SYMLINK_PATH" --version 2>/dev/null | head -1)"
+  [[ -n "$link_version" ]] || die "$CLAUDE_CODE_SYMLINK_PATH does not run after linking to $claude_bin."
+  log_ok "Linked $CLAUDE_CODE_SYMLINK_PATH -> $claude_bin ($link_version)"
 
   home_mode="$(stat -c '%a' "$app_home" 2>/dev/null || true)"
   case "$home_mode" in
