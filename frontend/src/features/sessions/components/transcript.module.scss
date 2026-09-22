@@ -302,10 +302,27 @@
 }
 
 // Top-right and out of the way: the reply itself is the thing being read.
-.answerTime {
+// The wrapper (rather than `.answerTime` itself) carries `justify-self`, so
+// the model label sits on the same line as the time instead of getting its
+// own row in `.answer`'s single-column grid.
+.answerMeta {
   justify-self: end;
+}
+
+.answerTime {
   font-size: var(--text-2xs);
   line-height: var(--leading-2xs);
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+// The model that produced the message — the wire id (e.g. `claude-opus-5`),
+// shown as-is rather than prettified, and only ever present when the source
+// message actually carried one (see `modelOf`). Same muted treatment as
+// `.promptTime` / `.answerTime`: this is incidental metadata, not a feature.
+.model {
+  margin-inline-start: var(--space-2);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  color: var(--color-text-muted);
 }

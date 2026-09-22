@@ -259,6 +259,7 @@
     },
     "transcript": {
       "you": "You",
+      "model": "Model: {{model}}",
       "empty": "Nothing yet. Send a message to start the session.",
       "delegatedPrompt": "Prompt given to {{agent}}",
       "thinking": "Thinking",

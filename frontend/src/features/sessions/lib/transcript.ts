@@ -44,8 +44,19 @@ export type TranscriptNode =
       results: Record<string, ToolResult>
       createdAt: string
     }
-  /** The reply that closes a turn: shown open, at full size, as markdown. */
-  | { kind: 'answer'; id: string; seq: number; text: string; createdAt: string }
+  /** The reply that closes a turn: shown open, at full size, as markdown.
+   * `model` is carried here rather than read off a `message` the way the
+   * `event` variant does, because promoting a row into this variant (see
+   * `markAnswers` below) drops everything but `text` — the source message is
+   * gone by the time anything renders this node. */
+  | {
+      kind: 'answer'
+      id: string
+      seq: number
+      text: string
+      model: string | null
+      createdAt: string
+    }
   | {
       kind: 'task'
       id: string
@@ -296,6 +307,7 @@ function markAnswers(roots: TranscriptNode[]): void {
               id: answer.id,
               seq: answer.seq,
               text,
+              model: modelOf(answer.message),
               createdAt: answer.createdAt,
             }
           }
@@ -333,6 +345,17 @@ export function thinkingOf(message: SessionMessage): string {
     )
     .map((b) => b.thinking)
     .join('\n\n')
+}
+
+/** The model that produced an assistant message — only ever on an
+ * `assistant` frame's `message.model`. Absent from a `prompt` (the human's own
+ * words), a `result` (session-level accounting, not attributable to a single
+ * model) and anything else the SDK sends with no `message` of its own. A
+ * subagent's messages can and do name a different model from the
+ * orchestrator's — this is genuinely per-message, not per-session. */
+export function modelOf(message: SessionMessage): string | null {
+  const model = ((message.payload ?? {}) as { message?: { model?: unknown } }).message?.model
+  return typeof model === 'string' ? model : null
 }
 
 export interface ToolCall {

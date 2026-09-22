@@ -18,6 +18,7 @@ import { formatFullTime, formatTime } from '../lib/format'
 import {
   buildTranscript,
   type MessageFile,
+  modelOf,
   type ToolResult,
   type TranscriptNode,
   textOf,
@@ -326,9 +327,28 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
 
   // The turn's closing reply: open, full size, and the thing you came to read.
   if (node.kind === 'answer') {
+    const time = formatTime(node.createdAt) && (
+      <Timestamp createdAt={node.createdAt} className={styles.answerTime} />
+    )
+    // Same rule as the Collapsible `meta` slot below: an unparsable createdAt
+    // and an absent model must produce no wrapper at all, not an empty one —
+    // an always-rendered `.answerMeta` span would itself be a second child of
+    // `.answer`'s single-column grid even with nothing visible inside it.
     return (
       <div className={styles.answer}>
-        <Timestamp createdAt={node.createdAt} className={styles.answerTime} />
+        {(time || node.model) && (
+          <span className={styles.answerMeta}>
+            {time}
+            {node.model && (
+              <span
+                className={styles.model}
+                title={t('sessions.transcript.model', { model: node.model })}
+              >
+                {node.model}
+              </span>
+            )}
+          </span>
+        )}
         <Markdown>{node.text}</Markdown>
       </div>
     )
@@ -337,9 +357,26 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
   // Collapsible only renders its meta slot when this is truthy, so an
   // unparsable createdAt must produce undefined here, not an element that
   // renders empty.
-  const meta = formatTime(node.createdAt) && <Timestamp createdAt={node.createdAt} />
+  const time = formatTime(node.createdAt) && <Timestamp createdAt={node.createdAt} />
 
   if (node.kind === 'event') {
+    // Absent from most rows (a tool_result, a system frame) — only an
+    // `assistant`/`user` message names the model that produced it.
+    const model = modelOf(node.message)
+    // Either, not `time` alone: gating on the timestamp only meant a row with
+    // a real model but an unparsable createdAt lost the model along with it —
+    // the same "nothing to show" rule as the answer branch above, which
+    // already renders on `time || node.model`.
+    const meta = (time || model) && (
+      <>
+        {time}
+        {model && (
+          <span className={styles.model} title={t('sessions.transcript.model', { model })}>
+            {model}
+          </span>
+        )}
+      </>
+    )
     return (
       <Collapsible title={node.message.title ?? ''} meta={meta}>
         <MessageBody message={node.message} results={node.results} />
@@ -354,7 +391,7 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
       // Live progress, but only while it means something: on a finished task the
       // last ping is just whatever it happened to be doing when it stopped.
       note={node.status === 'running' ? node.progress : null}
-      meta={meta}
+      meta={time}
     >
       {/* The instruction the orchestrator wrote. Shown first and in full: it is
           the only place the delegation is visible. */}
