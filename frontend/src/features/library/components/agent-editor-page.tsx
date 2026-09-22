@@ -20,8 +20,14 @@ import {
   Switch,
   Textarea,
 } from '@/shared/ui'
-import { useAgent, useCreateAgent, useDeleteAgent, useUpdateAgent } from '../hooks/use-library'
-import { AVAILABLE_TOOLS, EFFORTS, MODELS } from '../model/tools'
+import {
+  useAgent,
+  useCreateAgent,
+  useDeleteAgent,
+  useModels,
+  useUpdateAgent,
+} from '../hooks/use-library'
+import { AVAILABLE_TOOLS, EFFORTS } from '../model/tools'
 import styles from './library.module.scss'
 
 interface Draft {
@@ -56,6 +62,7 @@ export function AgentEditorPage({ name }: { name?: string }) {
   const navigate = useNavigate()
   const isNew = !name
   const { data: agent, isPending } = useAgent(name ?? '')
+  const models = useModels()
   const create = useCreateAgent()
   const update = useUpdateAgent()
   const remove = useDeleteAgent()
@@ -117,7 +124,8 @@ export function AgentEditorPage({ name }: { name?: string }) {
   }
 
   const busy = create.isPending || update.isPending
-  if (!isNew && isPending) return <Spinner label={t('common.loading')} block />
+  if ((!isNew && isPending) || models.isPending)
+    return <Spinner label={t('common.loading')} block />
 
   const roleOptions: SelectOption[] = [
     {
@@ -131,10 +139,28 @@ export function AgentEditorPage({ name }: { name?: string }) {
       description: t('library.roleHint.orchestrator'),
     },
   ]
-  const modelOptions: SelectOption[] = MODELS.map((m) => ({
-    value: m,
-    label: m || t('library.agent.inherit'),
-  }))
+  const modelOptions: SelectOption[] = [
+    { value: '', label: t('library.agent.default') },
+    ...(models.data?.models ?? []).map((m) => ({
+      value: m.value,
+      label: m.displayName,
+      description: m.description,
+    })),
+  ]
+  // Only a subagent has a parent to inherit a model from; an orchestrator
+  // drives its own session, so the option would mean nothing there. The API
+  // never returns this value at all — it only ever comes from an agent's own
+  // frontmatter.
+  if (draft.role === 'subagent') {
+    modelOptions.push({ value: 'inherit', label: t('library.agent.inherit') })
+  }
+  // The saved model can be one this list no longer has — retired since, hand-
+  // edited, or written in a form (e.g. `opus[1m]`) this box's list doesn't
+  // currently carry — so it stays selectable, labelled with the raw value,
+  // rather than opening the agent silently changing or blanking it.
+  if (draft.model && !modelOptions.some((o) => o.value === draft.model)) {
+    modelOptions.push({ value: draft.model, label: draft.model })
+  }
   const effortOptions: SelectOption[] = EFFORTS.map((e2) => ({
     value: e2,
     label: e2 || t('library.agent.default'),
@@ -178,7 +204,12 @@ export function AgentEditorPage({ name }: { name?: string }) {
             />
           )}
 
-          <Field label={t('library.agent.model')}>
+          <Field
+            label={t('library.agent.model')}
+            hint={
+              models.data?.source === 'fallback' ? t('library.agent.modelFallbackHint') : undefined
+            }
+          >
             <Select
               options={modelOptions}
               value={draft.model}

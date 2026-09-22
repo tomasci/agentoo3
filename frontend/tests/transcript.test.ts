@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test'
 import {
   buildTranscript,
   displayAgent,
+  modelOf,
   textOf,
   thinkingOf,
   toolCallsOf,
@@ -230,6 +231,44 @@ test('a turn still running has no answer yet', () => {
   n = 0
   const nodes = buildTranscript([msg({ type: 'prompt', payload: { text: 'go' } }), say('thinking about it')])
   expect(nodes.some((x) => x.kind === 'answer')).toBe(false)
+})
+
+test('modelOf reads the model straight off an assistant frame, and is null everywhere else', () => {
+  const withModel = { payload: { message: { model: 'claude-opus-5', content: [] } } } as never
+  expect(modelOf(withModel)).toBe('claude-opus-5')
+
+  n = 0
+  const prompt = msg({ type: 'prompt', payload: { text: 'go' } })
+  const result = msg({ type: 'result', payload: { subtype: 'success' } })
+  expect(modelOf(prompt)).toBeNull()
+  expect(modelOf(result)).toBeNull()
+})
+
+test("the answer node carries the model of the message it replaces, since markAnswers drops the message itself", () => {
+  n = 0
+  const nodes = buildTranscript([
+    msg({ type: 'prompt', payload: { text: 'go' } }),
+    msg({
+      type: 'assistant',
+      title: 'orchestrator: replying',
+      payload: { message: { model: 'claude-opus-5', content: [{ type: 'text', text: 'done' }] } },
+    }),
+    msg({ type: 'result', title: 'Turn complete', payload: { subtype: 'success' } }),
+  ])
+  const answer = nodes[1]
+  if (answer?.kind !== 'answer') throw new Error('expected an answer node')
+  expect(answer.model).toBe('claude-opus-5')
+})
+
+test('an answer promoted from a message with no model carries model: null, not undefined', () => {
+  n = 0
+  const nodes = buildTranscript([
+    say('done'),
+    msg({ type: 'result', title: 'Turn complete', payload: { subtype: 'success' } }),
+  ])
+  const answer = nodes[0]
+  if (answer?.kind !== 'answer') throw new Error('expected an answer node')
+  expect(answer.model).toBeNull()
 })
 
 test('thinking is read out of the payload rather than dumped as JSON', () => {

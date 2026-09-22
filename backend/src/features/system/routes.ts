@@ -1,7 +1,8 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import { errorSchema } from '@/features/projects/schema'
+import { getModels } from './models'
 import { getPrompt, resetPrompt, updatePrompt } from './prompts'
-import { promptSchema, updatePromptSchema } from './schema'
+import { modelsResponseSchema, promptSchema, updatePromptSchema } from './schema'
 import { systemStats } from './service'
 
 const systemSchema = z.object({
@@ -53,6 +54,32 @@ systemRouter.openapi(
     },
   }),
   async (c) => c.json(await systemStats(), 200),
+)
+
+// --- the model list -------------------------------------------------------
+//
+// Read-only and unowned by anything, like the prompt registry below, but for
+// a different reason: this is never listed, created, renamed or assigned
+// either, it just answers "what can `model` be set to right now" for
+// whichever caller asks — currently the library editor's agent/orchestrator
+// forms, but nothing here is specific to them.
+
+systemRouter.openapi(
+  createRoute({
+    method: 'get',
+    path: '/system/models',
+    tags: ['system'],
+    summary: 'The models this box can actually use right now',
+    description:
+      'Always 200, never an error response: a failed or timed-out probe (or ' +
+      'no Claude credential configured at all) reports the built-in alias ' +
+      "list with `source: 'fallback'` rather than failing the request, so a " +
+      'caller can always render a picker.',
+    responses: {
+      200: json(modelsResponseSchema, 'The current model list, live or fallback'),
+    },
+  }),
+  async (c) => c.json(await getModels(), 200),
 )
 
 // --- operator-editable prompts -------------------------------------------------
