@@ -33,3 +33,55 @@ export const updatePromptSchema = z.object({
     .max(200_000),
 })
 export type UpdatePromptInput = z.infer<typeof updatePromptSchema>
+
+// --- the model list, mirroring library/models.ts's ModelOption -------------
+//
+// A separate enum from features/library/schema.ts's own `effortSchema`
+// rather than an import of it: this describes what a *model* supports, not
+// what an agent is configured with, and agentFrontmatterSchema (library/
+// types.ts) already carries the same values a second time for the same
+// reason — the two are duplicated on purpose rather than layered onto one
+// import, the same precedent this file follows.
+const modelEffortLevelSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max'])
+
+export const modelOptionSchema = z.object({
+  value: z.string().openapi({
+    description:
+      "What to write into an agent's `model` frontmatter or a session's model " +
+      'override. Not restricted to a fixed shape — the SDK has returned values ' +
+      "containing brackets (e.g. 'opus[1m]') — because Claude Code, not this " +
+      'app, is what actually validates it.',
+    example: 'opus[1m]',
+  }),
+  resolvedModel: z.string().optional().openapi({
+    description:
+      "Canonical wire model id this row's `value` resolves to, e.g. 'sonnet' -> 'claude-sonnet-5'.",
+  }),
+  displayName: z.string(),
+  description: z.string(),
+  supportsEffort: z.boolean().optional(),
+  supportedEffortLevels: z.array(modelEffortLevelSchema).optional(),
+  supportsAdaptiveThinking: z.boolean().optional(),
+  supportsFastMode: z.boolean().optional(),
+  supportsAutoMode: z.boolean().optional(),
+})
+export type ModelOptionDto = z.infer<typeof modelOptionSchema>
+
+export const modelsSourceSchema = z.enum(['live', 'fallback']).openapi({
+  description:
+    "'live' when this ran Query.supportedModels() against this box's Claude " +
+    "Code just now; 'fallback' when that could not be reached — no credential " +
+    'configured, or the probe failed or timed out — and `models` is the ' +
+    'built-in alias list instead.',
+})
+
+export const modelsResponseSchema = z.object({
+  models: z.array(modelOptionSchema),
+  source: modelsSourceSchema,
+  fetchedAt: z.string().openapi({
+    description:
+      'ISO timestamp of the underlying probe: when it last succeeded, for ' +
+      "'live', or when the failing attempt happened, for 'fallback'.",
+  }),
+})
+export type ModelsDto = z.infer<typeof modelsResponseSchema>

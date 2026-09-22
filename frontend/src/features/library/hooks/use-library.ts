@@ -15,6 +15,7 @@ import {
   getApiProjectsIdLibraryQueryKey,
   getApiProjectsIdLibraryQueryOptions,
 } from '@/shared/api/generated/hooks/useGetApiProjectsIdLibrary'
+import { getApiSystemModelsQueryOptions } from '@/shared/api/generated/hooks/useGetApiSystemModels'
 import { postApiLibraryAgentsMutationOptions } from '@/shared/api/generated/hooks/usePostApiLibraryAgents'
 import { postApiLibrarySkillsMutationOptions } from '@/shared/api/generated/hooks/usePostApiLibrarySkills'
 import { putApiLibraryAgentsNameMutationOptions } from '@/shared/api/generated/hooks/usePutApiLibraryAgentsName'
@@ -45,6 +46,12 @@ export function useSkill(name: string) {
     ...getApiLibrarySkillsNameQueryOptions({ path: { name } }),
     enabled: Boolean(name),
   })
+}
+
+// The backend already enforces a 6h TTL on the underlying probe and refreshes
+// it there; a second, shorter one here would just let the two disagree.
+export function useModels() {
+  return useQuery({ ...getApiSystemModelsQueryOptions(), staleTime: Infinity })
 }
 
 function useInvalidateLibrary() {

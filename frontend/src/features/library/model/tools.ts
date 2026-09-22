@@ -20,5 +20,4 @@ export const AVAILABLE_TOOLS = [
   'NotebookEdit',
 ] as const
 
-export const MODELS = ['', 'opus', 'sonnet', 'haiku', 'inherit'] as const
 export const EFFORTS = ['', 'low', 'medium', 'high', 'xhigh', 'max'] as const

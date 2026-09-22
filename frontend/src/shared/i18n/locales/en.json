@@ -330,6 +330,7 @@
         "off": "A solo agent: it gets neither the method nor the delegation instruction, and does the work itself."
       },
       "model": "Model",
+      "modelFallbackHint": "Showing the built-in model list — Claude Code isn't reachable from this box right now.",
       "inherit": "Inherit",
       "default": "Default",
       "effort": "Effort",
