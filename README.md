@@ -128,6 +128,13 @@ Two services, because a Claude session outlives any HTTP request: `agentoo-api`
 (Hono, REST + SSE) and `agentoo-worker` (project setup, Claude sessions).
 Restarting the API never kills a running agent.
 
+Re-running the installer restarts *both* services unconditionally, though —
+including the worker, which does end whatever turn happens to be running when
+it stops. `turn-reconcile.worker.ts` notices the interruption on the worker's
+next start and recovers it, but the turn itself is cut short rather than
+finishing; there is no drain-first option today. Something to know before
+re-running the installer against a box mid-session, not a reason to avoid it.
+
 Agents and skills are markdown in `LIBRARY_DIR`, marked `role: orchestrator` or
 `role: subagent` so you can see which drive a session and which are only reached
 by delegation. Every orchestrator is composed against the shared method in
@@ -278,18 +285,32 @@ reach for when testing agentoo itself rather than a project it hosts: see
 
 ## Claude Code
 
-Installed with Anthropic's native installer, which keeps itself updated in the
-background. Claude Code ships often, so that matters more here than the
-alternative's tidiness.
+This is the SYSTEM install, used only for `claude setup-token` and `claude
+doctor` (see "The service account" below for why the app itself does not need
+it). Anthropic's native installer updates itself in the background — on a
+laptop where something runs `claude` interactively. Nothing on this server
+ever invokes the system CLI, so that background update never fires here.
+What keeps it current instead is re-running this step, which converges to the
+configured channel (or pinned version) every time rather than only on a fresh
+box — the same policy every step here follows (see `scripts/lib/config.sh`),
+and exactly what already happens each time you run
+
+```
+curl -fsSL .../bootstrap.sh | sudo bash
+```
 
 The native install is per-user (`~/.local/bin/claude`), so the step runs it as
 the deploy user rather than root — provisioning runs as root, and a root-owned
 install would sit in `/root` where the account running the app cannot see it.
 Because a home directory is on nobody's PATH but its owner's login shell, the
-step also symlinks the launcher into `/usr/local/bin` — which *is* on systemd's
-default PATH — and adds `~/.local/bin` to the user's `.bashrc`. The link points
-at the launcher rather than the versioned binary, so auto-updates keep working.
-`CLAUDE_CODE_SYMLINK=0` disables it.
+step also symlinks `/usr/local/bin/claude` to it — which *is* on systemd's
+default PATH — and adds `~/.local/bin` to the user's `.bashrc`.
+`~/.local/bin/claude` is not a launcher wrapping some other versioned binary;
+it is itself a symlink straight into `~/.local/share/claude/versions/<ver>`,
+repointed in place by each upgrade — and the `/usr/local/bin` link is re-created
+from scratch on every run rather than assumed to still be correct, so it keeps
+resolving to the current version without needing indirection of its own.
+`CLAUDE_CODE_SYMLINK=0` disables the second link.
 
 Note that installing as `root` puts the binary under `/root`, which is mode
 `0700` — reachable by root, but not by a service running as another user.
