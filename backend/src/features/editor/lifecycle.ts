@@ -135,8 +135,14 @@ export async function runEditorStart(
     }
 
     // Step 5: the real cap, under this queue's own concurrency: 1 — the
-    // route's own check (service.ts) is only a fast, best-effort 409.
-    const running = await countRunningEditorContainers(cli)
+    // route's own check (service.ts) is only a fast, best-effort 409. Same
+    // `excludeName` as that route-side check, and for the same reason: Step 4
+    // above already `docker rm -f`'d this session's own container by this
+    // name, but never checked that removal's result, so if it somehow
+    // survived it must still not be counted as a second container alongside
+    // the one this job is about to start — see countRunningEditorContainers's
+    // own comment (container.ts).
+    const running = await countRunningEditorContainers(cli, { excludeName: name })
     if (running >= env.EDITOR_MAX_RUNNING) {
       await finishEditorOperation(
         operationId,

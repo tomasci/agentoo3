@@ -186,8 +186,14 @@ export async function requestEditorStart(
     return getEditorStatus(projectId, sessionId, cli)
   }
 
-  // Step 6.
-  const running = await countRunningEditorContainers(cli)
+  // Step 6: this session's own container — if Step 4 above found one at
+  // all, it's running but unresponsive, since a healthy one already
+  // short-circuited above — is excluded from the count. Restarting it is not
+  // asking the cap for a second slot; the worker's own start job (lifecycle.ts
+  // step 4) removes this very container before it runs the same check again.
+  // See countRunningEditorContainers's own comment (container.ts) for why
+  // that matters at the cap.
+  const running = await countRunningEditorContainers(cli, { excludeName: name })
   if (running >= env.EDITOR_MAX_RUNNING) {
     await releaseEditorLock(sessionId, operationId)
     throw conflict(`The editor container cap (${env.EDITOR_MAX_RUNNING} running) is reached`)

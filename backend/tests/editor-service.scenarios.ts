@@ -334,6 +334,9 @@ test('a worktree missing from disk is a 409', async () => {
 // --- cap 409 ------------------------------------------------------------------
 
 test('EDITOR_MAX_RUNNING reached is a 409, and releases the lock it just claimed', async () => {
+  // Only an OTHER session's container is on the box here — this doubles as
+  // the "cap reached by other sessions alone" case: nothing of this
+  // session's own is around to (wrongly) get excluded from the count.
   testEnv.EDITOR_MAX_RUNNING = 1
   const containers = new Map([['agentoo_editor-other_s-abc123456789', { status: 'running' }]])
   const result = await status(requestEditorStart(PROJECT_ID, SESSION_ID, fakeCli({ containers })))
@@ -345,6 +348,25 @@ test('EDITOR_MAX_RUNNING reached is a 409, and releases the lock it just claimed
   // capacity frees up) is not permanently blocked by this one's own lock.
   testEnv.EDITOR_MAX_RUNNING = 2
   const dto = await requestEditorStart(PROJECT_ID, SESSION_ID, fakeCli({ containers: new Map() }))
+  expect(dto.state).toBe('starting')
+  expect(enqueued).toHaveLength(1)
+})
+
+test("at the cap, restarting this session's own unresponsive container is accepted, not a 409", async () => {
+  // Mirrors the actual bug report: cap 2, this session's own editor is
+  // running but not answering /healthz (so Step 4 does not short-circuit),
+  // and one OTHER session's editor also holds a slot. Counting this
+  // session's own container against its own restart would always land on
+  // the cap here, even though the worker's own start job removes that exact
+  // container before it ever runs the same check itself.
+  testEnv.EDITOR_MAX_RUNNING = 2
+  const ownName = 'agentoo_editor-demo_s-' + SESSION_ID.replace(/-/g, '').slice(0, 12)
+  const containers = new Map([
+    [ownName, { status: 'running' }],
+    ['agentoo_editor-other_s-abc123456789', { status: 'running' }],
+  ])
+  healthy = false
+  const dto = await requestEditorStart(PROJECT_ID, SESSION_ID, fakeCli({ containers }))
   expect(dto.state).toBe('starting')
   expect(enqueued).toHaveLength(1)
 })

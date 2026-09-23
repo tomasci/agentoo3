@@ -144,6 +144,11 @@ function fakeCli(opts: {
   runStderr?: string
   logsText?: string
   onRun?: () => void
+  /** Simulates an `rm -f` that the daemon reports as failed (or simply never
+   * applies) — the call is still recorded in `calls.rm`, but the container is
+   * NOT removed from the fixture, the same as lifecycle.ts's own Step 4,
+   * which never checks removeEditorContainer's result before moving on. */
+  rmNoop?: boolean
 }) {
   const containers = opts.containers ?? new Map<string, ContainerFixture>()
   const runCalls: string[][] = []
@@ -194,6 +199,9 @@ function fakeCli(opts: {
       if (args[0] === 'rm') {
         const name = args[2] as string
         rmCalls.push(name)
+        if (opts.rmNoop) {
+          return { ok: false, stdout: '', stderr: 'rm failed (simulated)', exitCode: 1 }
+        }
         containers.delete(name)
         return { ok: true, stdout: name, stderr: '', exitCode: 0 }
       }
@@ -327,6 +335,9 @@ test('an exited container is removed and a fresh one started', async () => {
 // --- cap at the worker ---------------------------------------------------------
 
 test('the cap is enforced by the worker itself, not just the route', async () => {
+  // Only an OTHER session's container is on the box — this doubles as the
+  // "cap reached by other sessions alone" case: nothing of this session's
+  // own is around to (wrongly) get excluded from the count.
   testEnv.EDITOR_MAX_RUNNING = 1
   await mkdir(WORKTREE, { recursive: true }) // resolveDockerScope only needs the dir to exist
   const containers = new Map([['agentoo_editor-other_s-abc123456789', { status: 'running' }]])
@@ -342,6 +353,43 @@ test('the cap is enforced by the worker itself, not just the route', async () =>
   expect(op?.status).toBe('failed')
   expect(op?.error).toContain('cap')
   expect(cli.calls.run).toHaveLength(0) // never even got to gitCommonDir/run
+})
+
+test("this session's own container does not count against its own restart's cap check, even if it survives Step 4's rm", async () => {
+  // Step 4 above always tries to remove this session's own stale container
+  // before the cap check runs, but never checks whether that removal
+  // actually worked. `rmNoop` simulates it silently failing, so this
+  // session's own (still `running`) container is still sitting in `docker
+  // ps` when Step 5 counts — exactly like the route-side check, it must not
+  // count against the restart that is trying to replace it.
+  await layoutGit()
+  testEnv.EDITOR_MAX_RUNNING = 2
+  const containers = new Map([
+    [NAME, { status: 'running' }],
+    ['agentoo_editor-other_s-abc123456789', { status: 'running' }],
+  ])
+  const cli = fakeCli({ containers, imageExists: true, rmNoop: true })
+  await seedOperation()
+
+  let probeCalls = 0
+  await runEditorStart(
+    { kind: 'start', operationId: OPERATION_ID, projectId: PROJECT_ID, sessionId: SESSION_ID },
+    {
+      cli,
+      // false on Step 4's own probe, so it does not short-circuit as
+      // "already healthy"; true on every later one (waitForHealthy's own
+      // polling, after runEditorContainer has actually been called).
+      probeHealthz: async () => {
+        probeCalls += 1
+        return probeCalls > 1
+      },
+      sleep: noSleep,
+    },
+  )
+
+  expect(cli.calls.rm).toContain(NAME) // Step 4 did try to remove it...
+  const op = await getEditorOperation(OPERATION_ID)
+  expect(op?.status).toBe('succeeded') // ...but it was excluded from the cap regardless
 })
 
 // --- pull output is logged ----------------------------------------------------

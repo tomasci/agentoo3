@@ -333,13 +333,26 @@ export function editorInstallId(): Promise<string> {
  * RAM, which every agentoo install on this daemon draws from together, so a
  * dev copy and the production install must count against the SAME cap, not
  * each get their own headroom on top of it.
+ *
+ * `excludeName`, when given, drops one container (matched by exact name) from
+ * the count before it is compared against the cap. Both callers of this
+ * function (service.ts's route-side check and lifecycle.ts's worker-side
+ * one) pass their own session's own container name here while restarting an
+ * unresponsive editor: that container is what THIS restart is about to
+ * replace, not a second one this session is trying to add alongside it, so
+ * it must not count as capacity this restart itself is competing for. Without
+ * this, a session whose own editor container is still running (merely not
+ * answering `/healthz`) could never restart once the box sat at the cap,
+ * even though the worker's own start job (lifecycle.ts step 4) removes that
+ * exact container before it would ever actually exceed it.
  */
 export async function countRunningEditorContainers(
   cli: DockerCli = realDockerCli,
+  opts: { excludeName?: string } = {},
 ): Promise<number> {
   const ids = await listContainerIds(EDITOR_LABEL_FILTER, cli)
   const containers = await inspectContainers(ids, cli)
-  return containers.filter((c) => c.state === 'running').length
+  return containers.filter((c) => c.state === 'running' && c.name !== opts.excludeName).length
 }
 
 /**
