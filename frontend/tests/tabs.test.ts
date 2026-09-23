@@ -3,11 +3,13 @@ import {
   activeTabIdForPath,
   adoptTab,
   closeTab,
+  isBareShellPath,
   isFullBleedPath,
   newTab,
   nextNewTabSeq,
   normalizeTabs,
   openProject,
+  projectIdForPath,
   projectTab,
   projectTabId,
   pruneProjectTabs,
@@ -41,17 +43,43 @@ test('the shell is chosen by the path, so it is right on first paint', () => {
   expect(shellModeForPath('/tab/new-1')).not.toBe('system')
 })
 
-test('a session\'s own live page and its own editor page draw their own chrome, edge to edge', () => {
+test("a session's own live page draws its own chrome, edge to edge", () => {
   expect(isFullBleedPath('/projects/abc/sessions/s1')).toBe(true)
-  expect(isFullBleedPath('/projects/abc/sessions/s1/editor')).toBe(true)
 })
 
-test('the session list and the session\'s Docker dashboard still want the ordinary page body', () => {
+test("the session list and the session's Docker dashboard still want the ordinary page body", () => {
   expect(isFullBleedPath('/projects/abc/sessions')).toBe(false)
   expect(isFullBleedPath('/projects/abc/sessions/s1/docker')).toBe(false)
   // Not a session route at all.
   expect(isFullBleedPath('/projects/abc')).toBe(false)
   expect(isFullBleedPath('/library')).toBe(false)
+})
+
+// ── the standalone editor launcher ───────────────────────────────────────────
+
+test('the editor launcher is a bare path, and nothing else is', () => {
+  expect(isBareShellPath('/projects/abc/sessions/s1/editor')).toBe(true)
+  // Every other session route still wants the ordinary shell.
+  expect(isBareShellPath('/projects/abc/sessions/s1')).toBe(false)
+  expect(isBareShellPath('/projects/abc/sessions/s1/docker')).toBe(false)
+  expect(isBareShellPath('/projects/abc/sessions')).toBe(false)
+  // No longer full-bleed *inside* the shell — it renders with no shell at all.
+  expect(isFullBleedPath('/projects/abc/sessions/s1/editor')).toBe(false)
+})
+
+test('the launcher belongs to no project tab, even though its URL starts with /projects/:id', () => {
+  const path = '/projects/abc/sessions/s1/editor'
+  expect(shellModeForPath(path)).not.toBe('project')
+  expect(projectIdForPath(path)).toBeNull()
+})
+
+test('opening the launcher in a fresh browser tab adds no workspace tab', () => {
+  const tabs = [systemTab()]
+  const path = '/projects/abc/sessions/s1/editor'
+  // Whatever id a caller names — including the one `activeTabIdForPath`
+  // would compute for this very path — adoption refuses it outright.
+  expect(adoptTab(tabs, projectTabId('abc'), path, ['abc'])).toBe(tabs)
+  expect(adoptTab(tabs, activeTabIdForPath(path), path, ['abc'])).toBe(tabs)
 })
 
 // ── opening projects ─────────────────────────────────────────────────────────

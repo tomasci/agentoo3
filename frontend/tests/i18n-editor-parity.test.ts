@@ -1,13 +1,16 @@
-// Same idea as tests/i18n-ideas-parity.test.ts, scoped to the two places this
-// track added copy: the top-level `editor` block, and `sessions.editor` (the
-// session header's link label, sitting right next to `sessions.docker`).
+// Same idea as tests/i18n-ideas-parity.test.ts, scoped to the places this
+// feature added copy: the top-level `editor` block, and the two
+// `sessions.*` keys that sit beside it (`sessions.editor`, the session
+// header's link label, and `sessions.stopEditor`/`sessions.editorStopped`,
+// its "Stop editor" menu item and the toast it raises).
 //
 // A plain string-set diff is the wrong notion of parity for a pluralised key
 // — see i18n-ideas-parity.test.ts's own comment on why a CLDR plural suffix is
-// stripped before either language's key set is built. `editor.idleNote` is
-// this file's own instance: English resolves it with `_one`/`_other`, Russian
-// with `_one`/`_few`/`_many`, and a literal-suffix comparison would flag that
-// difference as broken when it is not.
+// stripped before either language's key set is built. Nothing under `editor`
+// itself is pluralised any more (the one key that was, `idleNote`, went with
+// the iframe dashboard it described), but `keyPaths` still strips the suffix
+// generically, the same as every other parity test in this file's family, so
+// it costs nothing to keep and nothing here depends on demonstrating it.
 
 import { expect, test } from 'bun:test'
 import en from '../src/shared/i18n/locales/en.json'
@@ -51,4 +54,16 @@ test('"sessions.editor" — the header link label — exists in both languages',
 
   expect(typeof enSessions?.editor).toBe('string')
   expect(typeof ruSessions?.editor).toBe('string')
+})
+
+test('"sessions.stopEditor" and "sessions.editorStopped" exist in both languages', () => {
+  const enSessions = (en as { sessions?: { stopEditor?: unknown; editorStopped?: unknown } })
+    .sessions
+  const ruSessions = (ru as { sessions?: { stopEditor?: unknown; editorStopped?: unknown } })
+    .sessions
+
+  expect(typeof enSessions?.stopEditor).toBe('string')
+  expect(typeof ruSessions?.stopEditor).toBe('string')
+  expect(typeof enSessions?.editorStopped).toBe('string')
+  expect(typeof ruSessions?.editorStopped).toBe('string')
 })

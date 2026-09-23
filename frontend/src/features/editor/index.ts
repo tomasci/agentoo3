@@ -1,1 +1,2 @@
-export { EditorPage } from './components/editor-page'
+export { EditorLauncher } from './components/editor-launcher'
+export { useEditorStop } from './hooks/use-editor'

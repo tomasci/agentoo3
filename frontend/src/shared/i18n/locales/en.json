@@ -188,6 +188,8 @@
     "backToIdea": "Back to Idea",
     "docker": "Docker",
     "editor": "Editor",
+    "stopEditor": "Stop editor",
+    "editorStopped": "Editor stopped",
     "empty": "No sessions yet. Create one above — it gets its own git worktree and branch, so it will not collide with anything else running on this project.",
     "loadFailed": "Could not load the session",
     "createFailed": "Could not create the session",
@@ -644,15 +646,8 @@
     }
   },
   "editor": {
-    "heading": "Editor",
     "backToSession": "Back to session",
-    "openInNewTab": "Open in new tab",
-    "start": "Start",
     "restart": "Restart",
-    "stop": "Stop",
-    "idleNote_one": "Stops on its own after {{count}} minute of inactivity.",
-    "idleNote_other": "Stops on its own after {{count}} minutes of inactivity.",
-    "insecureContext": "This page is loaded over plain HTTP: webviews, the Markdown preview and the clipboard need HTTPS to work. Editing, syntax highlighting and IntelliSense are unaffected.",
     "loadFailed": "Could not load the editor status",
     "empty": {
       "title": "The editor is turned off",
@@ -679,7 +674,12 @@
       "heading": "Start log",
       "empty": "Waiting for output…"
     },
-    "iframeTitle": "Code editor — {{name}}"
+    "launcher": {
+      "title": "Editor — starting…",
+      "opening": "Opening the editor…",
+      "openAnyway": "Open anyway",
+      "retry": "Retry"
+    }
   },
   "prompts": {
     "title": "Idea → prompt instruction",

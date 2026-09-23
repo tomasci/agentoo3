@@ -1,0 +1,25 @@
+// Full-viewport, with nothing else drawn into the page at all — no TabBar,
+// sidebar or StatusBar around this (root-layout.tsx's `isBareShellPath`):
+// the browser tab this opens in has nothing else in it, so this owns the
+// whole viewport itself instead of sizing off the shell's own `.body`
+// region the way every other page does.
+.page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: var(--layout-page-padding-y) var(--layout-page-padding-x);
+}
+
+// One centred column, the same reading width settings-page.module.scss's own
+// page content uses — this is a page of its own too, just a much shorter
+// and narrower one. `width: 100%` capped by `max-width` (rather than a bare
+// `max-width` alone) is what lets it shrink to the viewport on a phone and
+// still centre as a fixed column on anything wider.
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+  max-width: var(--layout-content-width);
+}

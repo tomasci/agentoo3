@@ -1,10 +1,12 @@
-// The Editor page's own gating: every state the backend's `EditorStatus` can
-// report (disabled, daemon down, stopped/starting/running/unresponsive), the
-// iframe's `src`/`title`/`allow` and the absence of `sandbox`, that the
-// workbench never remounts across a running→unresponsive reading, that
-// start/stop carry `{ path: { id, sessionId } }` and nothing else, that
-// mounting the page never itself calls start, and the insecure-context note.
-// Everything this file can prove without a real code-server container.
+// The editor launcher's own gating (features/editor/components/editor-launcher.tsx):
+// every state the backend's `EditorStatus` can report (GET failure, disabled,
+// daemon down, stopped/starting/running/unresponsive), exactly-once auto-start
+// when stopped, the running→redirect via `window.location.replace`, a failed
+// start's error+log+Retry with no second auto-start, and the back-to-session
+// link on every terminal state. Also covers the launcher's place in the app
+// around it: no shell (TabBar/sidebar/StatusBar) at all, and no workspace tab
+// created by merely visiting it. Everything this file can prove without a
+// real code-server container.
 //
 // Router-mounted, but through this file's OWN tiny route tree — never
 // `import { routeTree } from '../src/app/router'` (contrast
@@ -22,13 +24,19 @@
 // verbatim, and those files' assertions read that fallback itself). Adding
 // this track's own real editor-page.test.tsx tipped that count over.
 //
-// The fix is not "avoid a router" — the header's "Back to session" control is
-// a real `<Link>`, which needs one to resolve an `href` — it is "avoid
-// *that* router": a route tree built right here, with only the two paths
-// this file's own assertions touch (`/sessions/$sessionId` as the Link's
-// target, `/sessions/$sessionId/editor` as where `EditorPage` itself mounts),
-// never imports app/router.tsx or anything project/idea/docker/library-shaped
-// at all, so this file cannot be "one more" contributor to that count.
+// The fix is not "avoid a router" — the launcher's own "back to session"
+// control is a real `<Link>`, which needs one to resolve an `href` — it is
+// "avoid *that* router": a route tree built right here, with only the two
+// paths this file's own assertions touch (`/sessions/$sessionId` as the
+// Link's target, `/sessions/$sessionId/editor` as where `EditorLauncher`
+// itself mounts), never imports app/router.tsx or anything
+// project/idea/docker/library-shaped at all, so this file cannot be "one
+// more" contributor to that count. The one exception is the last section
+// below, which imports `RootLayout` directly (not `app/router.tsx`, and not
+// `@/shared/i18n`) to prove the launcher's own path renders with no shell —
+// `RootLayout` itself pulls in nothing project/idea/docker/library-shaped
+// either, only the tab bar/sidebar/status bar and the peripheral queries they
+// read, which the offline transport below keeps off the network.
 //
 // The same reasoning is why the i18next instance below is created locally
 // with `i18next.createInstance()` and handed down via `<I18nextProvider>`
@@ -40,17 +48,16 @@
 // fallback slot — is never `.use()`d here), so this file gets its own real
 // translations without touching that slot at all.
 //
-// CSS-module class names are `undefined` under `bun test` (see
-// session-idea-link.test.tsx's own note), so every assertion below is by
-// text, attribute or DOM structure — never a generated class name.
+// CSS-module class names are `undefined` under `bun test`, so every assertion
+// below is by text, attribute or DOM structure — never a generated class name.
 
 import { plugin } from 'bun'
 
 // Same identity-proxy loader, same allowlist, as tests/ui-core.test.tsx and
-// tests/docker-page.test.tsx: `EditorPage` pulls in the `@/shared/ui` barrel
-// too (Alert, Code, EmptyState, Stack), and whichever of them `bun test`
-// evaluates first decides how those ten modules are cached for the run.
-// Copied verbatim, not widened.
+// tests/docker-page.test.tsx: `EditorLauncher` pulls in the `@/shared/ui`
+// barrel too (Alert, Code, EmptyState, Stack), and whichever of them
+// `bun test` evaluates first decides how those ten modules are cached for the
+// run. Copied verbatim, not widened.
 const UI_CORE_STYLES =
   /src\/shared\/ui\/(core\/(badge|status-dot|code|layout)|patterns\/(card|page-header|empty-state|alert|definition-list|data-table))\.module\.scss$/
 plugin({
@@ -64,7 +71,7 @@ plugin({
   },
 })
 
-import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   createMemoryHistory,
@@ -75,16 +82,17 @@ import {
   RouterProvider,
   useParams,
 } from '@tanstack/react-router'
+import type { AxiosInstance } from 'axios'
 import i18next from 'i18next'
 import { Provider as JotaiProvider } from 'jotai'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
-import { EditorPage } from '../src/features/editor'
+import { EditorLauncher } from '../src/features/editor'
+import { RootLayout } from '../src/app/root-layout'
+import { client as apiClient } from '../src/shared/api/generated/.kubb/client'
 import { getApiProjectsIdSessionsSessionidEditorQueryKey } from '../src/shared/api/generated/hooks/useGetApiProjectsIdSessionsSessionidEditor'
-import { getApiSessionsIdQueryKey } from '../src/shared/api/generated/hooks/useGetApiSessionsId'
 import type { GetApiProjectsIdSessionsSessionidEditorStatus200 as Status } from '../src/shared/api/generated/types/GetApiProjectsIdSessionsSessionidEditor'
-import type { GetApiSessionsIdStatus200 as SessionDto } from '../src/shared/api/generated/types/GetApiSessionsId'
 import en from '../src/shared/i18n/locales/en.json'
 import { mockModule } from './mock-module'
 
@@ -92,9 +100,9 @@ const T = '2026-09-04T10:00:00.000Z'
 
 // This file's own tiny route tree — see the header comment for why it is not
 // `import { routeTree } from '../src/app/router'`. Only the two paths
-// `EditorPage` itself ever needs: where it mounts, and the "Back to session"
-// Link's own target (rendered as a bare placeholder — no test here asserts on
-// that page's own content, only on the `href` pointed at it).
+// `EditorLauncher` itself ever needs: where it mounts, and the "Back to
+// session" Link's own target (rendered as a bare placeholder — no test here
+// asserts on that page's own content, only on the `href` pointed at it).
 const rootRoute = createRootRoute({ component: () => <Outlet /> })
 const projectRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -112,7 +120,7 @@ const editorRoute = createRoute({
   component: function EditorRouteComponent() {
     const { projectId, sessionId } = useParams({ strict: false })
     if (!projectId || !sessionId) return null
-    return <EditorPage projectId={projectId} sessionId={sessionId} />
+    return <EditorLauncher projectId={projectId} sessionId={sessionId} />
   },
 })
 const routeTree = rootRoute.addChildren([projectRoute.addChildren([sessionRoute, editorRoute])])
@@ -132,7 +140,6 @@ testI18n.init({
 
 const STATUS_CLIENT = '@/shared/api/generated/clients/getApiProjectsIdSessionsSessionidEditor'
 const START_CLIENT = '@/shared/api/generated/clients/postApiProjectsIdSessionsSessionidEditorStart'
-const STOP_CLIENT = '@/shared/api/generated/clients/postApiProjectsIdSessionsSessionidEditorStop'
 const daemon = (o: Partial<Status['daemon']> = {}): Status['daemon'] => ({
   cliInstalled: true,
   available: true,
@@ -171,34 +178,8 @@ function editorStatus(overrides: Partial<Status> = {}): Status {
   }
 }
 
-const session = (overrides: Partial<SessionDto> = {}): SessionDto => ({
-  id: 's1',
-  projectId: 'p1',
-  ideaId: null,
-  title: 'Refactor auth',
-  status: 'idle',
-  orchestrator: null,
-  worktreePath: '/srv/worktrees/s1',
-  branch: 'feature/refactor-auth',
-  baseBranch: null,
-  baseSha: null,
-  baseNote: null,
-  workingDir: '/srv/worktrees/s1',
-  isolated: true,
-  sdkSessionId: null,
-  maxBudgetUsd: null,
-  lastError: null,
-  messageCount: 0,
-  totalCostUsd: 0,
-  pendingPrompts: 0,
-  createdAt: T,
-  updatedAt: T,
-  ...overrides,
-})
-
 let currentStatus: Status = editorStatus()
 let statusReject: unknown = null
-let currentSession: SessionDto = session()
 
 type StatusCall = { path: { id: string; sessionId: string } }
 let statusCalls: StatusCall[] = []
@@ -224,17 +205,21 @@ await mockModule(START_CLIENT, () => ({
   },
 }))
 
-let stopCalls: Call[] = []
-let stopReject: unknown = null
-await mockModule(STOP_CLIENT, () => ({
-  postApiProjectsIdSessionsSessionidEditorStop: async (opts: Call) => {
-    stopCalls.push(opts)
-    if (stopReject) throw stopReject
-    return { data: editorStatus({ state: 'stopped' }) }
-  },
-}))
-
-const { Toaster, toaster } = await import('../src/shared/ui/overlay/toast')
+/** Nothing in this file is about fetching /api/projects, /api/health,
+ *  /api/ssh-keys or /api/system — but the last section below mounts the real
+ *  `RootLayout`, whose tab bar/sidebar/status bar all poll them. Refusing
+ *  every unmocked request at the shared transport (rather than mocking four
+ *  more client modules) is the same technique tests/version-skew-alert.test.tsx
+ *  uses, and it cannot collide with the `mockModule` calls above: those
+ *  replace the editor's own generated client functions outright, which never
+ *  reach this shared transport at all. */
+const offlineTransport = (() =>
+  ({
+    request: async () => {
+      throw new Error('ECONNREFUSED (no backend in a unit test)')
+    },
+  }) as unknown as AxiosInstance)()
+const originalTransport = apiClient.getConfig().transport
 
 let client: QueryClient
 let container: HTMLDivElement
@@ -244,14 +229,6 @@ async function mount(path = '/projects/p1/sessions/s1/editor') {
   client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
   })
-  // Seeded directly, not mocked through the generated client: `getApiSessionsId`
-  // (features/sessions' `useSession`) is already mocked by two other feature's
-  // own test files (storage-page.test.tsx, session-page-scroll.test.tsx), and
-  // this avoids being a third file installing/restoring `mock.module` for the
-  // exact same specifier. `staleTime: Infinity` above means a seeded cache
-  // entry is never refetched, so this reaches the same page state with no
-  // such sharing at all.
-  client.setQueryData(getApiSessionsIdQueryKey({ path: { id: 's1' } }), currentSession)
 
   container = document.createElement('div')
   document.body.append(container)
@@ -268,7 +245,6 @@ async function mount(path = '/projects/p1/sessions/s1/editor') {
       <I18nextProvider i18n={testI18n}>
         <JotaiProvider>
           <QueryClientProvider client={client}>
-            <Toaster />
             <RouterProvider router={router} />
           </QueryClientProvider>
         </JotaiProvider>
@@ -288,26 +264,49 @@ const unmount = async () => {
   })
   container.remove()
   client.clear()
-  // The toaster is a module-level singleton (toast.tsx) — clear it so a toast
-  // this test raised is not still alive for the next test's mount().
-  toaster.remove()
 }
+
+let replaceCalls: string[] = []
+let assignCalls: string[] = []
+const realReplace = window.location.replace
+const realAssign = window.location.assign
 
 beforeEach(() => {
   localStorage.clear()
   currentStatus = editorStatus()
   statusReject = null
-  currentSession = session()
   statusCalls = []
   startCalls = []
   startReject = null
   startResponse = null
-  stopCalls = []
-  stopReject = null
-  ;(window as { isSecureContext?: boolean }).isSecureContext = undefined
+  replaceCalls = []
+  assignCalls = []
+  // The same technique tests/version-skew-alert.test.tsx uses for
+  // `window.location.reload`: happy-dom's own `location.replace`/`.assign`
+  // throw "Not implemented" rather than merely navigating nowhere, so the
+  // stub is not optional here.
+  Object.defineProperty(window.location, 'replace', {
+    configurable: true,
+    value: (url: string) => {
+      replaceCalls.push(url)
+    },
+  })
+  Object.defineProperty(window.location, 'assign', {
+    configurable: true,
+    value: (url: string) => {
+      assignCalls.push(url)
+    },
+  })
+  apiClient.setConfig({ transport: offlineTransport })
 })
 
 afterEach(unmount)
+
+afterAll(() => {
+  Object.defineProperty(window.location, 'replace', { configurable: true, value: realReplace })
+  Object.defineProperty(window.location, 'assign', { configurable: true, value: realAssign })
+  apiClient.setConfig({ transport: originalTransport })
+})
 
 const buttons = () => [...container.querySelectorAll('button')]
 const findButton = (text: string) => buttons().find((b) => b.textContent?.includes(text))
@@ -343,27 +342,30 @@ const refetchStatus = async () => {
 
 // --- 1. load failure ---------------------------------------------------------
 
-test('a GET failure is reported plainly, with the API\'s own message', async () => {
+test('a GET failure is reported plainly, with the API\'s own message, and a way back', async () => {
   statusReject = { response: { status: 409, data: { error: 'This worktree no longer exists on disk' } } }
   await mount()
 
   expect(container.textContent).toContain('This worktree no longer exists on disk')
-  expect(container.querySelector('iframe')).toBeNull()
+  const back = findLink('Back to session')
+  expect(back?.getAttribute('href')).toBe('/projects/p1/sessions/s1')
+  expect(startCalls).toHaveLength(0)
 })
 
 // --- 2. disabled --------------------------------------------------------------
 
-test('a disabled editor explains itself instead of offering a Start button', async () => {
+test('a disabled editor explains itself and offers the way back, not a Start button', async () => {
   currentStatus = editorStatus({ enabled: false })
   await mount()
 
   expect(container.textContent).toContain('The editor is turned off')
-  expect(findButton('Start')).toBeUndefined()
+  expect(findLink('Back to session')?.getAttribute('href')).toBe('/projects/p1/sessions/s1')
+  expect(startCalls).toHaveLength(0)
 })
 
 // --- 3. daemon down -------------------------------------------------------------
 
-test('docker not installed explains why, distinct from daemon unreachable', async () => {
+test('docker not installed explains why, distinct from daemon unreachable, with a way back', async () => {
   currentStatus = editorStatus({
     daemon: daemon({ cliInstalled: false, available: false, error: 'command not found' }),
   })
@@ -371,69 +373,58 @@ test('docker not installed explains why, distinct from daemon unreachable', asyn
 
   expect(container.textContent).toContain('Docker is not installed')
   expect(container.textContent).toContain('command not found')
-  expect(findButton('Start')).toBeUndefined()
+  expect(findLink('Back to session')?.getAttribute('href')).toBe('/projects/p1/sessions/s1')
 })
 
-test('the daemon installed but unreachable gets its own message', async () => {
+test('the daemon installed but unreachable gets its own message, with a way back', async () => {
   currentStatus = editorStatus({ daemon: daemon({ available: false, error: 'connection refused' }) })
   await mount()
 
   expect(container.textContent).toContain('Docker daemon not reachable')
   expect(container.textContent).not.toContain('Docker is not installed')
   expect(container.textContent).toContain('connection refused')
+  expect(findLink('Back to session')?.getAttribute('href')).toBe('/projects/p1/sessions/s1')
 })
 
-// --- 4. stopped -----------------------------------------------------------------
+// --- 4. auto-start when stopped -----------------------------------------------
 
-test('stopped renders a Start button and no iframe', async () => {
+test('stopped auto-starts exactly once, with only the path, and shows the starting panel', async () => {
   await mount()
-
-  expect(findButton('Start')).toBeDefined()
-  expect(container.querySelector('iframe')).toBeNull()
-})
-
-test("stopped with a failed last start shows that operation's error and its log", async () => {
-  currentStatus = editorStatus({
-    operation: operation({
-      status: 'failed',
-      error: 'docker pull failed: no space left on device',
-      output: [{ stream: 'stderr', text: 'no space left on device', at: T }],
-    }),
-  })
-  await mount()
-
-  expect(container.textContent).toContain('docker pull failed: no space left on device')
-  expect(container.textContent).toContain('no space left on device')
-})
-
-test('clicking Start calls the start mutation with only the path, and nothing on mount does', async () => {
-  await mount()
-  expect(startCalls).toHaveLength(0)
-
-  const start = findButton('Start')
-  if (!start) throw new Error('no Start button')
-  await click(start)
   await settle()
 
   expect(startCalls).toHaveLength(1)
   expect(startCalls[0]?.path).toEqual({ id: 'p1', sessionId: 's1' })
+  expect(container.textContent).toContain('Starting the editor')
+  // The mocked start response above moves the cache to 'starting' — further
+  // ticks (standing in for `useEditorStatus`'s own polling) must not start it
+  // again just because it is still not 'running' yet.
+  await settle()
+  await settle()
+  expect(startCalls).toHaveLength(1)
 })
 
-test('a 409 (max running editors reached) while starting is toasted with the API message', async () => {
-  startReject = { response: { status: 409, data: { error: 'The maximum number of running editors has been reached' } } }
+test('running never auto-starts', async () => {
+  currentStatus = editorStatus({ state: 'running' })
   await mount()
-
-  const start = findButton('Start')
-  if (!start) throw new Error('no Start button')
-  await click(start)
   await settle()
 
-  expect(document.body.textContent).toContain('The maximum number of running editors has been reached')
+  expect(startCalls).toHaveLength(0)
 })
 
-// --- 5. starting ------------------------------------------------------------------
+test('starting, opened directly, never auto-starts a second time', async () => {
+  currentStatus = editorStatus({
+    state: 'starting',
+    operation: operation({ status: 'running' }),
+  })
+  await mount()
+  await settle()
 
-test('starting shows a spinner, mentions the image pull, and renders the start log', async () => {
+  expect(startCalls).toHaveLength(0)
+})
+
+// --- 5. starting ---------------------------------------------------------------
+
+test('starting shows the note about the image pull and the start log', async () => {
   currentStatus = editorStatus({
     state: 'starting',
     operation: operation({
@@ -445,58 +436,83 @@ test('starting shows a spinner, mentions the image pull, and renders the start l
 
   expect(container.textContent).toContain('370')
   expect(container.textContent).toContain('Pulling codercom/code-server:4.138.0')
-  expect(container.querySelector('iframe')).toBeNull()
 })
 
-// --- 6. running -------------------------------------------------------------------
+// --- 6. running ------------------------------------------------------------------
 
-test('running mounts the iframe at proxyPath, with no sandbox attribute', async () => {
+test('running redirects the whole tab to proxyPath, via location.replace', async () => {
   currentStatus = editorStatus({
     state: 'running',
     container: { name: 'agentoo_editor-alpha_s-abc123', state: 'running', startedAt: T },
   })
   await mount()
 
-  const frame = container.querySelector('iframe')
-  expect(frame).not.toBeNull()
-  expect(frame?.getAttribute('src')).toBe('/api/projects/p1/sessions/s1/editor/proxy/')
-  expect(frame?.getAttribute('allow')).toBe('clipboard-read; clipboard-write')
-  expect(frame?.hasAttribute('sandbox')).toBe(false)
-  expect(frame?.getAttribute('title')).toBeTruthy()
+  expect(replaceCalls).toEqual(['/api/projects/p1/sessions/s1/editor/proxy/'])
+  // `replace`, not `assign` — Back must not return to the launcher.
+  expect(assignCalls).toEqual([])
 })
 
-test('running offers "open in new tab" at proxyPath, and a Stop button', async () => {
-  currentStatus = editorStatus({ state: 'running' })
+// --- 7. a failed start: error, log, Retry, no second auto-start ------------------
+
+test("the auto-start's own failure shows the error and the log, offers Retry, and never retries itself", async () => {
   await mount()
-
-  const openInNewTab = findLink('Open in new tab')
-  expect(openInNewTab?.getAttribute('href')).toBe('/api/projects/p1/sessions/s1/editor/proxy/')
-  expect(openInNewTab?.getAttribute('target')).toBe('_blank')
-  expect(openInNewTab?.getAttribute('rel')).toBe('noopener')
-
-  const stop = findButton('Stop')
-  if (!stop) throw new Error('no Stop button')
-  await click(stop)
   await settle()
-  expect(stopCalls).toHaveLength(1)
-  expect(stopCalls[0]?.path).toEqual({ id: 'p1', sessionId: 's1' })
+  expect(startCalls).toHaveLength(1)
+
+  // The async job the auto-start kicked off comes back failed — the same
+  // shape `useEditorStatus`'s own poll would report a few seconds later.
+  currentStatus = editorStatus({
+    operation: operation({
+      status: 'failed',
+      error: 'docker pull failed: no space left on device',
+      output: [{ stream: 'stderr', text: 'no space left on device', at: T }],
+    }),
+  })
+  await refetchStatus()
+
+  expect(container.textContent).toContain('docker pull failed: no space left on device')
+  expect(container.textContent).toContain('no space left on device')
+  const retry = findButton('Retry')
+  expect(retry).toBeDefined()
+  // Further ticks alone must not fire the effect a second time.
+  await settle()
+  expect(startCalls).toHaveLength(1)
+
+  if (!retry) throw new Error('no Retry button')
+  await click(retry)
+  await settle()
+  expect(startCalls).toHaveLength(2)
+  expect(startCalls[1]?.path).toEqual({ id: 'p1', sessionId: 's1' })
 })
 
-test('the idle-timeout note names how many minutes, converted from seconds', async () => {
-  currentStatus = editorStatus({ state: 'running', idleTimeoutSeconds: 1800 })
+// --- 8. start itself rejects (409/403/503) ---------------------------------------
+
+test('a 409 (max running editors reached) on the auto-start shows the API message and a Retry', async () => {
+  startReject = { response: { status: 409, data: { error: 'The maximum number of running editors has been reached' } } }
   await mount()
+  await settle()
 
-  expect(container.textContent).toContain('30')
+  expect(container.textContent).toContain('The maximum number of running editors has been reached')
+  expect(findButton('Retry')).toBeDefined()
+  expect(startCalls).toHaveLength(1)
+  // Polling alone must not retry a rejected mutate call either.
+  await settle()
+  expect(startCalls).toHaveLength(1)
 })
 
-// --- 7. unresponsive: same iframe node, Restart and Stop -------------------------
+// --- 9. unresponsive: Open anyway + Restart --------------------------------------
 
-test('unresponsive shows a warning banner with Restart and Stop, but keeps the iframe mounted', async () => {
+test('unresponsive offers "Open anyway" (assign) and "Restart" (calls start)', async () => {
   currentStatus = editorStatus({ state: 'unresponsive' })
   await mount()
 
   expect(container.textContent).toContain("The editor isn't responding")
-  expect(container.querySelector('iframe')).not.toBeNull()
+
+  const openAnyway = findButton('Open anyway')
+  if (!openAnyway) throw new Error('no "Open anyway" button')
+  await click(openAnyway)
+  expect(assignCalls).toEqual(['/api/projects/p1/sessions/s1/editor/proxy/'])
+  expect(replaceCalls).toEqual([])
 
   const restart = findButton('Restart')
   if (!restart) throw new Error('no Restart button')
@@ -506,45 +522,102 @@ test('unresponsive shows a warning banner with Restart and Stop, but keeps the i
   expect(startCalls[0]?.path).toEqual({ id: 'p1', sessionId: 's1' })
 })
 
-test('a running→unresponsive transition never remounts the iframe', async () => {
-  currentStatus = editorStatus({ state: 'running' })
+// --- 10. the tab's own title -------------------------------------------------------
+
+test("sets the browser tab's own title while mounted, and restores it on unmount", async () => {
+  document.title = 'agentoo'
   await mount()
 
-  const before = container.querySelector('iframe')
-  expect(before).not.toBeNull()
+  expect(document.title).not.toBe('agentoo')
+  expect(document.title).toContain('Editor')
 
-  currentStatus = editorStatus({ state: 'unresponsive' })
-  await refetchStatus()
-
-  const after = container.querySelector('iframe')
-  expect(after).not.toBeNull()
-  // Identity, not just presence — a fresh element that merely looks the same
-  // would still have thrown away the workbench's own in-page state.
-  expect(after).toBe(before)
-  expect(container.textContent).toContain("The editor isn't responding")
+  await unmount()
+  expect(document.title).toBe('agentoo')
 })
 
-// --- 8. insecure context ------------------------------------------------------------
+// --- 11. no shell around the launcher, and no workspace tab from visiting it -------
 
-test('a plain-HTTP context gets a non-blocking note about webviews/preview/clipboard', async () => {
-  ;(window as { isSecureContext?: boolean }).isSecureContext = false
-  await mount()
+// `RootLayout` itself, not `app/router.tsx` — see the header comment for why
+// that boundary matters. A route tree built here has exactly two leaves: the
+// bare editor path, and one ordinary page, so a `<nav>`/`<aside>`/`<footer>`
+// showing up for the second and not the first is a fact about `RootLayout`'s
+// own branching (shared/store/tabs.ts's `isBareShellPath`), not an accident
+// of this harness.
+const shellRootRoute = createRootRoute({ component: RootLayout })
+const bareShellRoute = createRoute({
+  getParentRoute: () => shellRootRoute,
+  path: '/projects/p1/sessions/s1/editor',
+  component: () => <div>bare child</div>,
+})
+// Not `/library` — that is the system tab's own default `path`
+// (shared/store/tabs.ts's `SYSTEM_HOME`), so `rememberPath` would see no
+// actual change and never call `setTabs`, leaving `localStorage` untouched
+// for a reason that has nothing to do with this test's own claim.
+const ordinaryShellRoute = createRoute({
+  getParentRoute: () => shellRootRoute,
+  path: '/ssh-keys',
+  component: () => <div>ordinary child</div>,
+})
+const shellRouteTree = shellRootRoute.addChildren([bareShellRoute, ordinaryShellRoute])
 
-  expect(container.textContent).toContain('HTTPS')
+async function mountShell(path: string) {
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  container = document.createElement('div')
+  document.body.append(container)
+
+  const router = createRouter({
+    routeTree: shellRouteTree,
+    history: createMemoryHistory({ initialEntries: [path] }),
+  })
+  await router.load()
+
+  root = createRoot(container)
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={testI18n}>
+        <JotaiProvider>
+          <QueryClientProvider client={client}>
+            <RouterProvider router={router} />
+          </QueryClientProvider>
+        </JotaiProvider>
+      </I18nextProvider>,
+    )
+  })
+  for (let i = 0; i < 5; i++) {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0))
+    })
+  }
+}
+
+test('the launcher path renders with no tab bar, sidebar or status bar', async () => {
+  await mountShell('/projects/p1/sessions/s1/editor')
+
+  expect(container.textContent).toContain('bare child')
+  expect(container.querySelector('nav')).toBeNull()
+  expect(container.querySelector('aside')).toBeNull()
+  expect(container.querySelector('footer')).toBeNull()
 })
 
-test('a secure context shows no such note', async () => {
-  ;(window as { isSecureContext?: boolean }).isSecureContext = true
-  await mount()
+test('an ordinary page, by contrast, gets the full shell — proving the harness means something', async () => {
+  await mountShell('/ssh-keys')
 
-  expect(container.textContent).not.toContain('HTTPS')
+  expect(container.textContent).toContain('ordinary child')
+  expect(container.querySelector('nav')).not.toBeNull()
+  expect(container.querySelector('aside')).not.toBeNull()
+  expect(container.querySelector('footer')).not.toBeNull()
 })
 
-// --- 9. back to session -----------------------------------------------------------
+test('visiting the launcher path adds no workspace tab — the stored row is never touched', async () => {
+  await mountShell('/projects/p1/sessions/s1/editor')
 
-test('the header always links back to the session', async () => {
-  await mount()
+  // `useWorkspaceSync` never mounts on this branch at all (root-layout.tsx),
+  // so the persisted row it would otherwise adopt into is never even read.
+  expect(localStorage.getItem('agentoo:tabs')).toBeNull()
+})
 
-  const back = findLink('Back to session')
-  expect(back?.getAttribute('href')).toBe('/projects/p1/sessions/s1')
+test('an ordinary page, by contrast, does adopt itself into the stored tab row', async () => {
+  await mountShell('/ssh-keys')
+
+  expect(localStorage.getItem('agentoo:tabs')).not.toBeNull()
 })

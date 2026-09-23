@@ -89,10 +89,15 @@ const sessionDockerRoute = createRoute({
 })
 
 // A session's own code-server (VS Code in the browser), scoped to this
-// session's own git worktree — see features/editor/components/editor-page.tsx
-// and the design doc it was built from. Full-bleed, unlike the Docker route
-// above (`isFullBleedPath`, shared/store/tabs.ts): the whole page is a
-// workbench iframe, not a dashboard around one.
+// session's own git worktree — see features/editor/components/editor-launcher.tsx
+// and the design doc it was built from. Opened only as its own browser tab
+// (the session header's Editor link sets target="_blank"), and rendered with
+// no app shell at all — not merely full-bleed inside one, as it used to be:
+// `RootLayout` matches this exact path (`isBareShellPath`,
+// shared/store/tabs.ts) and renders a bare `<Outlet />` instead of its usual
+// tab bar/sidebar/status bar. This route still nests under `projectRoute`
+// for the same lookup every other project route gets — `ProjectLayout` is
+// not part of that shell, only `RootLayout`'s own chrome is.
 const sessionEditorRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: '/sessions/$sessionId/editor',
