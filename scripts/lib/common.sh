@@ -534,11 +534,31 @@ ensure_service_user() {
 # with their own node_modules, files written by project containers, and the
 # editor feature's PROJECTS_DIR/.editor runtime directory — a full walk there
 # on every install run would be slow, and something other than $user owning a
-# file in there is routine, not a bug. They are also gitignored (see
-# .gitignore), so bootstrap.sh's root-run git commands never write inside
-# them — the failure this exists for cannot occur there. Even though they
-# default to living physically inside REPO_ROOT, the deep check below prunes
-# them out by path for that same reason.
+# file in there is routine, not a bug: a project's compose stack can bind-
+# mount a Postgres data directory owned by uid 999 or 70, or leave files a
+# container wrote as root. They are also gitignored (see .gitignore), so
+# bootstrap.sh's root-run git commands never write inside them — the failure
+# this exists for cannot occur there. Even though they default to living
+# physically inside REPO_ROOT, the deep check prunes them out by path for
+# that same reason.
+#
+# The repair has to honour that exact same prune list, not just the
+# detection — an earlier version of this found the mismatch correctly and
+# then repaired it with a plain `chown -R "$dir"`, which, having ignored the
+# prune list, re-owned every project's runtime data underneath REPO_ROOT
+# anyway: precisely the hazard the prune exists to avoid. So the pruning
+# `find` expression is built once and shared verbatim by both: detection
+# stops at the first hit (`-print -quit`), so it stays cheap; repair instead
+# walks to completion and re-owns every hit in place (`-exec chown -h ... {}
+# +`), never touching a path the prune excluded. `-h` so a symlink under
+# REPO_ROOT that happens to point at a pruned directory, or outside the tree
+# entirely, has its own ownership fixed rather than whatever it points to.
+#
+# The top-level fast path below is unrelated and unchanged: it only fires
+# when REPO_ROOT *itself* is not owned by $user — a tree left wholesale-root,
+# e.g. a fresh clone never handed to the app user at all — and a plain
+# recursive chown of the whole directory is correct there: nothing under it
+# is project data yet, since install.sh has not had a chance to create any.
 reconcile_ownership() {
   local user="$1"; shift
   local dir
@@ -555,26 +575,25 @@ reconcile_ownership() {
     # Deep check: REPO_ROOT only — see the comment above this function.
     [[ "$dir" == "${REPO_ROOT:-}" ]] || continue
 
-    local -a find_expr=()
+    local -a prune_expr=()
     local sibling first=1
     for sibling in "${PROJECTS_DIR:-}" "${SOURCES_DIR:-}" "${LIBRARY_DIR:-}" \
                    "${ATTACHMENTS_DIR:-}" "${SSH_KEYS_DIR:-}"; do
       [[ -n "$sibling" ]] || continue
       if (( first )); then
-        find_expr+=( "(" -path "$sibling" ); first=0
+        prune_expr+=( "(" -path "$sibling" ); first=0
       else
-        find_expr+=( -o -path "$sibling" )
+        prune_expr+=( -o -path "$sibling" )
       fi
     done
-    (( first )) || find_expr+=( ")" -prune -o )
-    find_expr+=( "!" -user "$user" -print -quit )
+    (( first )) || prune_expr+=( ")" -prune -o )
 
     local offender
-    offender="$(find "$dir" "${find_expr[@]}" 2>/dev/null)" || true
+    offender="$(find "$dir" "${prune_expr[@]}" "!" -user "$user" -print -quit 2>/dev/null)" || true
     if [[ -n "$offender" ]]; then
-      log_info "Found root-owned paths under $dir (e.g. $offender); reassigning to $user"
-      as_root chown -R "$user:$user" "$dir"
-      log_ok "Reassigned $dir"
+      log_info "Found paths under $dir not owned by $user (e.g. $offender); reassigning"
+      as_root find "$dir" "${prune_expr[@]}" "!" -user "$user" -exec chown -h "$user:$user" {} +
+      log_ok "Reassigned mismatched paths under $dir"
     fi
   done
 }
