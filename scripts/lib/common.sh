@@ -510,14 +510,71 @@ ensure_service_user() {
 # the symlinks in node_modules/.bin — it reports "Failed to link <pkg>: EEXIST",
 # because the symlink exists and removing it is denied. Missing directories are
 # skipped: they are created with the right owner later.
+#
+# The top-level check below only ever caught a directory that bootstrap.sh (or
+# an earlier root run) left wholesale-owned by root. It missed the case a
+# `sudo -u agentoo git switch <branch>` in /opt/agentoo just hit in the wild:
+# bootstrap.sh updates an existing clone by running `git fetch`/`checkout` as
+# root (see its clone/update block), and git only ever rewrites the files and
+# directories a fetch or checkout actually touches — it never re-owns the
+# directory it was invoked in. So REPO_ROOT itself stayed agentoo-owned from
+# an earlier chown while everything an update touched underneath, including
+# `.git/objects`, was left root-owned. The top-level-only check above sees
+# REPO_ROOT and declares the tree fine, so it never repaired any of that, and
+# the next `git switch` run as the app user could not replace files inside
+# those root-owned directories.
+#
+# So REPO_ROOT additionally gets a deep check: `find ... -print -quit` stops
+# at the first path not owned by $user, which is cheap when the tree is
+# broken — the case this exists for — but on a tree that is already fully
+# correct there is no shortcut: proving "nothing is wrong" means visiting
+# every entry. That cost is deliberately paid only for REPO_ROOT, not for
+# every directory this may be called with. PROJECTS_DIR (and SOURCES_DIR,
+# LIBRARY_DIR, ATTACHMENTS_DIR, SSH_KEYS_DIR) can hold many project worktrees
+# with their own node_modules, files written by project containers, and the
+# editor feature's PROJECTS_DIR/.editor runtime directory — a full walk there
+# on every install run would be slow, and something other than $user owning a
+# file in there is routine, not a bug. They are also gitignored (see
+# .gitignore), so bootstrap.sh's root-run git commands never write inside
+# them — the failure this exists for cannot occur there. Even though they
+# default to living physically inside REPO_ROOT, the deep check below prunes
+# them out by path for that same reason.
 reconcile_ownership() {
   local user="$1"; shift
   local dir
   for dir in "$@"; do
     [[ -d "$dir" ]] || continue
-    [[ "$(stat -c '%U' "$dir" 2>/dev/null)" == "$user" ]] && continue
-    log_info "Reassigning $dir to $user"
-    as_root chown -R "$user:$user" "$dir"
-    log_ok "Reassigned $dir"
+
+    if [[ "$(stat -c '%U' "$dir" 2>/dev/null)" != "$user" ]]; then
+      log_info "Reassigning $dir to $user"
+      as_root chown -R "$user:$user" "$dir"
+      log_ok "Reassigned $dir"
+      continue
+    fi
+
+    # Deep check: REPO_ROOT only — see the comment above this function.
+    [[ "$dir" == "${REPO_ROOT:-}" ]] || continue
+
+    local -a find_expr=()
+    local sibling first=1
+    for sibling in "${PROJECTS_DIR:-}" "${SOURCES_DIR:-}" "${LIBRARY_DIR:-}" \
+                   "${ATTACHMENTS_DIR:-}" "${SSH_KEYS_DIR:-}"; do
+      [[ -n "$sibling" ]] || continue
+      if (( first )); then
+        find_expr+=( "(" -path "$sibling" ); first=0
+      else
+        find_expr+=( -o -path "$sibling" )
+      fi
+    done
+    (( first )) || find_expr+=( ")" -prune -o )
+    find_expr+=( "!" -user "$user" -print -quit )
+
+    local offender
+    offender="$(find "$dir" "${find_expr[@]}" 2>/dev/null)" || true
+    if [[ -n "$offender" ]]; then
+      log_info "Found root-owned paths under $dir (e.g. $offender); reassigning to $user"
+      as_root chown -R "$user:$user" "$dir"
+      log_ok "Reassigned $dir"
+    fi
   done
 }

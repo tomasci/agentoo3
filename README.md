@@ -66,6 +66,13 @@ Run as root, or as a user with `sudo` — it authenticates once up front rather
 than stalling halfway through an upgrade. It is **idempotent**: re-running skips
 whatever is already in place, and re-uses already-generated passwords.
 
+If you switch branches by hand in an existing `/opt/agentoo` checkout (e.g.
+`sudo -u agentoo git switch <branch>`) and it fails to replace files that
+should have changed, the checkout was updated as root at some point and left
+files deep inside it root-owned. Run `sudo chown -R agentoo:agentoo
+/opt/agentoo` first, then switch branches again. `install.sh` repairs this
+itself on its next run.
+
 ## Layout
 
 ```

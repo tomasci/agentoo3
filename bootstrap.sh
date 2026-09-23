@@ -192,11 +192,36 @@ TXT
   ok "At $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"
 
   # ------------------------------------------------------------ ownership ----
-  # Hand the tree to whoever invoked sudo, so they can work in it afterwards.
+  # Hand the tree to whoever will actually work in it. Prefer the human behind
+  # sudo, so they can keep working in it by hand; fall back to the app account
+  # install.sh runs everything as when there is no such human — SUDO_USER is
+  # empty or "root", which is exactly what an automated re-provision, or a
+  # `sudo bash` invoked from an already-root shell, looks like. config.sh
+  # (scripts/lib/config.sh) is not sourced yet — it lives inside the very
+  # clone this is updating — so "agentoo" mirrors its default (APP_USER falls
+  # back to APP_NAME, which defaults to "agentoo") rather than importing it;
+  # keep the two in sync if that default ever moves.
+  #
+  # Runs whenever this process has root right now, not only when it had to
+  # escalate to get it: updating an existing, already-owned TARGET_DIR as
+  # root never calls need_root() at all (root can already write anywhere, so
+  # the `-w` check above it never fails), so `_escalated` alone would miss the
+  # single most common case this exists for — a plain re-run of this script
+  # as root against a clone `install.sh` already handed to the app user. The
+  # fetch/checkout above just ran as root regardless, and left every file and
+  # directory it touched root-owned; this chown -R is what puts it back.
   owner="${SUDO_USER:-}"
-  if [[ -n "$owner" && "$owner" != "root" ]] && (( _escalated )); then
-    "${SUDO[@]+${SUDO[@]}}" chown -R "$owner:$owner" "$TARGET_DIR"
-    ok "Owner set to $owner"
+  [[ -n "$owner" && "$owner" != "root" ]] || owner="agentoo"
+  if (( _escalated )) || [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    if "${SUDO[@]+${SUDO[@]}}" chown -R "$owner:$owner" "$TARGET_DIR" 2>/dev/null; then
+      ok "Owner set to $owner"
+    else
+      # Most likely "$owner" (a fallback guess, not a real human) does not
+      # exist yet on a brand-new box — install.sh's backend step creates it
+      # and reconciles ownership right after this hands off, so this is not
+      # fatal.
+      warn "Could not chown $TARGET_DIR to '$owner'; install.sh will reconcile ownership"
+    fi
   fi
 
   "${SUDO[@]+${SUDO[@]}}" chmod +x install.sh bootstrap.sh scripts/*.sh 2>/dev/null || true
