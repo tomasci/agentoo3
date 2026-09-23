@@ -5,6 +5,7 @@ import { ideas, messageFiles, messages, projects, sessionFiles, sessions } from 
 import { env } from '@/env'
 import { deleteSessionFiles } from '@/features/attachments/storage'
 import { listScopeContainers } from '@/features/docker/containers'
+import { removeEditor } from '@/features/editor/container'
 import { keyPathFor } from '@/features/ssh-keys/service'
 import { badRequest, conflict, notFound } from '@/lib/errors'
 import { publishControl, publishSessionEvent } from '@/lib/events'
@@ -431,6 +432,31 @@ export async function deleteSession(id: string): Promise<void> {
       throw conflict(
         "This session's docker stack still has containers; clean it up on the Docker page before deleting",
       )
+    }
+  }
+
+  // Best-effort, and NOT gated on DOCKER_ENABLED/EDITOR_ENABLED — unlike the
+  // container gate above, an editor container only ever carries this
+  // feature's own `com.agentoo.editor=1` label (never `com.agentoo.project`),
+  // so it can never be what that gate just checked, and there is nothing left
+  // to race: `docker rm -f` here, `git worktree remove --force` next, in that
+  // order, so the worktree files the editor had bind-mounted are gone before
+  // git itself touches them. A missing `docker` binary or a down daemon just
+  // fails this call fast (see cli.ts's own MISSING_BINARY_EXIT_CODE path) —
+  // it must never make a session undeletable, the same discipline the gate
+  // above already documents. The runtime dir (its socket) is deliberately
+  // left for the reaper's own sweep (features/editor/reaper.ts) rather than
+  // removed here too — one less filesystem op on the delete path, and the
+  // reaper already has to handle an orphaned runtime dir for the project
+  // deletion path, which skips this function entirely.
+  if (row.worktreePath) {
+    try {
+      const result = await removeEditor({ slug: project.slug, sessionId: row.id })
+      if (!result.ok && !/no such container/i.test(result.stderr)) {
+        logger.warn(`Could not remove the editor for session ${row.id}: ${result.stderr}`)
+      }
+    } catch (error) {
+      logger.warn(`Could not remove the editor for session ${row.id}: ${String(error)}`)
     }
   }
 

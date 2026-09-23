@@ -283,6 +283,15 @@ compose stack *of its own* for development — a different thing, and the one to
 reach for when testing agentoo itself rather than a project it hosts: see
 `docker/README.md`.
 
+That same daemon is also what a session's own **Editor** (per-session
+code-server, `backend/README.md`'s "Editor" section) runs on. It publishes no
+port of its own — `--network none`, reached only through this app's own `/api`
+proxy over a unix socket — so nothing new is exposed on the network by turning
+it on; the `DOCKER-USER` firewall rules above have nothing to do with it.
+Browser features that need a secure context (webviews, clipboard) inside the
+editor still need HTTPS, which on a tailnet-only deployment means serving over
+`tailscale serve` — see "Serving over Tailscale" below.
+
 ## Claude Code
 
 This is the SYSTEM install, used only for `claude setup-token` and `claude

@@ -3,6 +3,7 @@
 
 import { createApp } from '@/app'
 import { env, hasClaudeCredential } from '@/env'
+import { editorWebSocketHandler } from '@/features/editor/proxy'
 import { logger } from '@/lib/logger'
 
 const app = createApp()
@@ -17,6 +18,10 @@ const server = Bun.serve({
   fetch: app.fetch,
   // Agent output streams for minutes; do not let Bun time the request out.
   idleTimeout: 255,
+  // The editor proxy's own WebSocket half (features/editor/proxy.ts) — Bun
+  // requires this at the server level, not per-request: `server.upgrade()`
+  // inside `app.fetch` only works because this is the same `Bun.serve` call.
+  websocket: editorWebSocketHandler,
 })
 
 logger.success(`API listening on http://${server.hostname}:${server.port}`)

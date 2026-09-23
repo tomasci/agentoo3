@@ -33,6 +33,37 @@ export function projectPlugin(slug: string): string {
   return join(projectRoot(slug), 'plugin')
 }
 
+// --- editor runtime (per-session code-server) ------------------------------
+//
+// Lives under PROJECTS_DIR, not ATTACHMENTS_DIR or a /tmp path: slugs can
+// never start with `.` (see toSlug()), so `.editor` can never collide with a
+// real project directory; PROJECTS_DIR is already gitignored end to end; and
+// /tmp is unusable here specifically because the systemd unit for both the
+// API and worker sets PrivateTmp=true, which would make a socket written
+// there invisible to the other process the moment they disagree on which
+// /tmp they mean.
+
+/** Root of every session's editor runtime state — sockets, nothing else. */
+export function editorRuntimeRoot(): string {
+  return join(env.PROJECTS_DIR, '.editor')
+}
+
+/** One session's own editor runtime directory, bind-mounted whole into the
+ * container at /run/agentoo-editor (see features/editor/container.ts). */
+export function editorRuntimeDir(sessionId: string): string {
+  assertSessionId(sessionId)
+  return join(editorRuntimeRoot(), sessionId)
+}
+
+/** Where code-server's `--socket` listens, host-side. Guarded elsewhere
+ * (features/editor/container.ts) for AF_UNIX's 108-byte path limit — this
+ * function only builds the path, it does not enforce that bound, since the
+ * bound depends on PROJECTS_DIR's own length and that is a deploy-time fact,
+ * not something every caller of this path needs to re-check. */
+export function editorSocketPath(sessionId: string): string {
+  return join(editorRuntimeDir(sessionId), 'code-server.sock')
+}
+
 /**
  * Reject a path that escapes PROJECTS_DIR.
  *

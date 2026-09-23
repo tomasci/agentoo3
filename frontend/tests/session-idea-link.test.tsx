@@ -173,6 +173,16 @@ const ideaHrefs = () =>
     .map((a) => a.getAttribute('href') ?? '')
     .filter((href) => /\/ideas\/[^/]+$/.test(href))
 
+/** Scoped to `SessionPage`'s own `<header>`, not the whole container: the
+ *  project sidebar's own nav also has a "Docker" link
+ *  (`nav.docker`, sidebar.tsx), to the *project*-scope dashboard rather than
+ *  this session's — `linkByText` alone would count both. */
+const headerLinkByText = (text: string) => {
+  const header = container.querySelector('header')
+  if (!header) throw new Error('no session header rendered')
+  return [...header.querySelectorAll('a')].filter((a) => a.textContent?.trim() === text)
+}
+
 test('a session handed off from an idea links back to it', async () => {
   currentSession = session({ ideaId: 'idea-7' })
   await mount()
@@ -219,4 +229,33 @@ test('a session started directly offers no way back to an idea', async () => {
   expect(container.textContent ?? '').not.toContain('Back to Idea')
   // Not merely unlabelled: no link into the idea manager at all.
   expect(ideaHrefs()).toEqual([])
+})
+
+// The header's Docker and Editor links share one gate (session-page.tsx's own
+// comment on both): only an isolated session has a worktree of its own for
+// either a compose stack or a code-server container to run against — a
+// shared-checkout session has neither, and the backend 400s on both
+// (features/docker/scope.ts and, the same way, features/editor/service.ts).
+// Lives here rather than in tests/editor-page.test.tsx or a Docker-owned
+// file: it is a fact about `SessionPage`'s own header, not about either
+// feature page those links lead to.
+test("an isolated session's header links to its own Docker dashboard and its own editor", async () => {
+  currentSession = session({ isolated: true })
+  await mount()
+
+  const docker = headerLinkByText('Docker')
+  expect(docker.length).toBe(1)
+  expect(docker[0]?.getAttribute('href')).toBe('/projects/p1/sessions/s1/docker')
+
+  const editor = headerLinkByText('Editor')
+  expect(editor.length).toBe(1)
+  expect(editor[0]?.getAttribute('href')).toBe('/projects/p1/sessions/s1/editor')
+})
+
+test('a shared-checkout session offers neither the Docker nor the Editor link', async () => {
+  currentSession = session({ isolated: false })
+  await mount()
+
+  expect(headerLinkByText('Docker').length).toBe(0)
+  expect(headerLinkByText('Editor').length).toBe(0)
 })

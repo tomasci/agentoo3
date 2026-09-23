@@ -189,6 +189,12 @@ async function runUpdate(t: unknown, patch: Row): Promise<Row[]> {
 mock.module(`${B}/db/client.ts`, () => ({ db, closeDb: async () => {} }))
 
 mock.module(`${B}/queue/index.ts`, () => ({
+  // Additive stub for features/editor -- not exercised here, kept only so
+  // this hard-coded (non-spread) mock does not remove it from the shared
+  // module for whichever other test file imports it while this mock is live.
+  enqueueEditorStart: async () => ({}),
+  enqueueEditorReap: async () => ({}),
+  ensureEditorReapSchedule: async () => {},
   QUEUE_PROJECT_SETUP: 'project-setup',
   QUEUE_SESSION_RUN: 'session-run',
   QUEUE_ATTACHMENTS_GC: 'attachments-gc',

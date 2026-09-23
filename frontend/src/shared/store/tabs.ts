@@ -100,12 +100,18 @@ export function projectIdForPath(pathname: string): string | null {
  * Routes that own their whole region: no body padding, no body scroll.
  *
  * A session's own live page draws its own scrolling transcript and composer
- * edge to edge; the shell's usual page padding would just be a second frame
- * around a page that already has one. Matches the session *detail* route only
- * — `/projects/:id/sessions` (the list) still wants the ordinary page body.
+ * edge to edge, and its own editor page (a full-height code-server iframe) is
+ * the same deal — either way the shell's usual page padding would just be a
+ * second frame around one the page already drew itself. Matches the session
+ * *detail* route and its own `/editor` route only — `/projects/:id/sessions`
+ * (the list) and the session's `/docker` dashboard still want the ordinary
+ * page body.
  */
 export function isFullBleedPath(pathname: string): boolean {
-  return /^\/projects\/[^/]+\/sessions\/[^/]+$/.test(pathname)
+  return (
+    /^\/projects\/[^/]+\/sessions\/[^/]+$/.test(pathname) ||
+    /^\/projects\/[^/]+\/sessions\/[^/]+\/editor$/.test(pathname)
+  )
 }
 
 /**

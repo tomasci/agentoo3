@@ -1,5 +1,6 @@
 import { useParams } from '@tanstack/react-router'
 import { DockerPage } from '@/features/docker'
+import { EditorPage } from '@/features/editor'
 import { IdeaBoardPage, IdeaDetailPage } from '@/features/ideas'
 import { ProjectLibraryPage } from '@/features/library'
 import { ProjectOverview, ProjectPicker, useProjects } from '@/features/projects'
@@ -56,6 +57,13 @@ export function SessionDockerRoute() {
     from: '/projects/$projectId/sessions/$sessionId/docker',
   })
   return <DockerPage projectId={projectId} sessionId={sessionId} />
+}
+
+export function SessionEditorRoute() {
+  const { projectId, sessionId } = useParams({
+    from: '/projects/$projectId/sessions/$sessionId/editor',
+  })
+  return <EditorPage projectId={projectId} sessionId={sessionId} />
 }
 
 /**

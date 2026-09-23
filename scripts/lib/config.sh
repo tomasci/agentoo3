@@ -238,7 +238,13 @@ NODE_PREFIX="${NODE_PREFIX:-/usr/local}"                   # tarball method only
 
 BUN_VERSION="${BUN_VERSION:-latest}"
 BUN_INSTALL_DIR="${BUN_INSTALL_DIR:-/usr/local}"           # binary -> $DIR/bin/bun
-MIN_BUN_VERSION="${MIN_BUN_VERSION:-1.1.0}"
+# 1.3.13 is the floor because the editor feature's proxy (backend/src/features/
+# editor/proxy.ts) dials code-server over a unix socket with Bun's own `unix`
+# fetch option and a `ws+unix://` WebSocket client — both are Bun-specific and
+# only landed at that version. A host already past this floor is left alone
+# (see this file's own header on why this is one of the two declared
+# exceptions to "always converge").
+MIN_BUN_VERSION="${MIN_BUN_VERSION:-1.3.13}"
 
 # -------------------------------------------------------------- postgres ----
 

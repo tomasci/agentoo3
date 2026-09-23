@@ -518,6 +518,21 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
               </Link>
             </Button>
           )}
+          {/* Same gate as Docker above, for the same reason: a code-server
+              container runs against this session's own worktree
+              (features/editor/service.ts resolves scope the same way
+              features/docker/scope.ts does), which a shared-checkout session
+              does not have. */}
+          {data.isolated && (
+            <Button asChild variant="secondary" size="sm">
+              <Link
+                to="/projects/$projectId/sessions/$sessionId/editor"
+                params={{ projectId: data.projectId, sessionId: data.id }}
+              >
+                {t('sessions.editor')}
+              </Link>
+            </Button>
+          )}
           {/* Visible at every size while busy: the only way to halt a running
               agent does not belong behind a menu. */}
           {busy && (

@@ -1,0 +1,96 @@
+// Full-bleed, the same idiom as session-page.module.scss's own `.page`
+// (root-layout.tsx's `.bodyBleed` strips the shell's page padding for this
+// route — see shared/store/tabs.ts's `isFullBleedPath`): the workbench
+// iframe below is the page, not something sitting inside one.
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  height: 100%;
+  min-height: 0;
+  padding: 0 var(--layout-page-padding-x);
+
+  // Header and the optional insecure-context banner keep their natural
+  // height; only `.content`/`.body` below (whichever the current state
+  // renders) grows to take the rest. Overridden for those two specifically,
+  // further down this file — same technique as session-page.module.scss.
+  > * { flex: none; }
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: var(--leading-md);
+  font-weight: var(--weight-semibold);
+}
+
+// The one item that yields — see session-page.module.scss's own `.title` for
+// why `flex-basis: 0` rather than `auto` is what actually lets this shrink
+// and ellipsize instead of forcing the row wider.
+.meta {
+  flex: 1 1 0%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-text-secondary);
+}
+
+.idleNote {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-text-muted);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+}
+
+// Every non-iframe state: loading, a load error, the disabled/daemon-down
+// alerts, the Start button (plus a failed op's own alert and log), and the
+// starting log. Scrolls on its own — a long start log must not push the
+// header off the top of a short viewport.
+.content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-4) 0;
+}
+
+// Wraps the iframe (running/unresponsive states) — column layout so the
+// `unresponsive` banner, when present, pushes the iframe down rather than
+// overlapping it. No padding: the workbench is meant to run edge to edge,
+// not sit inset like an ordinary block of page content.
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+// The workbench itself. `flex: 1` is load-bearing: without it a replaced
+// element defaults to its own intrinsic ~150px height and ignores the column
+// it sits in, rather than filling whatever `.body` has left.
+.frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+}

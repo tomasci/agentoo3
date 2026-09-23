@@ -3,6 +3,7 @@ import {
   activeTabIdForPath,
   adoptTab,
   closeTab,
+  isFullBleedPath,
   newTab,
   nextNewTabSeq,
   normalizeTabs,
@@ -38,6 +39,19 @@ test('the shell is chosen by the path, so it is right on first paint', () => {
   expect(shellModeForPath('/ssh-keys')).toBe('system')
   // An empty tab shows the picker with no sidebar at all.
   expect(shellModeForPath('/tab/new-1')).not.toBe('system')
+})
+
+test('a session\'s own live page and its own editor page draw their own chrome, edge to edge', () => {
+  expect(isFullBleedPath('/projects/abc/sessions/s1')).toBe(true)
+  expect(isFullBleedPath('/projects/abc/sessions/s1/editor')).toBe(true)
+})
+
+test('the session list and the session\'s Docker dashboard still want the ordinary page body', () => {
+  expect(isFullBleedPath('/projects/abc/sessions')).toBe(false)
+  expect(isFullBleedPath('/projects/abc/sessions/s1/docker')).toBe(false)
+  // Not a session route at all.
+  expect(isFullBleedPath('/projects/abc')).toBe(false)
+  expect(isFullBleedPath('/library')).toBe(false)
 })
 
 // ── opening projects ─────────────────────────────────────────────────────────

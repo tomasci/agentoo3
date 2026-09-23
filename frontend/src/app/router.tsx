@@ -17,6 +17,7 @@ import {
   ProjectOverviewRoute,
   ProjectSessionsRoute,
   SessionDockerRoute,
+  SessionEditorRoute,
   SessionRoute,
 } from './project-routes'
 import { RootLayout } from './root-layout'
@@ -85,6 +86,17 @@ const sessionDockerRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: '/sessions/$sessionId/docker',
   component: SessionDockerRoute,
+})
+
+// A session's own code-server (VS Code in the browser), scoped to this
+// session's own git worktree — see features/editor/components/editor-page.tsx
+// and the design doc it was built from. Full-bleed, unlike the Docker route
+// above (`isFullBleedPath`, shared/store/tabs.ts): the whole page is a
+// workbench iframe, not a dashboard around one.
+const sessionEditorRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/sessions/$sessionId/editor',
+  component: SessionEditorRoute,
 })
 
 const projectLibraryRoute = createRoute({
@@ -203,6 +215,7 @@ export const routeTree = rootRoute.addChildren([
     projectSessionsRoute,
     sessionRoute,
     sessionDockerRoute,
+    sessionEditorRoute,
     projectDockerRoute,
     projectLibraryRoute,
     projectIdeasRoute,

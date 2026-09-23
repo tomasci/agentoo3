@@ -10,6 +10,7 @@ export const QUEUE_TURN_RECONCILE = 'turn-reconcile'
 export const QUEUE_IDEA_PROMPT = 'idea-prompt'
 export const QUEUE_IDEA_HANDOFF_SWEEP = 'idea-handoff-sweep'
 export const QUEUE_DOCKER_OP = 'docker-op'
+export const QUEUE_EDITOR_OP = 'editor-op'
 
 export interface ProjectSetupJob {
   projectId: string
@@ -340,4 +341,60 @@ export const dockerOpQueue = new Queue<DockerOpJob>(QUEUE_DOCKER_OP, {
 
 export async function enqueueDockerOp(job: DockerOpJob) {
   return dockerOpQueue.add('run', job)
+}
+
+/**
+ * One start job carries only ids — never a resolved path, never a slug — the
+ * worker (features/editor/lifecycle.ts) re-resolves the scope itself via
+ * `resolveDockerScope`, exactly like `DockerOpJob` above and for the same
+ * reason: a queue payload is data written by a process that may not be this
+ * one, and the worktree it names may have been removed in the time between
+ * the route enqueuing this and the worker picking it up.
+ *
+ * A second variant on the same queue, not a second queue, is what the
+ * design's own "own queue... runs both start jobs and the reap job" note
+ * asks for: this queue's `concurrency: 1` is what keeps a start and a reap
+ * sweep from ever running against the same container at once.
+ */
+export type EditorOpJob =
+  | { kind: 'start'; operationId: string; projectId: string; sessionId: string }
+  | { kind: 'reap'; reason: 'scheduled' | 'boot' }
+
+/**
+ * How often the reap sweep (features/editor/reaper.ts) runs on its own
+ * schedule — a file-local constant, like `TURN_RECONCILE_INTERVAL_MS` above,
+ * not an env var: nothing about this cadence is a deployment's to tune, only
+ * this feature's own cleanup story.
+ */
+const EDITOR_REAP_INTERVAL_MS = 300_000
+
+export const editorOpQueue = new Queue<EditorOpJob>(QUEUE_EDITOR_OP, {
+  connection: redisConnection(),
+  defaultJobOptions: {
+    // Same reasoning as `dockerOpQueue`'s own `attempts: 1`: by the time a
+    // start can fail, it may already have created a real container (or
+    // partially pulled a real image) — retrying blind risks doubling that,
+    // not undoing it. A user who wants to try again clicks Start again.
+    attempts: 1,
+    removeOnComplete: { count: 100 },
+    removeOnFail: { count: 100 },
+  },
+})
+
+export async function enqueueEditorStart(job: Extract<EditorOpJob, { kind: 'start' }>) {
+  return editorOpQueue.add('start', job)
+}
+
+export async function enqueueEditorReap(job: Extract<EditorOpJob, { kind: 'reap' }>) {
+  return editorOpQueue.add('reap', job)
+}
+
+/** Idempotent by construction — see `ensureAttachmentsGcSchedule`'s own
+ * comment above — safe, and correct, to call on every worker boot. */
+export async function ensureEditorReapSchedule() {
+  await editorOpQueue.upsertJobScheduler(
+    'editor-reap-sweep',
+    { every: EDITOR_REAP_INTERVAL_MS },
+    { name: 'reap', data: { kind: 'reap', reason: 'scheduled' } },
+  )
 }
