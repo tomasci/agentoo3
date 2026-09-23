@@ -82,6 +82,20 @@ test('opening the launcher in a fresh browser tab adds no workspace tab', () => 
   expect(adoptTab(tabs, activeTabIdForPath(path), path, ['abc'])).toBe(tabs)
 })
 
+test('a trailing slash on the launcher path is still the launcher, not the project tab', () => {
+  const path = '/projects/abc/sessions/s1/editor/'
+  // The router matches this to the very same route as the bare form (see
+  // isBareShellPath's own comment) — every guard built on it has to agree,
+  // or a stray trailing slash would slip the launcher into the app shell
+  // and get it adopted as the project's own tab.
+  expect(isBareShellPath(path)).toBe(true)
+  expect(shellModeForPath(path)).not.toBe('project')
+  expect(projectIdForPath(path)).toBeNull()
+
+  const tabs = [systemTab()]
+  expect(adoptTab(tabs, projectTabId('abc'), path, ['abc'])).toBe(tabs)
+})
+
 // ── opening projects ─────────────────────────────────────────────────────────
 
 test('opening a project from the system tab appends a tab', () => {

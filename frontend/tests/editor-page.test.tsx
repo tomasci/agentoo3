@@ -522,17 +522,128 @@ test('unresponsive offers "Open anyway" (assign) and "Restart" (calls start)', a
   expect(startCalls[0]?.path).toEqual({ id: 'p1', sessionId: 's1' })
 })
 
+test('unresponsive + Restart rejecting shows the API message and lets the reader retry', async () => {
+  currentStatus = editorStatus({ state: 'unresponsive' })
+  startReject = {
+    response: { status: 409, data: { error: 'The editor container cap (2 running) is reached' } },
+  }
+  await mount()
+
+  const restart = findButton('Restart')
+  if (!restart) throw new Error('no Restart button')
+  await click(restart)
+  await settle()
+
+  expect(container.textContent).toContain('The editor container cap (2 running) is reached')
+  expect(startCalls).toHaveLength(1)
+
+  // The error must not swallow the retry path: the same button, clicked
+  // again, calls start again rather than becoming a dead end.
+  const restartAgain = findButton('Restart')
+  if (!restartAgain) throw new Error('no Restart button once the error is showing')
+  await click(restartAgain)
+  await settle()
+  expect(startCalls).toHaveLength(2)
+})
+
 // --- 10. the tab's own title -------------------------------------------------------
 
 test("sets the browser tab's own title while mounted, and restores it on unmount", async () => {
   document.title = 'agentoo'
   await mount()
 
+  // By the time `mount` settles, the auto-start effect has already moved this
+  // default status from 'stopped' to 'starting' (see the auto-start tests
+  // above) — the title tracks that, same as the body does.
   expect(document.title).not.toBe('agentoo')
-  expect(document.title).toContain('Editor')
+  expect(document.title).toBe('Starting the editor…')
 
   await unmount()
   expect(document.title).toBe('agentoo')
+})
+
+test('the title matches whatever error page is actually showing, not a generic "starting" one', async () => {
+  statusReject = { response: { status: 409, data: { error: 'This worktree no longer exists on disk' } } }
+  await mount()
+  expect(document.title).toBe('Could not load the editor status')
+  await unmount()
+
+  statusReject = null
+  currentStatus = editorStatus({ enabled: false })
+  await mount()
+  expect(document.title).toBe('The editor is turned off')
+  await unmount()
+
+  currentStatus = editorStatus({
+    daemon: daemon({ cliInstalled: false, available: false, error: 'command not found' }),
+  })
+  await mount()
+  expect(document.title).toBe('Docker is not installed')
+  await unmount()
+
+  currentStatus = editorStatus({ daemon: daemon({ available: false, error: 'connection refused' }) })
+  await mount()
+  expect(document.title).toBe('Docker daemon not reachable')
+  await unmount()
+
+  currentStatus = editorStatus({ state: 'unresponsive' })
+  await mount()
+  expect(document.title).toBe("The editor isn't responding")
+  await unmount()
+})
+
+test('the title reads "starting" only while a start is actually in flight or the tab is about to leave', async () => {
+  currentStatus = editorStatus({
+    state: 'starting',
+    operation: operation({ status: 'running' }),
+  })
+  await mount()
+  expect(document.title).toBe('Starting the editor…')
+  await unmount()
+
+  // 'stopped' with no failure yet — the auto-start effect just fired (or is
+  // about to) — reads the same as an explicit 'starting', not as idle.
+  await mount()
+  await settle()
+  expect(document.title).toBe('Starting the editor…')
+  await unmount()
+
+  currentStatus = editorStatus({
+    state: 'running',
+    container: { name: 'agentoo_editor-alpha_s-abc123', state: 'running', startedAt: T },
+  })
+  await mount()
+  expect(document.title).toBe('Opening the editor…')
+  await unmount()
+})
+
+test('a failed start title distinguishes itself from the plain "starting" one', async () => {
+  await mount()
+  await settle()
+  currentStatus = editorStatus({
+    operation: operation({ status: 'failed', error: 'docker pull failed: no space left on device' }),
+  })
+  await refetchStatus()
+
+  expect(document.title).toBe('The last start failed')
+})
+
+// --- 10b. a trailing slash on the launcher URL ------------------------------------
+
+test('a trailing slash on the launcher URL still matches this route and renders the launcher', async () => {
+  // Same route tree as every other test in this file (see the header
+  // comment) — proves the router itself resolves `.../editor/` to the same
+  // leaf as `.../editor`, which is what makes shared/store/tabs.ts's own
+  // `isBareShellPath` fix (the trailing `/?`) actually matter: without the
+  // router agreeing, there would be nothing for that fix to protect.
+  currentStatus = editorStatus({
+    state: 'starting',
+    operation: operation({ status: 'running' }),
+  })
+  await mount('/projects/p1/sessions/s1/editor/')
+
+  expect(container.textContent).toContain('Starting the editor')
+  expect(statusCalls[0]?.path).toEqual({ id: 'p1', sessionId: 's1' })
 })
 
 // --- 11. no shell around the launcher, and no workspace tab from visiting it -------
@@ -620,4 +731,14 @@ test('an ordinary page, by contrast, does adopt itself into the stored tab row',
   await mountShell('/ssh-keys')
 
   expect(localStorage.getItem('agentoo:tabs')).not.toBeNull()
+})
+
+test('a trailing slash on the launcher path renders bare too, and adopts no tab', async () => {
+  await mountShell('/projects/p1/sessions/s1/editor/')
+
+  expect(container.textContent).toContain('bare child')
+  expect(container.querySelector('nav')).toBeNull()
+  expect(container.querySelector('aside')).toBeNull()
+  expect(container.querySelector('footer')).toBeNull()
+  expect(localStorage.getItem('agentoo:tabs')).toBeNull()
 })

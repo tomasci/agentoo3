@@ -89,10 +89,16 @@ export function activeTabIdForPath(pathname: string): string {
  * comment), and this predicate is also the guard `projectIdForPath`,
  * `shellModeForPath` and `adoptTab` below use so the launcher can never be
  * picked up as that project's tab even if something calls them directly
- * against this path.
+ * against this path. The trailing `/?` matters: the router matches
+ * `.../editor/` to the very same route as `.../editor` (a link with a
+ * stray trailing slash, or one typed by hand), and without it here that
+ * form would fall through to the ordinary shell and get adopted as the
+ * project's own tab — which then auto-starts the editor and, per the
+ * launcher's own redirect effect, hands the *workspace* tab to code-server
+ * instead of a disposable one.
  */
 export function isBareShellPath(pathname: string): boolean {
-  return /^\/projects\/[^/]+\/sessions\/[^/]+\/editor$/.test(pathname)
+  return /^\/projects\/[^/]+\/sessions\/[^/]+\/editor\/?$/.test(pathname)
 }
 
 /**

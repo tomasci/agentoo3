@@ -675,7 +675,7 @@
       "empty": "Waiting for output…"
     },
     "launcher": {
-      "title": "Editor — starting…",
+      "title": "Editor",
       "opening": "Opening the editor…",
       "openAnyway": "Open anyway",
       "retry": "Retry"

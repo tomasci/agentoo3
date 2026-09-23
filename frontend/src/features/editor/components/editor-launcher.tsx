@@ -30,18 +30,20 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
   const start = useEditorStart(projectId, sessionId)
   const data = status.data
 
-  // The tab's own title while it waits — code-server sets its own once
-  // `window.location.replace` below hands the tab to it. Restored on
-  // unmount, so leaving via the "back to session" link below (an in-app
-  // navigation, not a full reload) does not strand this title on a page
-  // that never asked for it.
+  // Captures the tab's own title exactly once, before this component ever
+  // sets one, and restores it exactly once on unmount — split from the
+  // effect below that keeps the title in step with the current state, since
+  // that one runs on every state change and must never mistake "the title a
+  // moment ago" for "the title this tab found here first". Restored so that
+  // leaving via the "back to session" link (an in-app navigation, not a full
+  // reload) does not strand a launcher title on a page that never asked for
+  // one.
   useEffect(() => {
     const previous = document.title
-    document.title = t('editor.launcher.title')
     return () => {
       document.title = previous
     }
-  }, [t])
+  }, [])
 
   // Fires the first time this tab sees the editor stopped, and never again:
   // `autoStarted` is a ref rather than, say, a check against `data` itself,
@@ -69,6 +71,18 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
 
   const retry = () => start.mutate({ path: { id: projectId, sessionId } })
 
+  // This tab's own last `start.mutate` call — an auto-start or a manual
+  // Retry/Restart click — read once, up here, because it can be the thing
+  // that turns *any* start-triggering state's page from silent into
+  // explained: 'unresponsive' (Restart), 'stopped' with a stale failed
+  // operation, or 'stopped' still waiting on the very attempt that produced
+  // this error. Takes priority over a stale `operation.status === 'failed'`
+  // wherever both are read below — it is the more recent of the two by
+  // definition, since it is what a click just produced.
+  const startError = start.isError
+    ? apiErrorMessage(start.error, t('editor.errors.startFailed'))
+    : null
+
   const backToSession = (
     <Button asChild variant="secondary" size="sm">
       <Link to="/projects/$projectId/sessions/$sessionId" params={{ projectId, sessionId }}>
@@ -78,13 +92,21 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
   )
 
   let body: ReactNode
+  // The tab's own title, set to match whatever `body` below is showing —
+  // "Editor" while nothing is known yet, an error-appropriate title on every
+  // error page, and copy with its own "…" only while a start is actually in
+  // flight (state 'starting', or 'stopped' still waiting on the auto-start
+  // effect above) or the tab is about to leave for code-server ('running').
+  let title: string
   if (status.isPending) {
+    title = t('editor.launcher.title')
     body = <Spinner label={t('common.loading')} block />
   } else if (status.isError || !data) {
     // Covers every shape of GET failure worth telling apart here (a shared
     // checkout with no worktree of its own, a session that no longer
     // exists, a worktree removed from disk) with the one thing they share:
     // there is nothing this page can do about any of them itself.
+    title = t('editor.loadFailed')
     body = (
       <EmptyState
         title={t('editor.loadFailed')}
@@ -93,6 +115,7 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
       />
     )
   } else if (!data.enabled) {
+    title = t('editor.empty.title')
     body = (
       <EmptyState
         title={t('editor.empty.title')}
@@ -106,16 +129,11 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
     // `description` in a `<p>` — nesting a `<pre>` (or another block element)
     // inside a `<p>` is invalid HTML, which is exactly what this used to do
     // before it was an `Alert`, whose `children` sit in a plain `<div>`.
+    title = data.daemon.cliInstalled
+      ? t('editor.daemon.unavailableTitle')
+      : t('editor.daemon.notInstalledTitle')
     body = (
-      <Alert
-        tone="danger"
-        title={
-          data.daemon.cliInstalled
-            ? t('editor.daemon.unavailableTitle')
-            : t('editor.daemon.notInstalledTitle')
-        }
-        action={backToSession}
-      >
+      <Alert tone="danger" title={title} action={backToSession}>
         <Stack gap={2}>
           <p>
             {data.daemon.cliInstalled
@@ -132,42 +150,49 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
     )
   } else if (data.state === 'running') {
     // Transient — the effect above is already replacing this document.
+    title = t('editor.launcher.opening')
     body = <Spinner label={t('editor.launcher.opening')} block />
   } else if (data.state === 'unresponsive') {
-    body = (
-      <EmptyState
-        title={t('editor.state.unresponsiveTitle')}
-        description={t('editor.state.unresponsiveBody')}
-        action={
-          <Inline gap={2}>
-            <Button type="button" onClick={() => window.location.assign(data.proxyPath)}>
-              {t('editor.launcher.openAnyway')}
-            </Button>
-            <Button type="button" variant="secondary" loading={start.isPending} onClick={retry}>
-              {t('editor.restart')}
-            </Button>
-          </Inline>
-        }
-      />
+    title = t('editor.state.unresponsiveTitle')
+    const actions = (
+      <Inline gap={2}>
+        <Button type="button" onClick={() => window.location.assign(data.proxyPath)}>
+          {t('editor.launcher.openAnyway')}
+        </Button>
+        <Button type="button" variant="secondary" loading={start.isPending} onClick={retry}>
+          {t('editor.restart')}
+        </Button>
+      </Inline>
+    )
+    // `Alert`, not `EmptyState`, once there is a start error to show: the
+    // same nesting problem as the daemon branch above — a second `<p>` passed
+    // as `EmptyState`'s `description` would land inside the one it already
+    // wraps its own description in. Restart stays available either way, so a
+    // 409 (the running-editor cap) or any other rejected Restart is never a
+    // dead end.
+    body = startError ? (
+      <Alert tone="danger" title={title} action={actions}>
+        <Stack gap={3}>
+          <p>{t('editor.state.unresponsiveBody')}</p>
+          <p>{startError}</p>
+        </Stack>
+      </Alert>
+    ) : (
+      <EmptyState title={title} description={t('editor.state.unresponsiveBody')} action={actions} />
     )
   } else if (data.state === 'starting') {
+    title = t('editor.state.startingTitle')
     body = <StartingPanel operation={data.operation} />
   } else {
     // 'stopped'. Either the auto-start effect above just fired (or is about
     // to — effects run after this render commits) and the log will start
     // filling in once that POST resolves, or the last attempt — this page's
     // own auto-start, or a manual Retry — already failed and is waiting on
-    // another click. `start.isError` (this tab's own last mutate call, e.g.
-    // a 409 for the running-editor cap) takes priority over a stale
-    // `operation.status === 'failed'` already sitting in the cache: it is
-    // the more recent of the two by definition, since it is what a Retry
-    // click just produced.
-    const startError = start.isError
-      ? apiErrorMessage(start.error, t('editor.errors.startFailed'))
-      : null
+    // another click.
     const opError = data.operation?.status === 'failed' ? data.operation.error : null
     const failure = startError ?? opError
 
+    title = failure ? t('editor.operationFailed') : t('editor.state.startingTitle')
     body = failure ? (
       <Alert
         tone="danger"
@@ -187,6 +212,10 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
       <StartingPanel operation={data.operation} />
     )
   }
+
+  useEffect(() => {
+    document.title = title
+  }, [title])
 
   return (
     <div className={styles.page}>
