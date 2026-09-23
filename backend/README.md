@@ -589,6 +589,17 @@ on top of `DOCKER_ENABLED`: the effective flag (`editorEnabled` in `env.ts`)
 is `DOCKER_ENABLED && EDITOR_ENABLED`, since an editor container is still a
 docker container underneath.
 
+**Reloading a workbench tab after the editor has stopped redirects to the
+launcher instead of showing a raw 502.** The Editor button opens the
+workbench in its own tab, whose location is the proxy path itself, so a
+reload after an idle timeout, a Stop, or a restart would otherwise repeat the
+same request against a socket that is no longer there. `proxy.ts` tells that
+one case (a top-level document navigation, per `isDocumentNavigation`) apart
+from every other 502 — a POST, an asset, an XHR, a WebSocket upgrade all
+still 502 — and sends it a `303` (`Cache-Control: no-store`) to
+`editorLauncherPath`, the same launcher route the Editor button opens, which
+restarts the editor and lands the tab back on the workbench.
+
 ## Commands
 
 ```

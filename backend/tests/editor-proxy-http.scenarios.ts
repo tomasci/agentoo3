@@ -91,9 +91,12 @@ mock.module(`${B}/features/sessions/service.ts`, () => ({
   },
 }))
 
-const { editorProxyRouter, editorProxyPath, resetEditorProxyScopeCacheForTests } = await import(
-  `${B}/features/editor/proxy.ts`
-)
+const {
+  editorProxyRouter,
+  editorProxyPath,
+  editorLauncherPath,
+  resetEditorProxyScopeCacheForTests,
+} = await import(`${B}/features/editor/proxy.ts`)
 const { editorSocketPath, editorRuntimeDir } = await import(`${B}/lib/paths.ts`)
 
 afterAll(async () => {
@@ -220,6 +223,92 @@ test('a session with no socket file on disk is a 502, not a hang', async () => {
   const deadBase = editorProxyPath(PROJECT_ID, deadSessionId).slice(0, -1)
   const res = await req(`${deadBase}/anything`)
   expect(res.status).toBe(502)
+})
+
+// --- a dead editor: a document-navigation reload goes to the launcher, ------
+// --- everything else keeps the plain 502 ------------------------------------
+//
+// Each of these gets its own never-reused session id/worktree — not because
+// the socket path matters (there never is one), but because `sessionRow` is
+// shared, mutable module state (see `beforeEach` above), so two tests
+// pointed at the same dead session id could only race each other if they
+// ever ran concurrently.
+
+let deadSessionCounter = 0
+
+async function deadSessionBase(): Promise<{ base: string; sessionId: string }> {
+  deadSessionCounter += 1
+  const sessionId = `4444444${deadSessionCounter}-4444-4444-8444-444444444444`
+  const worktreePath = join(TEST_PROJECTS_DIR, SLUG, 'worktrees', sessionId)
+  sessionRow = { id: sessionId, projectId: PROJECT_ID, worktreePath }
+  await mkdir(worktreePath, { recursive: true })
+  return { base: editorProxyPath(PROJECT_ID, sessionId).slice(0, -1), sessionId }
+}
+
+test('a document navigation (Sec-Fetch-Dest: document) to a dead editor redirects to the launcher, not 502', async () => {
+  const { base, sessionId } = await deadSessionBase()
+  const res = await req(`${base}/`, {
+    redirect: 'manual',
+    headers: { 'sec-fetch-dest': 'document' },
+  })
+  expect(res.status).toBe(303)
+  expect(res.headers.get('location')).toBe(editorLauncherPath(PROJECT_ID, sessionId))
+  expect(res.headers.get('cache-control')).toBe('no-store')
+})
+
+test('the Sec-Fetch-Mode: navigate fallback (no Sec-Fetch-Dest at all) also redirects', async () => {
+  const { base, sessionId } = await deadSessionBase()
+  const res = await req(`${base}/`, {
+    redirect: 'manual',
+    headers: { 'sec-fetch-mode': 'navigate' },
+  })
+  expect(res.status).toBe(303)
+  expect(res.headers.get('location')).toBe(editorLauncherPath(PROJECT_ID, sessionId))
+})
+
+test('the Accept: text/html fallback (no Sec-Fetch-* headers at all) also redirects', async () => {
+  const { base, sessionId } = await deadSessionBase()
+  const res = await req(`${base}/`, {
+    redirect: 'manual',
+    headers: { accept: 'text/html,application/xhtml+xml' },
+  })
+  expect(res.status).toBe(303)
+  expect(res.headers.get('location')).toBe(editorLauncherPath(PROJECT_ID, sessionId))
+})
+
+test('a Sec-Fetch-Dest of script/empty/iframe on a dead editor never redirects, still 502', async () => {
+  const { base } = await deadSessionBase()
+  for (const dest of ['script', 'empty', 'iframe']) {
+    const res = await req(`${base}/`, { headers: { 'sec-fetch-dest': dest } })
+    expect(res.status).toBe(502)
+  }
+})
+
+test('a POST to a dead editor still 502s, even carrying document-navigation-shaped headers', async () => {
+  const { base } = await deadSessionBase()
+  const res = await req(`${base}/`, {
+    method: 'POST',
+    headers: { 'sec-fetch-dest': 'document', origin: 'http://myhost:3000' },
+  })
+  expect(res.status).toBe(502)
+})
+
+test('a document navigation to a LIVE editor is proxied normally, never redirected', async () => {
+  const res = await req(`${BASE}/`, { headers: { 'sec-fetch-dest': 'document' } })
+  expect(res.status).toBe(200)
+})
+
+test('a document navigation for a cross-project session is still a 404, not a redirect', async () => {
+  const otherBase = editorProxyPath(OTHER_PROJECT_ID, SESSION_ID).slice(0, -1)
+  const res = await req(`${otherBase}/`, { headers: { 'sec-fetch-dest': 'document' } })
+  expect(res.status).toBe(404)
+})
+
+test('a document navigation with a non-UUID session id is still a 400, not a redirect', async () => {
+  const res = await req(`/api/projects/${PROJECT_ID}/sessions/not-a-uuid/editor/proxy/`, {
+    headers: { 'sec-fetch-dest': 'document' },
+  })
+  expect(res.status).toBe(400)
 })
 
 // --- 403 when disabled ---------------------------------------------------------

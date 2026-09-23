@@ -42,6 +42,17 @@ export function editorProxyPath(projectId: string, sessionId: string): string {
   return `/api/projects/${projectId}/sessions/${sessionId}/editor/proxy/`
 }
 
+/** The launcher page a dead-editor page reload is sent back to (see
+ * `isDocumentNavigation`/`proxyHttp` below) — must match the frontend route
+ * in frontend/src/app/router.tsx (`sessionEditorRoute`,
+ * `/projects/$projectId/sessions/$sessionId/editor`). That page starts the
+ * editor if it is not already running, then replaces its own location with
+ * `editorProxyPath`, so redirecting a stale tab here is what lets it recover
+ * on reload instead of dead-ending on a JSON error body. */
+export function editorLauncherPath(projectId: string, sessionId: string): string {
+  return `/projects/${projectId}/sessions/${sessionId}/editor`
+}
+
 export const editorProxyRouter = new OpenAPIHono()
 
 // Same reason dockerRouter/editorRouter each give their own: lets this
@@ -219,6 +230,31 @@ function downstreamResponseHeaders(
 
 // --- HTTP proxy ----------------------------------------------------------------
 
+/**
+ * True only for the browser's own top-level navigation to the workbench page
+ * itself — never an asset it loads, an XHR/fetch it makes, an iframe, or a
+ * WebSocket upgrade (which never reaches this function at all — see
+ * `handleProxy`'s `upgrade` branch). `Sec-Fetch-Dest: document` is the
+ * precise signal for that: a Fetch Metadata header the browser attaches
+ * itself to every request, which no asset request or XHR ever sets to
+ * `document`. Older clients (or a browser with Fetch Metadata disabled) send
+ * none of the `Sec-Fetch-*` headers, so this falls back first to
+ * `Sec-Fetch-Mode: navigate` (an older, less specific version of the same
+ * signal) and then to a plain `Accept: text/html` check — still never true
+ * for a WebSocket handshake (no such `Accept`) or a JS/CSS/image asset
+ * (whose `Accept` never lists `text/html`). Restricted to GET/HEAD because
+ * those are the only methods a browser navigation ever issues; nothing under
+ * this proxy is reached by a submitted HTML form.
+ */
+function isDocumentNavigation(req: Request): boolean {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false
+  const dest = req.headers.get('sec-fetch-dest')
+  if (dest) return dest === 'document'
+  const mode = req.headers.get('sec-fetch-mode')
+  if (mode) return mode === 'navigate'
+  return (req.headers.get('accept') ?? '').includes('text/html')
+}
+
 async function proxyHttp(
   req: Request,
   socketPath: string,
@@ -226,6 +262,7 @@ async function proxyHttp(
   effHost: string,
   proto: string,
   prefix: string,
+  launcherPath: string,
 ): Promise<Response> {
   const hasBody = req.method !== 'GET' && req.method !== 'HEAD'
 
@@ -252,6 +289,23 @@ async function proxyHttp(
     })
   } catch (error) {
     logger.debug(`Editor proxy: no answer from ${socketPath}: ${String(error)}`)
+    // A reload of the workbench tab itself, after the editor stopped (idle
+    // timeout, Stop, a restart) would otherwise land on a bare 502 JSON body
+    // with no way back in — the tab's location is stuck on the proxy path,
+    // and reloading it just repeats the same dead fetch forever. Sending
+    // *only* this one case to the launcher (never an asset/XHR the dead
+    // workbench itself was mid-request on, and never a WebSocket, which
+    // 502s before ever reaching here) re-enters the same "start if needed,
+    // then replace the location" flow the Editor button already uses, so the
+    // tab self-heals on reload instead of dead-ending. `no-store` keeps a
+    // browser from ever serving this redirect back out of its cache once the
+    // editor is running again.
+    if (isDocumentNavigation(req)) {
+      return new Response(null, {
+        status: 303,
+        headers: { Location: launcherPath, 'Cache-Control': 'no-store' },
+      })
+    }
     throw badGateway('The editor is not responding')
   }
 
@@ -508,7 +562,15 @@ async function handleProxy(c: Context, id: string, sessionId: string): Promise<R
   const proto = headers.get('x-forwarded-proto') || url.protocol.replace(':', '')
 
   if (upgrade) return proxyWebSocket(c, socketPath, pathAndQuery, effHost, proto, headers)
-  return proxyHttp(req, socketPath, pathAndQuery, effHost, proto, prefix)
+  return proxyHttp(
+    req,
+    socketPath,
+    pathAndQuery,
+    effHost,
+    proto,
+    prefix,
+    editorLauncherPath(id, sessionId),
+  )
 }
 
 editorProxyRouter.all('/projects/:id/sessions/:sessionId/editor/proxy', (c) => {
