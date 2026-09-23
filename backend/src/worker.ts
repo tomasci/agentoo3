@@ -5,12 +5,15 @@ import { env } from '@/env'
 import { sweepIdeaHandoffs } from '@/features/ideas/handoff'
 import { logger } from '@/lib/logger'
 import {
+  enqueueEditorReap,
   ensureAttachmentsGcSchedule,
+  ensureEditorReapSchedule,
   ensureIdeaHandoffSweepSchedule,
   ensureTurnReconcileSchedule,
 } from '@/queue'
 import { startAttachmentsGcWorker } from '@/queue/attachments-gc.worker'
 import { startDockerOpWorker } from '@/queue/docker-op.worker'
+import { startEditorOpWorker } from '@/queue/editor-op.worker'
 import { startIdeaHandoffSweepWorker, startIdeaTurnEndedWorker } from '@/queue/idea-handoff.worker'
 import { startIdeaPromptWorker } from '@/queue/idea-prompt.worker'
 import { startProjectSetupWorker } from '@/queue/project-setup.worker'
@@ -28,6 +31,7 @@ const workers = [
   startIdeaHandoffSweepWorker(),
   startIdeaTurnEndedWorker(),
   startDockerOpWorker(),
+  startEditorOpWorker(),
 ]
 
 // Idempotent — see ensureAttachmentsGcSchedule's own comment — so running it
@@ -36,6 +40,7 @@ const workers = [
 await ensureAttachmentsGcSchedule()
 await ensureTurnReconcileSchedule()
 await ensureIdeaHandoffSweepSchedule()
+await ensureEditorReapSchedule()
 
 // The other reconciliation trigger, alongside the schedule above: run once
 // right now, for whatever piled up while nothing was sweeping at all — most
@@ -52,6 +57,17 @@ await reconcileTurns()
 await sweepIdeaHandoffs().catch((error) => {
   logger.error(
     `Idea handoff sweep at boot failed: ${error instanceof Error ? error.message : String(error)}`,
+  )
+})
+
+// Same reasoning as the idea-handoff sweep above: an editor container
+// orphaned by a worker that died mid-start (or a project deleted outright,
+// which skips deleteSession's own inline removal entirely) sits unreaped
+// until this runs once for real, right at boot — not just on the 5-minute
+// schedule.
+await enqueueEditorReap({ kind: 'reap', reason: 'boot' }).catch((error) => {
+  logger.error(
+    `Editor reap at boot failed to enqueue: ${error instanceof Error ? error.message : String(error)}`,
   )
 })
 

@@ -164,17 +164,45 @@ TXT
     fi
   fi
 
+  # Updating an existing clone as root is what leaves files inside it root-
+  # owned: git only rewrites whatever a fetch/checkout actually touches, so
+  # TARGET_DIR's own top level stays owned by whoever it was handed to, while
+  # everything an update touches underneath does not. So when this is already
+  # root and TARGET_DIR was already handed to a real, non-root account, run
+  # git itself AS that account instead — nothing it writes comes back root-
+  # owned, and no chown is needed afterwards at all. `runuser` (util-linux) is
+  # always present, unlike plain `su`, and unlike `${SUDO[@]}` it still means
+  # something once we already are root. GITHUB_TOKEN never depends on this:
+  # it reaches git as a literal `-c http...extraheader=` argument (see
+  # GIT_AUTH above), not through a credential file or the environment, so it
+  # works identically no matter which account runs the command.
+  #
+  # Everywhere else this changes nothing: a non-root invoker who does not
+  # already own TARGET_DIR gets here through `need_root` above and keeps using
+  # `${SUDO[@]}` exactly as before; one who already owns it needed no
+  # escalation in the first place and was never wrapped in anything.
+  declare -a GIT_RUN=("${SUDO[@]+${SUDO[@]}}")
+  _ran_git_as_owner=0
+  if [[ -d "$TARGET_DIR/.git" && "${EUID:-$(id -u)}" -eq 0 ]]; then
+    _existing_owner="$(stat -c '%U' "$TARGET_DIR" 2>/dev/null || true)"
+    if [[ -n "$_existing_owner" && "$_existing_owner" != "root" ]] \
+       && id -u "$_existing_owner" >/dev/null 2>&1; then
+      GIT_RUN=(runuser -u "$_existing_owner" --)
+      _ran_git_as_owner=1
+    fi
+  fi
+
   if [[ -d "$TARGET_DIR/.git" ]]; then
     info "Existing clone found; updating"
-    "${SUDO[@]+${SUDO[@]}}" git "${GIT_AUTH[@]+${GIT_AUTH[@]}}" -C "$TARGET_DIR" \
+    "${GIT_RUN[@]+${GIT_RUN[@]}}" git "${GIT_AUTH[@]+${GIT_AUTH[@]}}" -C "$TARGET_DIR" \
       fetch --prune origin 2>&1 | redact
     if (( FORCE )); then
       warn "--force: discarding local changes"
-      "${SUDO[@]+${SUDO[@]}}" git -C "$TARGET_DIR" checkout -f "$BRANCH" 2>&1 | redact
-      "${SUDO[@]+${SUDO[@]}}" git -C "$TARGET_DIR" reset --hard "origin/$BRANCH" 2>&1 | redact
+      "${GIT_RUN[@]+${GIT_RUN[@]}}" git -C "$TARGET_DIR" checkout -f "$BRANCH" 2>&1 | redact
+      "${GIT_RUN[@]+${GIT_RUN[@]}}" git -C "$TARGET_DIR" reset --hard "origin/$BRANCH" 2>&1 | redact
     else
-      "${SUDO[@]+${SUDO[@]}}" git -C "$TARGET_DIR" checkout "$BRANCH" 2>&1 | redact
-      if ! "${SUDO[@]+${SUDO[@]}}" git -C "$TARGET_DIR" merge --ff-only "origin/$BRANCH" 2>&1 | redact; then
+      "${GIT_RUN[@]+${GIT_RUN[@]}}" git -C "$TARGET_DIR" checkout "$BRANCH" 2>&1 | redact
+      if ! "${GIT_RUN[@]+${GIT_RUN[@]}}" git -C "$TARGET_DIR" merge --ff-only "origin/$BRANCH" 2>&1 | redact; then
         die "Cannot fast-forward $TARGET_DIR (local commits or changes). Re-run with --force to discard them."
       fi
     fi
@@ -183,6 +211,8 @@ TXT
       die "$TARGET_DIR exists and is not empty, but is not a git clone. Move it aside or pass --dir."
     fi
     info "Cloning into $TARGET_DIR"
+    # Always the escalation path, never GIT_RUN: there is no existing owner to
+    # run as yet, which is exactly what the ownership block below handles.
     "${SUDO[@]+${SUDO[@]}}" install -d -m 0755 "$(dirname "$TARGET_DIR")"
     "${SUDO[@]+${SUDO[@]}}" git "${GIT_AUTH[@]+${GIT_AUTH[@]}}" \
       clone --branch "$BRANCH" --single-branch "$REPO_URL" "$TARGET_DIR" 2>&1 | redact
@@ -192,11 +222,44 @@ TXT
   ok "At $(git rev-parse --short HEAD) on $(git rev-parse --abbrev-ref HEAD)"
 
   # ------------------------------------------------------------ ownership ----
-  # Hand the tree to whoever invoked sudo, so they can work in it afterwards.
+  # Hand the tree to whoever will actually work in it. Prefer the human behind
+  # sudo, so they can keep working in it by hand; fall back to the app account
+  # install.sh runs everything as when there is no such human — SUDO_USER is
+  # empty or "root", which is exactly what an automated re-provision, or a
+  # `sudo bash` invoked from an already-root shell, looks like. config.sh
+  # (scripts/lib/config.sh) is not sourced yet — it lives inside the very
+  # clone this is updating — so "agentoo" mirrors its default (APP_USER falls
+  # back to APP_NAME, which defaults to "agentoo") rather than importing it;
+  # keep the two in sync if that default ever moves.
+  #
+  # Skipped entirely when the update above already ran git AS the existing
+  # owner (_ran_git_as_owner): nothing came back root-owned in that case, so
+  # there is nothing to repair, and a recursive chown here would be actively
+  # harmful — TARGET_DIR by then usually holds project data underneath it
+  # (installed by `install.sh`, e.g. PROJECTS_DIR, ATTACHMENTS_DIR), and a
+  # blanket `chown -R` would re-own a project's bind-mounted Postgres data
+  # directory or files its containers wrote as some other uid. That hazard is
+  # exactly why this used to only run on the original escalated-sudo path
+  # (freshly cloning, or updating without a resolvable owner to run git as):
+  # neither of those leaves that kind of data behind to damage. It still runs
+  # whenever this process has root right now, not only when it had to
+  # escalate to get it — updating an existing, already-owned TARGET_DIR as
+  # root never calls need_root() at all (root can already write anywhere, so
+  # the `-w` check above it never fails), so `_escalated` alone would miss
+  # that case.
   owner="${SUDO_USER:-}"
-  if [[ -n "$owner" && "$owner" != "root" ]] && (( _escalated )); then
-    "${SUDO[@]+${SUDO[@]}}" chown -R "$owner:$owner" "$TARGET_DIR"
-    ok "Owner set to $owner"
+  [[ -n "$owner" && "$owner" != "root" ]] || owner="agentoo"
+  if (( ! _ran_git_as_owner )) \
+     && { (( _escalated )) || [[ "${EUID:-$(id -u)}" -eq 0 ]]; }; then
+    if "${SUDO[@]+${SUDO[@]}}" chown -R "$owner:$owner" "$TARGET_DIR" 2>/dev/null; then
+      ok "Owner set to $owner"
+    else
+      # Most likely "$owner" (a fallback guess, not a real human) does not
+      # exist yet on a brand-new box — install.sh's backend step creates it
+      # and reconciles ownership right after this hands off, so this is not
+      # fatal.
+      warn "Could not chown $TARGET_DIR to '$owner'; install.sh will reconcile ownership"
+    fi
   fi
 
   "${SUDO[@]+${SUDO[@]}}" chmod +x install.sh bootstrap.sh scripts/*.sh 2>/dev/null || true

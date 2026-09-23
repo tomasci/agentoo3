@@ -187,6 +187,9 @@
     "backToProjects": "All projects",
     "backToIdea": "Back to Idea",
     "docker": "Docker",
+    "editor": "Editor",
+    "stopEditor": "Stop editor",
+    "editorStopped": "Editor stopped",
     "empty": "No sessions yet. Create one above — it gets its own git worktree and branch, so it will not collide with anything else running on this project.",
     "loadFailed": "Could not load the session",
     "createFailed": "Could not create the session",
@@ -640,6 +643,42 @@
     "badge": {
       "compose": "Compose",
       "dockerfile": "Dockerfile"
+    }
+  },
+  "editor": {
+    "backToSession": "Back to session",
+    "restart": "Restart",
+    "loadFailed": "Could not load the editor status",
+    "empty": {
+      "title": "The editor is turned off",
+      "description": "Set EDITOR_ENABLED and DOCKER_ENABLED to turn it on for this installation."
+    },
+    "daemon": {
+      "notInstalledTitle": "Docker is not installed",
+      "notInstalled": "The docker CLI was not found on this host, so the editor cannot be started.",
+      "unavailableTitle": "Docker daemon not reachable",
+      "unavailable": "The docker CLI is installed, but the daemon could not be reached."
+    },
+    "state": {
+      "startingTitle": "Starting the editor…",
+      "startingNote": "The first start on this host downloads the code-server image (about 370 MB) — this can take a few minutes. Later starts are quick.",
+      "unresponsiveTitle": "The editor isn't responding",
+      "unresponsiveBody": "The container is running but didn't answer its health check. It may just be slow — try again, or restart it."
+    },
+    "operationFailed": "The last start failed",
+    "errors": {
+      "startFailed": "Could not start the editor",
+      "stopFailed": "Could not stop the editor"
+    },
+    "log": {
+      "heading": "Start log",
+      "empty": "Waiting for output…"
+    },
+    "launcher": {
+      "title": "Editor",
+      "opening": "Opening the editor…",
+      "openAnyway": "Open anyway",
+      "retry": "Retry"
     }
   },
   "prompts": {

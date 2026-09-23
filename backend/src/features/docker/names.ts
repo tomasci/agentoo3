@@ -172,3 +172,89 @@ export function projectLabelFilter(slug: string): string {
 export function composeProjectLabelFilter(ref: DockerScopeRef): string {
   return `label=com.docker.compose.project=${composeProjectName(ref)}`
 }
+
+// --- the editor feature (per-session code-server) ---------------------------
+//
+// A separate naming family, deliberately not `scopedName`/`managedLabels`
+// above: this feature has its own queue, its own lock and its own container
+// lifecycle (see features/editor/), and sharing this module's names/labels
+// would make an editor container visible to `listScopeContainers`, the
+// session pre-delete gate, and the Docker page's own listing — none of which
+// should ever see, count, or tear down a code-server container as if it were
+// part of a project's own docker stack.
+//
+// `agentoo_editor-` (underscore), never `agentoo-editor-` (dash): every name
+// `scopedName` produces starts `agentoo-<slug>`, and SLUG_RE forbids `_` in a
+// slug (see this file's own header), so no legal (slug, sessionId) pair can
+// ever make `scopedName` produce a string starting `agentoo_` — the two
+// families are disjoint by construction, not merely by convention. Starting
+// this family with `agentoo-editor-` instead would not have that property: a
+// project literally named "editor" produces the slug `editor`, and its own
+// repo-scope container name is already `agentoo-editor` — a `-` join could
+// not tell that project's containers apart from this feature's own.
+//
+// Session-scoped only: an editor always runs in a session's own worktree
+// (see the design's own "Scope" section), so unlike DockerScopeRef there is
+// no repo-scope variant and no optional sessionId to guard against forgetting.
+export interface EditorScopeRef {
+  slug: string
+  sessionId: string
+}
+
+export function editorContainerName(ref: EditorScopeRef): string {
+  const slug = assertSlug(ref.slug)
+  const suffix = sessionSuffix(ref.sessionId)
+  return `agentoo_editor-${slug}_s-${suffix}`
+}
+
+/**
+ * Deliberately excludes every `com.agentoo.*`/`com.docker.compose.*` key the
+ * plain-Dockerfile/compose paths use (see `managedLabels` above) — an editor
+ * container carrying `com.agentoo.project` or `com.agentoo.managed` would
+ * make `listScopeContainers` (containers.ts) count it as part of a project's
+ * own docker stack, which is exactly the cross-contamination this feature's
+ * own label namespace (`com.agentoo.editor*`) exists to prevent.
+ *
+ * `installId` (container.ts's own `editorInstallId`) is the fourth label,
+ * `com.agentoo.editor.install` — not computed here, since deriving it needs
+ * `realpath` and `env.PROJECTS_DIR`, and this file stays free of env/fs
+ * imports on purpose (see this file's own header). It exists because this
+ * box's one docker daemon is shared by more than one agentoo install (a
+ * production checkout plus per-worktree dev/test copies): without it, one
+ * install's reaper cannot tell its own editor containers apart from a
+ * sibling install's, and would remove them the moment its own database does
+ * not recognise their session.
+ */
+export function editorLabels(ref: EditorScopeRef, installId: string): string[] {
+  return [
+    'com.agentoo.editor=1',
+    `com.agentoo.editor.session=${assertSessionId(ref.sessionId)}`,
+    `com.agentoo.editor.project=${assertSlug(ref.slug)}`,
+    `com.agentoo.editor.install=${installId}`,
+  ]
+}
+
+/** Every editor container on the box, across every project, session AND
+ * install — deliberately unscoped by install: `countRunningEditorContainers`
+ * (container.ts) needs exactly this (the cap protects the box's shared RAM,
+ * not one install's own share of it — see that function's own comment), and
+ * it is the broader half of the AND the reaper narrows with
+ * `editorInstallLabelFilter` below. Anything that needs one session's own
+ * editor container looks it up by `editorContainerName` instead. */
+export const EDITOR_LABEL_FILTER = 'label=com.agentoo.editor=1'
+
+/**
+ * The narrower half of the reaper's own AND: ANDed with `EDITOR_LABEL_FILTER`
+ * (two separate `docker ps` calls, ids intersected client-side — see
+ * container.ts's own `listThisInstallEditorContainerIds`, which is what
+ * actually issues them; `docker ps --filter` ANDs multiple `label=` values
+ * only within one invocation, and this feature has no reason to touch
+ * docker/args.ts's own multi-filter plumbing for a single caller). A
+ * container carrying no `com.agentoo.editor.install` label at all — none
+ * should ever exist, since this feature stamps every editor it starts — is
+ * excluded by construction: docker's own label filter cannot match a label
+ * that is not there.
+ */
+export function editorInstallLabelFilter(installId: string): string {
+  return `label=com.agentoo.editor.install=${installId}`
+}

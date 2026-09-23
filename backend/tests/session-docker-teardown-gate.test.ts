@@ -33,9 +33,19 @@ const SUFFIX = SESSION_ID.replace(/-/g, '').slice(0, 12)
 const realEnv = { ...(await import(`${B}/env.ts`)) } as {
   env: Record<string, unknown>
   hasClaudeCredential: boolean
+  editorEnabled: boolean
 }
 const testEnv = { ...realEnv.env, DOCKER_ENABLED: true }
-mock.module(`${B}/env.ts`, () => ({ env: testEnv, hasClaudeCredential: realEnv.hasClaudeCredential }))
+mock.module(`${B}/env.ts`, () => ({
+  env: testEnv,
+  hasClaudeCredential: realEnv.hasClaudeCredential,
+  // Additive: features/editor didn't exist when this file was written.
+  // Kept, not spread from realEnv wholesale, for the same reason this
+  // file's own `env` override isn't a spread either -- see run-isolated.ts's
+  // header for why an ADDITIVE, hard-coded mock still has to carry every
+  // named export another concurrently-running test file might import.
+  editorEnabled: realEnv.editorEnabled,
+}))
 
 let sessionRow: Row | undefined
 const projectRow: Row = { id: PROJECT_ID, name: 'Demo', slug: 'demo', path: '/tmp/does-not-matter' }
@@ -76,9 +86,19 @@ type Mode =
   | 'no-containers'
 let mode: Mode = 'no-containers'
 
+// Ordering evidence for the editor-removal tests below: every 'ps'/'inspect'
+// call the docker CONTAINER GATE makes, and every 'rm' call removeEditor makes,
+// is pushed here in the order it actually happened.
+let callOrder: string[] = []
+
 const realCli = { ...(await import(`${B}/features/docker/cli.ts`)) } as Record<string, unknown>
 const fakeCli = {
   async run(args: string[]) {
+    if (args[0] === 'ps' || args[0] === 'inspect') callOrder.push(`gate:${args[0]}`)
+    // Pushed unconditionally, before the mode branches below can short-circuit
+    // with an early return -- the daemon-down/binary-missing tests need this
+    // call recorded even though it goes on to fail.
+    if (args[0] === 'rm') callOrder.push(`editor-rm:${args[2]}`)
     if (mode === 'daemon-down') {
       return { ok: false, stdout: '', stderr: 'Cannot connect to the Docker daemon', exitCode: 1 }
     }
@@ -103,6 +123,12 @@ const fakeCli = {
           : { ok: true, stdout: '', stderr: '', exitCode: 0 }
       }
       if (mode === 'no-containers') return { ok: true, stdout: '', stderr: '', exitCode: 0 }
+      // An EDITOR-labelled container never carries `com.agentoo.project` or
+      // `com.docker.compose.project` (see names.ts's own header), so it can
+      // never be what either of this gate's two label filters matches --
+      // this mode's own `docker ps` answers empty for both, the same as
+      // 'no-containers', which is the whole point: the gate must not see it.
+      if (mode === 'editor-only') return { ok: true, stdout: '', stderr: '', exitCode: 0 }
       return filter.startsWith('label=com.agentoo.project=')
         ? { ok: true, stdout: 'f'.repeat(12), stderr: '', exitCode: 0 }
         : { ok: true, stdout: '', stderr: '', exitCode: 0 }
@@ -124,6 +150,13 @@ const fakeCli = {
         exitCode: 0,
       }
     }
+    if (args[0] === 'rm') {
+      // removeEditor (features/editor/container.ts): `docker rm -f <name>`.
+      // Never reached by the docker CONTAINER GATE above, which only ever
+      // runs `ps`/`inspect` -- so every entry pushed above is unambiguously
+      // the editor removal, not the gate.
+      return { ok: true, stdout: String(args[2]), stderr: '', exitCode: 0 }
+    }
     return { ok: true, stdout: '', stderr: '', exitCode: 0 }
   },
   stream() {
@@ -140,6 +173,7 @@ let removedWorktrees: string[] = []
 mock.module(`${B}/lib/git.ts`, () => ({
   ...realGit,
   removeWorktree: async (_repo: string, path: string) => {
+    callOrder.push(`worktree-remove:${path}`)
     removedWorktrees.push(path)
     return { ok: true, stderr: '' }
   },
@@ -182,6 +216,7 @@ beforeEach(() => {
   mode = 'no-containers'
   removedWorktrees = []
   deletedSessionIds = []
+  callOrder = []
   testEnv.DOCKER_ENABLED = true
 })
 
@@ -273,5 +308,60 @@ test('a session that never had a worktree never reaches the gate at all', async 
   mode = 'exited-container'
   await deleteSession(SESSION_ID)
   expect(removedWorktrees).toEqual([])
+  expect(deletedSessionIds).toEqual([SESSION_ID])
+})
+
+// --- editor removal: after the gate, before removeWorktree, best-effort ----
+
+test('an editor-labelled container never blocks deletion: the gate never sees it', async () => {
+  mode = 'editor-only'
+  await deleteSession(SESSION_ID)
+  expect(removedWorktrees).toEqual([WORKTREE_PATH])
+  expect(deletedSessionIds).toEqual([SESSION_ID])
+  expect(callOrder.some((c) => c.startsWith('editor-rm:'))).toBe(true)
+})
+
+test('the editor is removed strictly after the docker gate check and strictly before removeWorktree', async () => {
+  mode = 'no-containers'
+  await deleteSession(SESSION_ID)
+
+  const gateIndex = callOrder.findIndex((c) => c.startsWith('gate:'))
+  const editorIndex = callOrder.findIndex((c) => c.startsWith('editor-rm:'))
+  const worktreeIndex = callOrder.findIndex((c) => c.startsWith('worktree-remove:'))
+
+  expect(gateIndex).toBeGreaterThanOrEqual(0)
+  expect(editorIndex).toBeGreaterThan(gateIndex)
+  expect(worktreeIndex).toBeGreaterThan(editorIndex)
+})
+
+test('a down docker daemon still lets deletion proceed even though removeEditor cannot reach it', async () => {
+  mode = 'daemon-down'
+  await deleteSession(SESSION_ID)
+  expect(removedWorktrees).toEqual([WORKTREE_PATH])
+  expect(deletedSessionIds).toEqual([SESSION_ID])
+  // The attempt was made (and failed) — not skipped outright.
+  expect(callOrder.some((c) => c.startsWith('editor-rm:'))).toBe(true)
+})
+
+test('a missing docker binary during editor removal still lets deletion proceed', async () => {
+  mode = 'binary-missing'
+  await deleteSession(SESSION_ID)
+  expect(deletedSessionIds).toEqual([SESSION_ID])
+})
+
+test('a refused deletion (the docker gate 409s) has no side effects at all: no editor removal, no worktree removal', async () => {
+  mode = 'exited-container'
+  await expect(deleteSession(SESSION_ID)).rejects.toMatchObject({ status: 409 })
+  expect(callOrder.some((c) => c.startsWith('editor-rm:'))).toBe(false)
+  expect(callOrder.some((c) => c.startsWith('worktree-remove:'))).toBe(false)
+  expect(removedWorktrees).toEqual([])
+  expect(deletedSessionIds).toEqual([])
+})
+
+test('a session with no worktree never attempts an editor removal either', async () => {
+  sessionRow = { ...sessionRow, worktreePath: null }
+  mode = 'no-containers'
+  await deleteSession(SESSION_ID)
+  expect(callOrder.some((c) => c.startsWith('editor-rm:'))).toBe(false)
   expect(deletedSessionIds).toEqual([SESSION_ID])
 })

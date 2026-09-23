@@ -26,11 +26,17 @@ const TEST_PROJECTS_DIR = await mkdtemp(join(tmpdir(), 'agentoo-docker-gates-'))
 const realEnv = { ...(await import(`${B}/env.ts`)) } as {
   env: Record<string, unknown>
   hasClaudeCredential: boolean
+  editorEnabled: boolean
 }
 const testEnv = { ...realEnv.env, PROJECTS_DIR: TEST_PROJECTS_DIR, DOCKER_ENABLED: true }
 mock.module(`${B}/env.ts`, () => ({
   env: testEnv,
   hasClaudeCredential: realEnv.hasClaudeCredential,
+  // Additive: features/editor didn't exist when this file was written --
+  // see run-isolated.ts's header for why an additive, hard-coded mock
+  // still has to carry every named export a concurrently-running file
+  // might import.
+  editorEnabled: realEnv.editorEnabled,
 }))
 
 const PROJECT_ID = '11111111-1111-4111-8111-111111111111'
@@ -113,6 +119,12 @@ mock.module(`${B}/features/docker/hosts.ts`, () => ({
 
 const enqueued: Record<string, unknown>[] = []
 mock.module(`${B}/queue/index.ts`, () => ({
+  // Additive stub for features/editor -- not exercised here, kept only so
+  // this hard-coded (non-spread) mock does not remove it from the shared
+  // module for whichever other test file imports it while this mock is live.
+  enqueueEditorStart: async () => ({}),
+  enqueueEditorReap: async () => ({}),
+  ensureEditorReapSchedule: async () => {},
   QUEUE_PROJECT_SETUP: 'project-setup',
   QUEUE_SESSION_RUN: 'session-run',
   QUEUE_ATTACHMENTS_GC: 'attachments-gc',

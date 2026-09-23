@@ -132,6 +132,52 @@ const schema = z.object({
   // 30 minutes is generous headroom for a cold image pull plus a build on a
   // small box, not a value anyone should expect to brush against.
   DOCKER_OP_TIMEOUT_MS: z.coerce.number().int().positive().default(1_800_000),
+
+  // Editor feature (per-session code-server): a second, independent kill
+  // switch layered on top of DOCKER_ENABLED (see `editorEnabled` below) —
+  // an operator who wants docker controls but not a code-server container
+  // per session (or vice versa) can turn off just one.
+  EDITOR_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v.toLowerCase() !== 'false' && v !== '0'),
+  // Pinned, not `:latest`: the design doc verifies this exact tag's digest
+  // (Debian, not the Fedora `-39` variant) against what `--entrypoint
+  // /usr/bin/code-server` and every `--disable-*`/`--socket` flag below were
+  // checked against in that image's own cli.ts. The regex is the same shape
+  // `docker` itself accepts for a reference (registry/name:tag or @digest),
+  // case-insensitive because a registry host may not be.
+  EDITOR_IMAGE: z
+    .string()
+    .regex(/^[a-z0-9][a-z0-9._/:@-]*$/i, 'EDITOR_IMAGE must look like a docker image reference')
+    .default('codercom/code-server:4.138.0'),
+  // Route-side fast-path only; the worker's own count under `editor-op`'s
+  // concurrency 1 is the real limit (see reaper.ts/lifecycle.ts) — this just
+  // saves a doomed start from ever reaching the queue.
+  EDITOR_MAX_RUNNING: z.coerce.number().int().min(1).default(2),
+  // `docker run --memory`. Kept a string (not a byte count) because that is
+  // the exact form `--memory` itself accepts and this value is passed straight
+  // through to it in container.ts — parsing it to a number here would only
+  // have to be un-parsed right back into one of docker's own suffixed forms.
+  EDITOR_MEMORY_LIMIT: z
+    .string()
+    .regex(/^[0-9]+[bkmg]?$/i, 'EDITOR_MEMORY_LIMIT must look like a docker --memory value')
+    .default('1g'),
+  // `docker run --cpus`. A float, not an int: docker itself accepts fractional
+  // cpu shares (e.g. 0.5), and there is no reason this knob should be coarser
+  // than the flag it feeds.
+  EDITOR_CPUS: z.coerce.number().positive().default(1),
+  // `code-server --idle-timeout-seconds`: alive while requests arrive or a
+  // connection is open at each 60s tick; on expiry the process exits 0 and the
+  // reaper (reaper.ts) removes the now-stopped container on its next sweep.
+  // Floored at 60 — anything shorter is indistinguishable from "never stays up
+  // long enough to be useful" given that same 60s tick.
+  EDITOR_IDLE_TIMEOUT_SECONDS: z.coerce.number().int().min(60).default(1800),
+  // Both the start lock's TTL (features/editor/operations.ts) and the worker's
+  // own deadline for one start job (lifecycle.ts) — the same value serves
+  // both because the lock exists to bound exactly this: a start job that never
+  // finishes must not hold the per-session lock forever.
+  EDITOR_START_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
 })
 
 const parsed = schema.safeParse(process.env)
@@ -146,6 +192,12 @@ if (!parsed.success) {
 export const env = parsed.data
 
 export const hasClaudeCredential = Boolean(env.ANTHROPIC_API_KEY || env.CLAUDE_CODE_OAUTH_TOKEN)
+
+// The editor feature's own kill switch is meaningless without a docker daemon
+// underneath it — a code-server container is still a docker container — so
+// this is the one flag every editor route/worker/reaper actually checks,
+// never EDITOR_ENABLED alone.
+export const editorEnabled = env.DOCKER_ENABLED && env.EDITOR_ENABLED
 
 /**
  * How a process on this box dials our own API — the docker skill shells out

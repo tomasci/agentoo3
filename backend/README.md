@@ -499,6 +499,107 @@ dashboard visible without the controls live. The installer sets this from
 deliberately separate switches, so a host can have Docker installed and
 `DOCKER_ENABLED=false`, or vice versa if installed by hand.
 
+## Editor
+
+Each isolated session (one with its own git worktree — see "Sessions" above)
+can run its own [code-server](https://github.com/coder/code-server) container,
+reached at `/api/projects/{id}/sessions/{sessionId}/editor/proxy/*` and started
+from a session's own page. Like the Docker feature above, this adds no table
+and no column — the running daemon is the only record of which editors exist,
+correlated by the `com.agentoo.editor*` labels in `features/docker/names.ts`
+(a distinct family from `com.agentoo.project`/`com.agentoo.managed`, so an
+editor container never shows up on the Docker page or blocks a session's own
+docker-container gate on delete).
+
+**No published ports, ever.** The container runs with `--network none`;
+code-server listens on a unix socket in a per-session runtime directory
+(`${PROJECTS_DIR}/.editor/<sessionId>/code-server.sock`), bind-mounted into
+the container at `/run/agentoo-editor`. The backend is what reaches that
+socket, over a same-origin HTTP + WebSocket proxy — nothing about this
+feature opens a new port or a new network path into the box. Browser access
+to the editor (webviews, the integrated clipboard, service workers) needs
+HTTPS, which on this app's tailnet-only threat model means serving over
+`tailscale serve` — see the top-level README's "Serving over Tailscale".
+
+**The proxy is same-origin, and trusts nothing the client sends but the two
+path ids.** `features/editor/proxy.ts` is a raw (non-OpenAPI) router: `ANY
+.../editor/proxy` 308s to the trailing-slash form, and `ANY
+.../editor/proxy/*` strips that prefix and re-issues the request (or the
+WebSocket upgrade) against `editorSocketPath(sessionId)` — a path always
+*derived* from a freshly resolved `resolveDockerScope(projectId, sessionId)`
+(cached 5s, per session), never read off anything the client provides. A unix
+socket, rather than a loopback TCP port, is what makes `--network none`
+actually mean no network path in: a container with a published port is
+reachable by anything else on the host, while a socket file under a
+0700 per-session directory is reachable only by the process that opens it.
+
+Because there is no app-level auth, the proxy is also this feature's own
+CSRF boundary: before proxying anything, it checks that an `Origin` header
+(when present) names this same host — the first `X-Forwarded-Host`, else
+`Host`, ports compared exactly — on every WebSocket upgrade and every
+non-GET/HEAD request; a plain `GET` (the workbench page, its static assets)
+is exempt, since a same-origin iframe navigation legitimately sends no
+`Origin` at all. The same effective host is then stamped onto the upstream
+request as `X-Forwarded-Host`, which is what lets code-server's own identical
+check (`Forwarded host=` → `X-Forwarded-Host` → `Host`) agree with this one.
+Both fetch to the unix socket (`redirect: 'manual'`, `decompress: false`,
+`keepalive: false`) and the WebSocket dial (`ws+unix://<sock>:<path>`, a Bun
+client `WebSocket` used directly rather than Hono's own `upgradeWebSocket` —
+that adapter hides the raw socket and mangles binary frames) are Bun 1.4.0
+features this proxy leans on directly; `keepalive: false` in particular is
+what stops Bun from holding an idle upstream connection open between
+requests, which would otherwise stop code-server's own
+`--idle-timeout-seconds` from ever seeing zero connections.
+
+**nginx needs no change**: this is one more path under `/api/`, which nginx
+already forwards (including WebSocket upgrades — see the top-level README's
+nginx config). The Vite dev server is the one thing that does: its `/api`
+proxy needs `ws: true` to carry an upgrade at all, and — because it also sets
+`changeOrigin: true`, which rewrites the outgoing `Host` to the backend's own
+address — a `configure` hook that restamps `X-Forwarded-Host` from the
+browser's real, incoming `Host` before either a plain request or a WebSocket
+upgrade leaves the dev server (`frontend/vite.config.ts`).
+
+**Runs as the worktree's own owner, never root.** The image's built-in
+`fixuid` entrypoint is bypassed entirely (`--entrypoint /usr/bin/code-server`)
+— fixuid is setuid-plus-passwordless-sudo, i.e. root inside the container and
+root-owned files in the worktree the moment anything goes wrong, the same bug
+class an earlier commit fixed for the dev stack. Instead the container is
+started with `--user <uid>:<gid>` read straight off `stat()` of the worktree,
+`--cap-drop ALL` and `--security-opt no-new-privileges:true`.
+
+**No persistence.** `HOME=/tmp/home` lives in the container's own writable
+layer and is gone the moment it stops — extensions, settings, anything
+code-server itself would otherwise keep. v1 ships with only the built-in
+TS/JS/JSON/HTML/CSS/Markdown IntelliSense and no extension marketplace, which
+follows directly from `--network none`.
+
+**Lifecycle is its own queue (`editor-op`), its own Redis lock, its own
+5-minute reap sweep** — deliberately separate from `docker-op` above: sharing
+that queue would leak editor starts into `GET /projects/{id}/docker/operations`
+and share docker's own per-scope lock, which has nothing to do with a
+session's editor. `EDITOR_MAX_RUNNING` (default 2) caps how many editor
+containers may run at once, enforced for real by `editor-op`'s own
+`concurrency: 1`. The reaper removes any editor container whose session,
+project, or worktree is gone — the same safety net a project deleted outright
+relies on, since deleting a project skips the per-session teardown entirely.
+
+`EDITOR_ENABLED` (default true) is a second, independent kill switch layered
+on top of `DOCKER_ENABLED`: the effective flag (`editorEnabled` in `env.ts`)
+is `DOCKER_ENABLED && EDITOR_ENABLED`, since an editor container is still a
+docker container underneath.
+
+**Reloading a workbench tab after the editor has stopped redirects to the
+launcher instead of showing a raw 502.** The Editor button opens the
+workbench in its own tab, whose location is the proxy path itself, so a
+reload after an idle timeout, a Stop, or a restart would otherwise repeat the
+same request against a socket that is no longer there. `proxy.ts` tells that
+one case (a top-level document navigation, per `isDocumentNavigation`) apart
+from every other 502 — a POST, an asset, an XHR, a WebSocket upgrade all
+still 502 — and sends it a `303` (`Cache-Control: no-store`) to
+`editorLauncherPath`, the same launcher route the Editor button opens, which
+restarts the editor and lands the tab back on the workbench.
+
 ## Commands
 
 ```

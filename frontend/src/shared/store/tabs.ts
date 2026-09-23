@@ -80,18 +80,43 @@ export function activeTabIdForPath(pathname: string): string {
 }
 
 /**
+ * The standalone editor launcher (features/editor's `EditorLauncher`,
+ * mounted at this exact path — see project-routes.tsx's
+ * `SessionEditorRoute`): opened as its own browser tab, target="_blank",
+ * with no app shell around it at all — not even the sidebar or tab bar this
+ * module otherwise draws around every route. `RootLayout` renders a bare
+ * `<Outlet />` for this path instead of its usual shell (see its own
+ * comment), and this predicate is also the guard `projectIdForPath`,
+ * `shellModeForPath` and `adoptTab` below use so the launcher can never be
+ * picked up as that project's tab even if something calls them directly
+ * against this path. The trailing `/?` matters: the router matches
+ * `.../editor/` to the very same route as `.../editor` (a link with a
+ * stray trailing slash, or one typed by hand), and without it here that
+ * form would fall through to the ordinary shell and get adopted as the
+ * project's own tab — which then auto-starts the editor and, per the
+ * launcher's own redirect effect, hands the *workspace* tab to code-server
+ * instead of a disposable one.
+ */
+export function isBareShellPath(pathname: string): boolean {
+  return /^\/projects\/[^/]+\/sessions\/[^/]+\/editor\/?$/.test(pathname)
+}
+
+/**
  * Which shell a URL wants: project navigation, system navigation, or the bare
  * picker with no sidebar at all. Read from the path rather than from the tab
  * list so the layout is right on the first render, before any tab is adopted.
  */
 export function shellModeForPath(pathname: string): TabKind {
+  if (isBareShellPath(pathname)) return 'system'
   if (/^\/tab\//.test(pathname)) return 'new'
   if (/^\/projects\/[^/]+/.test(pathname)) return 'project'
   return 'system'
 }
 
-/** The project a URL is about, if any. */
+/** The project a URL is about, if any — never the launcher (see
+ *  `isBareShellPath`), which belongs to no tab at all. */
 export function projectIdForPath(pathname: string): string | null {
+  if (isBareShellPath(pathname)) return null
   const match = /^\/projects\/([^/]+)/.exec(pathname)
   return match?.[1] ? decodeURIComponent(match[1]) : null
 }
@@ -100,9 +125,12 @@ export function projectIdForPath(pathname: string): string | null {
  * Routes that own their whole region: no body padding, no body scroll.
  *
  * A session's own live page draws its own scrolling transcript and composer
- * edge to edge; the shell's usual page padding would just be a second frame
- * around a page that already has one. Matches the session *detail* route only
- * — `/projects/:id/sessions` (the list) still wants the ordinary page body.
+ * edge to edge — the shell's usual page padding would just be a second frame
+ * around one the page already drew itself. The editor launcher used to be
+ * the other member of this set, but it no longer renders inside the shell at
+ * all (see `isBareShellPath`), so it has nothing here to opt out of. Matches
+ * the session *detail* route only — `/projects/:id/sessions` (the list) and
+ * the session's `/docker` dashboard still want the ordinary page body.
  */
 export function isFullBleedPath(pathname: string): boolean {
   return /^\/projects\/[^/]+\/sessions\/[^/]+$/.test(pathname)
@@ -189,10 +217,14 @@ export function closeTab(tabs: Tab[], id: string): { tabs: Tab[]; activeId: stri
  *
  * The URL has to vouch for the tab and the server has to vouch for the project:
  * adopting a project that is not in `projectIds` would fight with the pruning
- * that removed it, each undoing the other on every render.
+ * that removed it, each undoing the other on every render. The launcher
+ * (`isBareShellPath`) vouches for nothing at all: opening it in a fresh
+ * browser tab must never add, change or reorder the workspace's own tabs,
+ * which are persisted and shared with every other tab already open.
  */
 export function adoptTab(tabs: Tab[], id: string, pathname: string, projectIds: string[]): Tab[] {
   if (tabs.some((tab) => tab.id === id)) return tabs
+  if (isBareShellPath(pathname)) return tabs
 
   const projectId = projectIdForPath(pathname)
   if (projectId && id === projectTabId(projectId)) {

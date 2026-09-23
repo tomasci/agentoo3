@@ -2,8 +2,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useEditorStop } from '@/features/editor'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { ActionsMenu, Alert, Badge, Button, Code, Spinner, StatusDot } from '@/shared/ui'
+import { ActionsMenu, Alert, Badge, Button, Code, Spinner, StatusDot, toast } from '@/shared/ui'
 import {
   type AttachmentUpload,
   useAttachmentUploads,
@@ -85,6 +86,13 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   const messages = useSessionMessages(sessionId)
   const send = useSendMessage(sessionId)
   const interrupt = useInterruptSession(sessionId)
+  // Needs `projectId` too, unlike every other hook here, which is why it is
+  // declared with a fallback rather than after the `session.data` guard
+  // below: hooks cannot be called conditionally, and by the time the "Stop
+  // editor" menu item that actually calls `mutate` can render at all,
+  // `session.data` — and so this hook's real `projectId` — is guaranteed to
+  // be in.
+  const stopEditor = useEditorStop(session.data?.projectId ?? '', sessionId)
   // Gated on the messages query's own success, not just mount: opening the
   // stream before that first page has landed leaves nothing in the cache to
   // seed `lastSeq` from, so the backend treats it as a brand new reader and
@@ -518,6 +526,34 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
               </Link>
             </Button>
           )}
+          {/* Same gate as Docker above, for the same reason: a code-server
+              container runs against this session's own worktree
+              (features/editor/service.ts resolves scope the same way
+              features/docker/scope.ts does), which a shared-checkout session
+              does not have.
+
+              A real anchor via `target`, not a click handler that calls
+              `window.open`: the latter needs a popup blocker's blessing and
+              drops modifier clicks (middle-click, cmd/ctrl-click) on the
+              floor, where a plain `<a target="_blank">` — which is all
+              `Link` renders once `target` is set — never needs permission
+              and honours them for free. The editor launcher this opens
+              (features/editor/components/editor-launcher.tsx) renders with
+              no app shell around it at all, which is also why it has to be a
+              *new* tab rather than an in-app navigation: this tab's own
+              workspace state must stay exactly as the reader left it. */}
+          {data.isolated && (
+            <Button asChild variant="secondary" size="sm">
+              <Link
+                to="/projects/$projectId/sessions/$sessionId/editor"
+                params={{ projectId: data.projectId, sessionId: data.id }}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {t('sessions.editor')}
+              </Link>
+            </Button>
+          )}
           {/* Visible at every size while busy: the only way to halt a running
               agent does not belong behind a menu. */}
           {busy && (
@@ -546,6 +582,36 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
                   a.click()
                 },
               },
+              // Same isolated-only gate as the Editor link above: a
+              // shared-checkout session has no editor container to stop.
+              // Lives in the overflow menu, not beside the link, because
+              // stopping is the rare path — the container idles itself out
+              // on its own, and the common way to end a session is just to
+              // close its tab. No polling here afterwards: `stop` is
+              // idempotent (features/editor's own contract), so there is
+              // nothing this page needs to keep watching for.
+              ...(data.isolated
+                ? [
+                    {
+                      id: 'stop-editor',
+                      label: t('sessions.stopEditor'),
+                      disabled: stopEditor.isPending,
+                      onSelect: () => {
+                        stopEditor.mutate(
+                          { path: { id: data.projectId, sessionId: data.id } },
+                          {
+                            onSuccess: () => toast({ title: t('sessions.editorStopped') }),
+                            onError: (e) =>
+                              toast({
+                                title: apiErrorMessage(e, t('editor.errors.stopFailed')),
+                                tone: 'danger',
+                              }),
+                          },
+                        )
+                      },
+                    },
+                  ]
+                : []),
             ]}
           />
         </div>

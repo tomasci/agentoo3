@@ -17,6 +17,7 @@ import {
   ProjectOverviewRoute,
   ProjectSessionsRoute,
   SessionDockerRoute,
+  SessionEditorRoute,
   SessionRoute,
 } from './project-routes'
 import { RootLayout } from './root-layout'
@@ -85,6 +86,22 @@ const sessionDockerRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: '/sessions/$sessionId/docker',
   component: SessionDockerRoute,
+})
+
+// A session's own code-server (VS Code in the browser), scoped to this
+// session's own git worktree — see features/editor/components/editor-launcher.tsx
+// and the design doc it was built from. Opened only as its own browser tab
+// (the session header's Editor link sets target="_blank"), and rendered with
+// no app shell at all — not merely full-bleed inside one, as it used to be:
+// `RootLayout` matches this exact path (`isBareShellPath`,
+// shared/store/tabs.ts) and renders a bare `<Outlet />` instead of its usual
+// tab bar/sidebar/status bar. This route still nests under `projectRoute`
+// for the same lookup every other project route gets — `ProjectLayout` is
+// not part of that shell, only `RootLayout`'s own chrome is.
+const sessionEditorRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/sessions/$sessionId/editor',
+  component: SessionEditorRoute,
 })
 
 const projectLibraryRoute = createRoute({
@@ -203,6 +220,7 @@ export const routeTree = rootRoute.addChildren([
     projectSessionsRoute,
     sessionRoute,
     sessionDockerRoute,
+    sessionEditorRoute,
     projectDockerRoute,
     projectLibraryRoute,
     projectIdeasRoute,

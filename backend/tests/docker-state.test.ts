@@ -48,9 +48,14 @@ const TEST_PROJECTS_DIR = await mkdtemp(join(tmpdir(), 'agentoo-docker-state-'))
 const real = { ...(await import(`${B}/env.ts`)) } as {
   env: Record<string, unknown>
   hasClaudeCredential: boolean
+  editorEnabled: boolean
 }
 const testEnv = { ...real.env, PROJECTS_DIR: TEST_PROJECTS_DIR, DOCKER_ENABLED: true }
-mock.module(`${B}/env.ts`, () => ({ env: testEnv, hasClaudeCredential: real.hasClaudeCredential }))
+mock.module(`${B}/env.ts`, () => ({
+  env: testEnv,
+  hasClaudeCredential: real.hasClaudeCredential,
+  editorEnabled: real.editorEnabled,
+}))
 afterAll(async () => {
   mock.module(`${B}/env.ts`, () => real)
   mock.module(`${B}/features/projects/service.ts`, () => realProjects)
@@ -116,6 +121,12 @@ mock.module(`${B}/features/docker/hosts.ts`, () => ({
 // list; every value is a safe no-op, matching the convention every other
 // test file in this suite already uses for this same module.
 mock.module(`${B}/queue/index.ts`, () => ({
+  // Additive stub for features/editor -- not exercised here, kept only so
+  // this hard-coded (non-spread) mock does not remove it from the shared
+  // module for whichever other test file imports it while this mock is live.
+  enqueueEditorStart: async () => ({}),
+  enqueueEditorReap: async () => ({}),
+  ensureEditorReapSchedule: async () => {},
   QUEUE_PROJECT_SETUP: 'project-setup',
   QUEUE_SESSION_RUN: 'session-run',
   QUEUE_ATTACHMENTS_GC: 'attachments-gc',
@@ -354,13 +365,13 @@ test('GET /docker/detection lists every project by slug when enabled', async () 
 })
 
 test('GET /docker/detection reports enabled:false and no projects when DOCKER_ENABLED=false', async () => {
-  mock.module(`${B}/env.ts`, () => ({ env: { ...testEnv, DOCKER_ENABLED: false } }))
+  mock.module(`${B}/env.ts`, () => ({ env: { ...testEnv, DOCKER_ENABLED: false }, editorEnabled: real.editorEnabled }))
   try {
     const result = await listDockerDetections()
     expect(result).toEqual({ enabled: false, projects: [] })
   } finally {
     // Restore so nothing imported after this file in the same test run sees
     // docker disabled by surprise.
-    mock.module(`${B}/env.ts`, () => ({ env: testEnv }))
+    mock.module(`${B}/env.ts`, () => ({ env: testEnv, editorEnabled: real.editorEnabled }))
   }
 })

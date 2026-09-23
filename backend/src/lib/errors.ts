@@ -31,6 +31,11 @@ export const forbidden = (message: string) => new AppError(message, 403)
 export const serviceUnavailable = (message: string, recoveryCommands?: string[]) =>
   new AppError(message, 503, { recoveryCommands })
 export const tooManyRequests = (message: string) => new AppError(message, 429)
+// The upstream (a session's own code-server, over its unix socket) refused
+// the connection, never answered, or the socket wasn't there at all — a fact
+// about that one container, not about this API, so 502 rather than the 503
+// `serviceUnavailable` already uses for "our own docker CLI/daemon is down".
+export const badGateway = (message: string) => new AppError(message, 502)
 
 /** A zod failure's issues, flattened to the shape this API puts on the wire —
  * shared so every 400 that started as a failed parse looks the same,

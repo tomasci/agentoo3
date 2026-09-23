@@ -16,9 +16,19 @@ const TEST_PROJECTS_DIR = await mkdtemp(join(tmpdir(), 'agentoo-docker-scope-'))
 const realEnv = { ...(await import(`${B}/env.ts`)) } as {
   env: Record<string, unknown>
   hasClaudeCredential: boolean
+  editorEnabled: boolean
 }
 const testEnv = { ...realEnv.env, PROJECTS_DIR: TEST_PROJECTS_DIR }
-mock.module(`${B}/env.ts`, () => ({ env: testEnv, hasClaudeCredential: realEnv.hasClaudeCredential }))
+mock.module(`${B}/env.ts`, () => ({
+  env: testEnv,
+  hasClaudeCredential: realEnv.hasClaudeCredential,
+  // Additive: features/editor didn't exist when this file was written.
+  // Kept, not spread from realEnv wholesale, for the same reason this
+  // file's own `env` override isn't a spread either -- see run-isolated.ts's
+  // header for why an ADDITIVE, hard-coded mock still has to carry every
+  // named export another concurrently-running test file might import.
+  editorEnabled: realEnv.editorEnabled,
+}))
 
 const PROJECT_ID = '11111111-1111-4111-8111-111111111111'
 const OTHER_PROJECT_ID = '22222222-2222-4222-8222-222222222222'
