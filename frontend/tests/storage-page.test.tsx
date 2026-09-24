@@ -16,32 +16,24 @@
 // contract (`topSessions[].sessionId` is never null) — `getApiSessionsId` is
 // mocked to fail there, which is what already makes `SessionRefLink` render
 // its no-router-needed "session gone" fallback for the anomalies table too.
+//
+// Rendered inside a private, isolated `I18nextProvider` (a `cimode` instance
+// — i18next's own always-return-the-key mode) rather than the app's ambient
+// global i18next singleton: that singleton is a `bun test`-process-wide,
+// unawaited side effect (see shared/i18n/index.ts) that whichever test
+// file's render reaches it first initialises for every *other* file
+// afterwards too, permanently, for the rest of the run — several already do
+// (e.g. tests/idea-board-page.test.tsx, tests/settings-page.test.tsx),
+// independently of this file and of each other. Every `t()` match below
+// depends on getting a raw key back, so this file no longer races the rest
+// of the suite for that; it brings its own answer.
 
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-
-// Same identity-proxy loader, same allowlist, as tests/ui-core.test.tsx,
-// tests/transcript-row.test.tsx and tests/transcript-time.test.tsx: `StoragePage`
-// pulls in the `@/shared/ui` barrel too, and whichever of them `bun test`
-// evaluates first decides how those ten modules are cached for the run — see
-// the long note in transcript-time.test.tsx. Copied verbatim, not widened.
-import { plugin } from 'bun'
-
-const UI_CORE_STYLES =
-  /src\/shared\/ui\/(core\/(badge|status-dot|code|layout)|patterns\/(card|page-header|empty-state|alert|definition-list|data-table))\.module\.scss$/
-
-plugin({
-  name: 'storage-page-test-css-module-identity',
-  setup(build) {
-    build.onLoad({ filter: UI_CORE_STYLES }, () => ({
-      contents:
-        'export default new Proxy({}, { get: (_t, p) => (typeof p === "string" ? p : undefined) })',
-      loader: 'js',
-    }))
-  },
-})
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import i18next from 'i18next'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { I18nextProvider } from 'react-i18next'
 import { mockModule } from './mock-module'
 
 type Query = Record<string, unknown> | undefined
@@ -173,7 +165,15 @@ await mockModule(BULK_CLIENT, () => ({
 }))
 
 const { StoragePage } = await import('../src/features/storage/components/storage-page')
-const { Toaster, toaster } = await import('../src/shared/ui/overlay/toast')
+const { Toaster, toast } = await import('../src/shared/ui/toast')
+
+// Deliberately never `.use(initReactI18next)` — see
+// tests/settings-page.test.tsx's header comment for why that plugin would
+// silently swap react-i18next's *global* default instance to this one for
+// the rest of the run, rather than staying scoped to what `I18nextProvider`
+// wraps below.
+const testI18n = i18next.createInstance()
+await testI18n.init({ lng: 'cimode', fallbackLng: 'cimode' })
 
 let client: QueryClient
 let container: HTMLDivElement
@@ -186,10 +186,12 @@ async function mount() {
   root = createRoot(container)
   await act(async () => {
     root.render(
-      <QueryClientProvider client={client}>
-        <Toaster />
-        <StoragePage />
-      </QueryClientProvider>,
+      <I18nextProvider i18n={testI18n}>
+        <QueryClientProvider client={client}>
+          <Toaster />
+          <StoragePage />
+        </QueryClientProvider>
+      </I18nextProvider>,
     )
   })
   // The several queries (summary, open anomalies, unfiltered open anomalies)
@@ -209,11 +211,10 @@ const unmount = async () => {
   })
   container.remove()
   client.clear()
-  // The toaster is a module-level singleton (see toast.tsx), so a toast this
-  // test created would otherwise still be alive — and its `<Toaster />`
-  // subscriber still registered — for whatever the *next* test's own
-  // `mount()` renders on top of it.
-  toaster.remove()
+  // The toast manager is a module-level singleton (ui/toast.tsx) — close
+  // every toast so one this test raised is not still alive for the next
+  // test's mount().
+  toast.close()
 }
 
 beforeEach(() => {
@@ -250,16 +251,14 @@ const click = async (el: Element) => {
 
 /** The row checkboxes the "select" column renders, in row order — table row
  *  order matches `openAnomalies` order (no sort applied), so index 0 is
- *  always a1. */
-const rowCheckboxes = () =>
-  [...container.querySelectorAll('input[type="checkbox"]')] as HTMLInputElement[]
+ *  always a1. Base UI's `Checkbox` is a `role="checkbox"` element with a
+ *  hidden native input behind it, not an `input[type="checkbox"]` itself. */
+const rowCheckboxes = () => [...container.querySelectorAll('[role="checkbox"]')] as HTMLElement[]
 
 const selectRow = async (index: number) => {
-  const input = rowCheckboxes()[index]
-  if (!input) throw new Error(`no row checkbox at index ${index}`)
-  await act(async () => {
-    input.click()
-  })
+  const el = rowCheckboxes()[index]
+  if (!el) throw new Error(`no row checkbox at index ${index}`)
+  await click(el)
 }
 
 /** Every menu trigger on the page, in row order — one `ActionsMenu` per open
@@ -268,45 +267,31 @@ const menuTriggers = () =>
   [...container.querySelectorAll('button[aria-haspopup="menu"]')] as HTMLElement[]
 
 /**
- * Opens the row's menu and selects the item whose label is `label`.
- *
- * Two events, each its own `act`: Zag's menu machine sets `highlightedValue`
- * off `ITEM_POINTERDOWN` and reads it back synchronously handling
- * `ITEM_CLICK` — a `pointerdown` and a `click` dispatched inside the *same*
- * `act` land before that machine transition has actually applied, and the
- * click fires against a `highlightedValue` that is still unset.
+ * Opens the row's menu and selects the item whose label is `label`. Base
+ * UI's menu unmounts its popup entirely while closed, and a plain click both
+ * opens the menu and picks an item — no `pointerdown` priming and no
+ * open-state qualifier needed the way Zag's menu required.
  */
 async function selectRowMenuItem(rowIndex: number, label: string) {
   const trigger = menuTriggers()[rowIndex]
   if (!trigger) throw new Error(`no menu trigger at row ${rowIndex}`)
-  await act(async () => {
-    trigger.click()
-  })
-  const items = [
-    ...document.body.querySelectorAll('[role="menu"][data-state="open"] [role="menuitem"]'),
-  ] as HTMLElement[]
+  await click(trigger)
+  const items = [...document.body.querySelectorAll('[role="menu"] [role="menuitem"]')] as HTMLElement[]
   const item = items.find((el) => el.textContent === label)
   if (!item) {
     throw new Error(`no open menu item "${label}" among ${items.map((i) => i.textContent).join(', ')}`)
   }
-  await act(async () => {
-    item.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }))
-  })
-  await act(async () => {
-    item.click()
-  })
+  await click(item)
 }
 
 /**
- * Ark's Dialog (and therefore ConfirmDialog) renders through a Portal,
- * straight onto `document.body`, never inside `container` — and, per
- * dialog.tsx's own note, never unmounts its Content on close either. This
- * page renders five `ConfirmDialog`s unconditionally, so a bare
- * `[role="alertdialog"]` always matches one of them, open or not; the
- * `data-state="open"` qualifier is load-bearing, not decoration.
+ * The one `ConfirmDialog` open at a time, if any. Base UI's alert dialog
+ * unmounts its popup entirely while closed, so a bare `[role="alertdialog"]`
+ * only ever matches an open one — no `data-state="open"` qualifier needed the
+ * way Ark's dialog (which never unmounts its content) required.
  */
 const dialogButtons = () => {
-  const dialog = document.body.querySelector('[role="alertdialog"][data-state="open"]')
+  const dialog = document.body.querySelector('[role="alertdialog"]')
   return dialog ? ([...dialog.querySelectorAll('button')] as HTMLElement[]) : []
 }
 const findDialogButton = (text: string) => dialogButtons().find((b) => b.textContent?.includes(text))
@@ -369,7 +354,7 @@ test('recheck fires for exactly the row it was chosen from, not the first or eve
 
   expect(recheckCalls).toEqual([{ id: 'a3' }])
   // Recheck deletes nothing, so it never asks for confirmation first.
-  expect(document.body.querySelector('[role="alertdialog"][data-state="open"]')).toBeNull()
+  expect(document.body.querySelector('[role="alertdialog"]')).toBeNull()
 })
 
 test('a recheck that finds the anomaly fixed itself reports that honestly, not as a deletion', async () => {
@@ -389,7 +374,7 @@ test('delete asks for confirmation before calling anything', async () => {
   await selectRowMenuItem(0, 'storage.anomalies.delete')
 
   expect(deleteCalls).toEqual([])
-  expect(document.body.querySelector('[role="alertdialog"][data-state="open"]')).not.toBeNull()
+  expect(document.body.querySelector('[role="alertdialog"]')).not.toBeNull()
 })
 
 test('confirming delete fires for exactly the row it was chosen from', async () => {

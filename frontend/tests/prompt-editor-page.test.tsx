@@ -4,30 +4,6 @@
 // reaches the DOM, since everything else (mutation wiring, invalidation) is
 // the generated client's own contract, not this page's.
 
-import { plugin } from 'bun'
-
-// Same identity-proxy loader, same allowlist, as tests/ui-core.test.tsx and
-// tests/storage-page.test.tsx: this page pulls in the whole `@/shared/ui`
-// barrel (PageHeader, Badge, Alert among them), which means importing it here
-// also loads the ten `.module.scss` files ui-core.test.tsx owns. `bun test`
-// does not evaluate files in a documented order, so whichever file runs first
-// decides how those modules are cached for the whole run — registering the
-// identical loader here makes the outcome the same either way. (Keep the
-// allowlist in step with the one in tests/ui-core.test.tsx.)
-const UI_CORE_STYLES =
-  /src\/shared\/ui\/(core\/(badge|status-dot|code|layout)|patterns\/(card|page-header|empty-state|alert|definition-list|data-table))\.module\.scss$/
-
-plugin({
-  name: 'prompt-editor-page-test-css-module-identity',
-  setup(build) {
-    build.onLoad({ filter: UI_CORE_STYLES }, () => ({
-      contents:
-        'export default new Proxy({}, { get: (_t, p) => (typeof p === "string" ? p : undefined) })',
-      loader: 'js',
-    }))
-  },
-})
-
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act } from 'react'

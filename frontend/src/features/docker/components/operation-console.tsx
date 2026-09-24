@@ -1,9 +1,12 @@
+import { CircleAlertIcon } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Alert, Badge, Button, Card, Inline, Stack, StatusDot, type Tone } from '@/shared/ui'
-import { cx } from '@/shared/ui/lib/cx'
+import { StatusBadge, StatusDot, type Tone } from '@/shared/components'
+import { cn } from '@/shared/lib/utils'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Button } from '@/shared/ui/button'
+import { Card, CardContent } from '@/shared/ui/card'
 import { useOperationStream } from '../hooks/use-operation-stream'
-import styles from './operation-console.module.scss'
 
 type OperationStatus = 'queued' | 'running' | 'succeeded' | 'failed'
 
@@ -50,36 +53,44 @@ export function OperationConsole({
 
   return (
     <Card>
-      <Stack gap={3}>
-        <Inline gap={3} justify="between" align="center">
-          <Inline gap={2} align="center">
+      <CardContent className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
             <StatusDot tone={connected ? 'accent' : 'neutral'} pulse={connected && !ended} />
-            <h3 className={styles.heading}>
+            <h3 className="text-base font-semibold">
               {operation
                 ? t(`docker.operation.kind.${operation.kind}`)
                 : t('docker.operation.heading')}
             </h3>
-            <Badge tone={STATUS_TONE[status]}>{t(`docker.operation.status.${status}`)}</Badge>
-          </Inline>
+            <StatusBadge tone={STATUS_TONE[status]}>
+              {t(`docker.operation.status.${status}`)}
+            </StatusBadge>
+          </div>
           <Button type="button" variant="ghost" size="sm" onClick={onDismiss}>
             {t('docker.operation.dismiss')}
           </Button>
-        </Inline>
+        </div>
 
         {operation && operation.services.length > 0 && (
-          <p className={styles.services}>
+          <p className="text-xs text-muted-foreground">
             {t('docker.operation.services', { names: operation.services.join(', ') })}
           </p>
         )}
 
-        <div ref={paneRef} className={styles.pane}>
+        <div
+          ref={paneRef}
+          className="max-h-64 overflow-y-auto rounded-md border bg-muted p-3 font-mono text-xs leading-relaxed"
+        >
           {lines.length === 0 ? (
-            <p className={styles.empty}>{t('docker.operation.empty')}</p>
+            <p className="m-0 text-muted-foreground">{t('docker.operation.empty')}</p>
           ) : (
             lines.map((line) => (
               <p
                 key={line.seq}
-                className={cx(styles.line, line.stream === 'stderr' && styles.stderr)}
+                className={cn(
+                  'm-0 break-words whitespace-pre-wrap',
+                  line.stream === 'stderr' && 'text-destructive',
+                )}
               >
                 {line.text}
               </p>
@@ -87,8 +98,13 @@ export function OperationConsole({
           )}
         </div>
 
-        {operation?.error && <Alert tone="danger">{operation.error}</Alert>}
-      </Stack>
+        {operation?.error && (
+          <Alert variant="destructive">
+            <CircleAlertIcon />
+            <AlertDescription>{operation.error}</AlertDescription>
+          </Alert>
+        )}
+      </CardContent>
     </Card>
   )
 }

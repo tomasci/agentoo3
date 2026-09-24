@@ -2,7 +2,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { ActionsMenu, ConfirmDialog, type MenuAction, toast } from '@/shared/ui'
+import { ActionsMenu, ConfirmDialog, type MenuAction, toast } from '@/shared/components'
 import { type Idea, type IdeaStatus, useDeleteIdea, useMoveIdea } from '../hooks/use-ideas'
 import { IDEA_STATUS_I18N_KEY, IDEA_STATUSES } from '../lib/status'
 
@@ -14,9 +14,8 @@ import { IDEA_STATUS_I18N_KEY, IDEA_STATUSES } from '../lib/status'
  * plus delete.
  *
  * Move and delete failures go to a toast, not an inline `Alert`: there is no
- * form here for a block-level error to sit under (component-contract.md's
- * three error levels — Field/Block/Transient — and a menu selection is
- * squarely the transient case).
+ * form here for a block-level error to sit under, and a menu selection is
+ * squarely the transient case.
  */
 export function IdeaActionsMenu({
   idea,
@@ -43,7 +42,7 @@ export function IdeaActionsMenu({
       { path: { id: idea.id }, body: { status } },
       {
         onError: (e) =>
-          toast({ tone: 'danger', title: apiErrorMessage(e, t('ideas.move.failed')) }),
+          toast.add({ type: 'error', title: apiErrorMessage(e, t('ideas.move.failed')) }),
       },
     )
   }
@@ -95,7 +94,7 @@ export function IdeaActionsMenu({
             { path: { id: idea.id }, body: { status: 'selected_for_development' } },
             {
               onError: (e) =>
-                toast({ tone: 'danger', title: apiErrorMessage(e, t('ideas.move.failed')) }),
+                toast.add({ type: 'error', title: apiErrorMessage(e, t('ideas.move.failed')) }),
               onSettled: () => setPendingMove(false),
             },
           )
@@ -114,7 +113,7 @@ export function IdeaActionsMenu({
             {
               onSuccess: () => onDeleted?.(),
               onError: (e) =>
-                toast({ tone: 'danger', title: apiErrorMessage(e, t('ideas.delete.failed')) }),
+                toast.add({ type: 'error', title: apiErrorMessage(e, t('ideas.delete.failed')) }),
               onSettled: () => setConfirmDelete(false),
             },
           )

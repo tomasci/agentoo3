@@ -1,24 +1,18 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAgents } from '@/features/library'
 import { useProjects } from '@/features/projects'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import {
-  Alert,
-  Button,
-  Card,
-  EmptyState,
-  Field,
-  Inline,
-  Input,
-  Select,
-  type SelectOption,
-  Spinner,
-  Stack,
-} from '@/shared/ui'
+import { Loading } from '@/shared/components'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Button } from '@/shared/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
+import { Empty, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
+import { Field, FieldDescription, FieldLabel } from '@/shared/ui/field'
+import { Input } from '@/shared/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import { useCreateSession, useSessions } from '../hooks/use-sessions'
 import { SessionCard } from './session-card'
-import styles from './sessions.module.scss'
 
 export function ProjectSessions({ projectId }: { projectId: string }) {
   const { t } = useTranslation()
@@ -33,17 +27,25 @@ export function ProjectSessions({ projectId }: { projectId: string }) {
   const [baseBranch, setBaseBranch] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
 
+  const titleId = useId()
+  const baseBranchId = useId()
+  const orchestratorId = useId()
+  const budgetId = useId()
+
   const project = (projects ?? []).find((p) => p.id === projectId)
 
   const orchestrators = (agents ?? []).filter((a) => a.role === 'orchestrator')
   // An explicit "(none)" option, not a placeholder: the reader needs to be able
   // to pick their way back to no orchestrator, not just start there.
-  const orchestratorOptions: SelectOption[] = [
-    { value: '', label: t('sessions.form.orchestratorNone') },
-    // Just the name in the trigger's own label: the select trigger has no
-    // min-width:0 defence against a long unbroken string (that fix belongs to
-    // Select, not this call site — see the report), so the description is
-    // demoted to SelectOption.description, shown only inside the open list.
+  const orchestratorOptions = [
+    {
+      value: '',
+      label: t('sessions.form.orchestratorNone'),
+      description: undefined as string | undefined,
+    },
+    // Just the name in the trigger's own label: a long unbroken orchestrator
+    // name is demoted to the item's own description line instead, shown only
+    // inside the open list.
     ...orchestrators.map((a) => ({ value: a.name, label: a.name, description: a.description })),
   ]
 
@@ -82,55 +84,81 @@ export function ProjectSessions({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className={styles.page}>
-      <Card variant="dashed">
-        <div className={styles.form}>
-          <Stack gap={3}>
-            <h3 className={styles.heading}>{t('sessions.form.heading')}</h3>
-
-            <Field label={t('sessions.form.title')}>
+    <div className="grid gap-5">
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('sessions.form.heading')}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex max-w-xl flex-col gap-3">
+            <Field>
+              <FieldLabel htmlFor={titleId}>{t('sessions.form.title')}</FieldLabel>
               <Input
+                id={titleId}
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder={t('sessions.form.titlePlaceholder')}
               />
             </Field>
 
-            <Field label={t('sessions.form.baseBranch')} hint={baseBranchHint}>
+            <Field>
+              <FieldLabel htmlFor={baseBranchId}>{t('sessions.form.baseBranch')}</FieldLabel>
               <Input
-                mono
+                id={baseBranchId}
+                className="font-mono"
                 value={baseBranch}
                 onChange={(e) => setBaseBranch(e.target.value)}
                 placeholder={baseBranchPlaceholder}
               />
+              <FieldDescription>{baseBranchHint}</FieldDescription>
             </Field>
 
-            <Field
-              label={t('sessions.form.orchestrator')}
-              hint={
-                orchestrators.length === 0
-                  ? t('sessions.form.orchestratorEmpty')
-                  : t('sessions.form.orchestratorHint')
-              }
-            >
+            <Field>
+              <FieldLabel htmlFor={orchestratorId}>{t('sessions.form.orchestrator')}</FieldLabel>
               <Select
-                options={orchestratorOptions}
+                items={orchestratorOptions}
                 value={orchestrator}
                 onValueChange={(value) => setOrchestrator(value ?? '')}
-              />
+              >
+                <SelectTrigger id={orchestratorId} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {orchestratorOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      <div className="flex flex-col">
+                        <span>{option.label}</span>
+                        {option.description && (
+                          <span className="text-xs text-muted-foreground">
+                            {option.description}
+                          </span>
+                        )}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FieldDescription>
+                {orchestrators.length === 0
+                  ? t('sessions.form.orchestratorEmpty')
+                  : t('sessions.form.orchestratorHint')}
+              </FieldDescription>
             </Field>
 
-            <Field label={t('sessions.form.budget')} hint={t('sessions.form.budgetHint')}>
+            <Field>
+              <FieldLabel htmlFor={budgetId}>{t('sessions.form.budget')}</FieldLabel>
               <Input
+                id={budgetId}
                 type="number"
                 min="1"
                 value={budget}
                 onChange={(e) => setBudget(e.target.value)}
                 placeholder="10"
               />
+              <FieldDescription>{t('sessions.form.budgetHint')}</FieldDescription>
             </Field>
 
-            <Inline gap={3}>
+            <div className="flex flex-wrap items-center gap-3">
               <Button
                 type="button"
                 disabled={create.isPending || project?.status !== 'ready'}
@@ -139,23 +167,35 @@ export function ProjectSessions({ projectId }: { projectId: string }) {
                 {create.isPending ? t('sessions.form.creating') : t('sessions.form.submit')}
               </Button>
               {project && project.status !== 'ready' && (
-                <span className={styles.hint}>{t('sessions.form.notReady')}</span>
+                <span className="text-xs text-muted-foreground">{t('sessions.form.notReady')}</span>
               )}
-            </Inline>
-            {formError && <Alert tone="danger">{formError}</Alert>}
-          </Stack>
-        </div>
+            </div>
+            {formError && (
+              <Alert variant="destructive">
+                <AlertDescription>{formError}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+        </CardContent>
       </Card>
 
       <div>
-        <h3 className={styles.heading}>{t('sessions.heading')}</h3>
-        {isError && <Alert tone="danger">{apiErrorMessage(error, t('sessions.loadFailed'))}</Alert>}
-        {isPending && <Spinner label={t('common.loading')} block />}
+        <h3 className="mb-3 text-base font-semibold">{t('sessions.heading')}</h3>
+        {isError && (
+          <Alert variant="destructive">
+            <AlertDescription>{apiErrorMessage(error, t('sessions.loadFailed'))}</AlertDescription>
+          </Alert>
+        )}
+        {isPending && <Loading label={t('common.loading')} block />}
         {!isPending && !isError && (sessions ?? []).length === 0 && (
-          <EmptyState title={t('sessions.empty')} />
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>{t('sessions.empty')}</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
         )}
         {(sessions ?? []).length > 0 && (
-          <div className={styles.list}>
+          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(26rem,100%),1fr))]">
             {(sessions ?? []).map((s) => (
               <SessionCard key={s.id} session={s} projectId={projectId} />
             ))}

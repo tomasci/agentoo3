@@ -1,11 +1,12 @@
 import { useNavigate } from '@tanstack/react-router'
+import { InfoIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { type Session, useSessions } from '@/features/sessions'
-import { Alert, Field, Select, type SelectOption, Stack } from '@/shared/ui'
-import styles from './docker-scope-bar.module.scss'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 
 /**
- * Not a real session id — Ark's `Select` needs a value for every option, and
+ * Not a real session id — the switcher needs a value for every option, and
  * `undefined` (what `sessionId` actually is at repo scope) is not one.
  *
  * Exported so docker-page.test.tsx can drive the switcher by value without
@@ -50,6 +51,11 @@ interface DockerScopeBarProps {
  * the switcher never offers one at all, rather than offering it and then
  * showing the rejection.
  *
+ * A `Select`, not a `ToggleGroup`: the list is one option per isolated
+ * session in the project, which has no upper bound, and a toggle row of
+ * buttons only reads well while it stays short — a `Select` collapses the
+ * same choice behind one trigger regardless of how many sessions pile up.
+ *
  * Reads the sessions list itself rather than taking it as a prop: nothing
  * else on this page needs it, and `useSessions` (features/sessions) is
  * already the shared, cached way anything reads a project's sessions.
@@ -62,13 +68,9 @@ export function DockerScopeBar({ projectId, sessionId }: DockerScopeBarProps) {
   const isolated = (sessions.data ?? []).filter((s) => s.isolated)
   const current = isolated.find((s) => s.id === sessionId)
 
-  const options: SelectOption[] = [
+  const options: { value: string; label: string }[] = [
     { value: REPO_SCOPE, label: t('docker.scope.repoOption') },
-    ...isolated.map((s) => ({
-      value: s.id,
-      label: sessionLabel(s, t),
-      description: s.branch ?? undefined,
-    })),
+    ...isolated.map((s) => ({ value: s.id, label: sessionLabel(s, t) })),
   ]
   // The URL can name a session this project's own list does not (yet) agree
   // with — still loading, or a link followed after the session stopped
@@ -92,26 +94,42 @@ export function DockerScopeBar({ projectId, sessionId }: DockerScopeBarProps) {
   }
 
   return (
-    <Alert tone="accent">
-      <Stack gap={3}>
-        <p>
-          {sessionId
-            ? t('docker.scope.sessionBanner', {
-                name: current ? sessionDescriptor(current, t) : t('docker.scope.unknownSession'),
-              })
-            : t('docker.scope.repoBanner')}
-        </p>
-        <div className={styles.switcher}>
-          <Field label={t('docker.scope.switcherLabel')} labelHidden>
-            <Select
-              options={options}
-              value={sessionId ?? REPO_SCOPE}
-              onValueChange={goTo}
+    <Alert role="status">
+      <InfoIcon />
+      <AlertDescription>
+        <div className="flex flex-col gap-3">
+          <p>
+            {sessionId
+              ? t('docker.scope.sessionBanner', {
+                  name: current ? sessionDescriptor(current, t) : t('docker.scope.unknownSession'),
+                })
+              : t('docker.scope.repoBanner')}
+          </p>
+          {/* `items` is what lets `SelectValue` show the selected option's own
+              label with no children of its own to render it from. */}
+          <Select items={options} value={sessionId ?? REPO_SCOPE} onValueChange={goTo}>
+            {/* Fixed, generous width so the popup (sized off the trigger) fits
+                typical session titles without clipping mid-word; anything
+                still too long truncates with an ellipsis instead. */}
+            <SelectTrigger
+              aria-label={t('docker.scope.switcherLabel')}
               size="sm"
-            />
-          </Field>
+              className="w-full sm:w-80"
+            >
+              <SelectValue className="min-w-0 truncate" />
+            </SelectTrigger>
+            <SelectContent>
+              {options.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  <span className="min-w-0 flex-1 truncate" title={option.label}>
+                    {option.label}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      </Stack>
+      </AlertDescription>
     </Alert>
   )
 }

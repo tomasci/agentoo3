@@ -8,6 +8,7 @@ import {
   type SortingState,
   useReactTable,
 } from '@tanstack/react-table'
+import { ArrowDownIcon, ArrowUpIcon, CircleAlertIcon, TriangleAlertIcon } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
@@ -15,25 +16,24 @@ import { useSession } from '@/features/sessions'
 import { formatBytes } from '@/features/system'
 import {
   ActionsMenu,
-  Alert,
-  Badge,
-  Button,
-  Card,
-  Checkbox,
   Code,
   ConfirmDialog,
   DataTable,
   DefinitionList,
-  EmptyState,
+  Loading,
   type MenuAction,
   PageHeader,
-  SegmentGroup,
-  Select,
-  type SelectOption,
-  Spinner,
-  Stack,
+  StatusBadge,
   toast,
-} from '@/shared/ui'
+} from '@/shared/components'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Button } from '@/shared/ui/button'
+import { Card, CardContent } from '@/shared/ui/card'
+import { Checkbox } from '@/shared/ui/checkbox'
+import { Empty, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { Spinner } from '@/shared/ui/spinner'
+import { ToggleGroup, ToggleGroupItem } from '@/shared/ui/toggle-group'
 import {
   ANOMALY_CLASSES,
   type AnomalyClass,
@@ -54,10 +54,19 @@ import { ANOMALY_TONE } from '../lib/classes'
 import { cleanupPlanFor } from '../lib/cleanup-plan'
 import { formatDateTime } from '../lib/format'
 import { OUTCOME_TONE, tallyOutcomes } from '../lib/outcomes'
-import styles from './storage-page.module.scss'
 
 const columnHelper = createColumnHelper<StorageAnomaly>()
 const topSessionsColumnHelper = createColumnHelper<TopSession>()
+
+// A toast only ever carries three of `Tone`'s five values (see OUTCOME_TONE in
+// lib/outcomes.ts) — this is the one place that vocabulary crosses into
+// `toast.add`'s own, narrower one (old tones: success→success, danger→error,
+// accent→info).
+const OUTCOME_TOAST_TYPE: Record<'success' | 'accent' | 'danger', 'success' | 'info' | 'error'> = {
+  success: 'success',
+  accent: 'info',
+  danger: 'error',
+}
 
 /** A column header that also toggles that column's sort — `DataTable` itself
  * renders whatever a column's own `header` returns, so a clickable, stateful
@@ -72,10 +81,14 @@ function SortableHeader({
 }) {
   const sorted = column.getIsSorted()
   return (
-    <button type="button" className={styles.sortButton} onClick={column.getToggleSortingHandler()}>
+    <button
+      type="button"
+      className="inline-flex items-center gap-1 rounded-sm font-medium hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={column.getToggleSortingHandler()}
+    >
       {label}
-      {sorted === 'asc' && ' ▲'}
-      {sorted === 'desc' && ' ▼'}
+      {sorted === 'asc' && <ArrowUpIcon className="size-3" />}
+      {sorted === 'desc' && <ArrowDownIcon className="size-3" />}
     </button>
   )
 }
@@ -91,7 +104,11 @@ function SessionRefLink({ sessionId }: { sessionId: string }) {
 
   if (session.isPending) return <Code>{short}</Code>
   if (session.isError || !session.data) {
-    return <span className={styles.muted}>{t('storage.anomalies.sessionGone', { id: short })}</span>
+    return (
+      <span className="text-sm text-muted-foreground">
+        {t('storage.anomalies.sessionGone', { id: short })}
+      </span>
+    )
   }
   return (
     <Link
@@ -104,7 +121,7 @@ function SessionRefLink({ sessionId }: { sessionId: string }) {
 }
 
 function SessionRef({ sessionId }: { sessionId: string | null }) {
-  if (!sessionId) return <span className={styles.muted}>—</span>
+  if (!sessionId) return <span className="text-sm text-muted-foreground">—</span>
   return <SessionRefLink sessionId={sessionId} />
 }
 
@@ -118,10 +135,10 @@ type View = 'open' | 'resolved'
  * per-row delete and per-row recheck actions, which answer with the exact
  * same shape. */
 function reportOutcome(t: (key: string) => string, result: AnomalyRemediation) {
-  toast({
+  toast.add({
     title: t(`storage.anomalies.outcome.${result.outcome}`),
     description: result.outcome === 'failed' ? result.error : undefined,
-    tone: OUTCOME_TONE[result.outcome],
+    type: OUTCOME_TOAST_TYPE[OUTCOME_TONE[result.outcome]],
   })
 }
 
@@ -194,9 +211,9 @@ export function StoragePage() {
               meta: { role: 'meta' },
               cell: (info) => (
                 <Checkbox
-                  label={<span className={styles.srOnly}>{t('storage.anomalies.select')}</span>}
+                  aria-label={t('storage.anomalies.select')}
                   checked={info.row.getIsSelected()}
-                  onCheckedChange={(checked) => info.row.toggleSelected(checked)}
+                  onCheckedChange={(checked) => info.row.toggleSelected(checked === true)}
                 />
               ),
             }),
@@ -206,9 +223,9 @@ export function StoragePage() {
         header: () => t('storage.anomalies.table.class'),
         meta: { role: 'primary' },
         cell: (info) => (
-          <Badge tone={ANOMALY_TONE[info.getValue()]}>
+          <StatusBadge tone={ANOMALY_TONE[info.getValue()]}>
             {t(`storage.classes.${info.getValue()}`)}
-          </Badge>
+          </StatusBadge>
         ),
       }),
       columnHelper.accessor('sessionId', {
@@ -270,9 +287,9 @@ export function StoragePage() {
                       {
                         onSuccess: (result) => reportOutcome(t, result),
                         onError: (e) =>
-                          toast({
+                          toast.add({
                             title: apiErrorMessage(e, t('storage.anomalies.recheckFailed')),
-                            tone: 'danger',
+                            type: 'error',
                           }),
                       },
                     )
@@ -337,13 +354,14 @@ export function StoragePage() {
     getCoreRowModel: getCoreRowModel(),
   })
 
-  const classOptions: SelectOption[] = [
+  const classOptions: { value: AnomalyClass | ''; label: string }[] = [
     { value: '', label: t('storage.anomalies.allClasses') },
     ...ANOMALY_CLASSES.map((cls) => ({ value: cls, label: t(`storage.classes.${cls}`) })),
   ]
 
   const runCheck = () =>
     check.mutate(undefined, { onSuccess: () => summary.startWatching('check') })
+  const checking = check.isPending || summary.watching
 
   // Selection only ever means something against the open view's own rows —
   // switching what the reader is looking at should not leave a stale batch
@@ -354,15 +372,22 @@ export function StoragePage() {
   }
 
   return (
-    <Stack gap={8}>
+    <div className="flex flex-col gap-8">
       <PageHeader title={t('storage.heading')} description={t('storage.lead')} />
 
-      {summary.isError && <Alert>{apiErrorMessage(summary.error, t('storage.loadFailed'))}</Alert>}
-      {!summary.isError && summary.isPending && <Spinner label={t('common.loading')} block />}
+      {summary.isError && (
+        <Alert variant="destructive">
+          <CircleAlertIcon />
+          <AlertDescription>
+            {apiErrorMessage(summary.error, t('storage.loadFailed'))}
+          </AlertDescription>
+        </Alert>
+      )}
+      {!summary.isError && summary.isPending && <Loading label={t('common.loading')} block />}
       {!summary.isError && summary.data && (
         <Card>
-          <Stack gap={3}>
-            <h3 className={styles.cardTitle}>{t('storage.summary.heading')}</h3>
+          <CardContent className="flex flex-col gap-3">
+            <h3 className="text-base font-semibold">{t('storage.summary.heading')}</h3>
             <DefinitionList
               items={[
                 {
@@ -410,41 +435,44 @@ export function StoragePage() {
                 },
               ]}
             />
-          </Stack>
+          </CardContent>
         </Card>
       )}
 
       {!summary.isError && summary.data && (
         <Card>
-          <Stack gap={3}>
-            <h3 className={styles.cardTitle}>{t('storage.topSessions.heading')}</h3>
+          <CardContent className="flex flex-col gap-3">
+            <h3 className="text-base font-semibold">{t('storage.topSessions.heading')}</h3>
             {summary.data.topSessions.length === 0 ? (
-              <EmptyState title={t('storage.topSessions.empty')} />
+              <Empty>
+                <EmptyHeader>
+                  <EmptyTitle>{t('storage.topSessions.empty')}</EmptyTitle>
+                </EmptyHeader>
+              </Empty>
             ) : (
               <DataTable table={topSessionsTable} />
             )}
-          </Stack>
+          </CardContent>
         </Card>
       )}
 
       {summary.data && !summary.data.lastCheckAt && (
-        <Alert tone="warning">{t('storage.noCheckYet')}</Alert>
+        <Alert role="status">
+          <TriangleAlertIcon />
+          <AlertDescription>{t('storage.noCheckYet')}</AlertDescription>
+        </Alert>
       )}
 
       <Card>
-        <Stack gap={3}>
-          <div className={styles.actionsRow}>
-            <Button
-              type="button"
-              loading={check.isPending || summary.watching}
-              loadingLabel={t('storage.checking')}
-              onClick={runCheck}
-            >
-              {t('storage.runCheck')}
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="button" disabled={checking} onClick={runCheck}>
+              {checking && <Spinner data-icon="inline-start" />}
+              {checking ? t('storage.checking') : t('storage.runCheck')}
             </Button>
             <Button
               type="button"
-              variant="danger"
+              variant="destructive"
               onClick={() => setConfirmCleanup(true)}
               disabled={!summary.data?.lastCheckAt || openAll.isError}
             >
@@ -452,45 +480,75 @@ export function StoragePage() {
             </Button>
           </div>
           {check.isError && (
-            <Alert tone="danger">{apiErrorMessage(check.error, t('storage.checkFailed'))}</Alert>
+            <Alert variant="destructive">
+              <CircleAlertIcon />
+              <AlertDescription>
+                {apiErrorMessage(check.error, t('storage.checkFailed'))}
+              </AlertDescription>
+            </Alert>
           )}
           {cleanup.isError && (
-            <Alert tone="danger">
-              {apiErrorMessage(cleanup.error, t('storage.cleanupFailed'))}
+            <Alert variant="destructive">
+              <CircleAlertIcon />
+              <AlertDescription>
+                {apiErrorMessage(cleanup.error, t('storage.cleanupFailed'))}
+              </AlertDescription>
             </Alert>
           )}
           {openAll.isError && (
-            <Alert tone="warning">
-              {apiErrorMessage(openAll.error, t('storage.cleanupCountsFailed'))}
+            <Alert role="status">
+              <TriangleAlertIcon />
+              <AlertDescription>
+                {apiErrorMessage(openAll.error, t('storage.cleanupCountsFailed'))}
+              </AlertDescription>
             </Alert>
           )}
-        </Stack>
+        </CardContent>
       </Card>
 
-      <Stack gap={3}>
+      <div className="flex flex-col gap-3">
         <PageHeader level={2} title={t('storage.anomalies.heading')} />
 
-        <div className={styles.filters}>
-          <SegmentGroup
-            label={t('storage.anomalies.viewLabel')}
-            options={[
-              { value: 'open', label: t('storage.anomalies.view.open') },
-              { value: 'resolved', label: t('storage.anomalies.view.resolved') },
-            ]}
-            value={view}
-            onValueChange={(v) => changeView(v === 'resolved' ? 'resolved' : 'open')}
-          />
+        <div className="flex flex-wrap items-center gap-3">
+          <ToggleGroup
+            aria-label={t('storage.anomalies.viewLabel')}
+            variant="outline"
+            value={[view]}
+            onValueChange={(next) => {
+              // Base UI represents a single-select group as a 0-or-1-length
+              // array; a click on the already-pressed item reports the empty
+              // one, which must leave `view` exactly where it was rather than
+              // land on neither tab pressed.
+              const value = next[0]
+              if (value === 'open' || value === 'resolved') changeView(value)
+            }}
+          >
+            <ToggleGroupItem value="open">{t('storage.anomalies.view.open')}</ToggleGroupItem>
+            <ToggleGroupItem value="resolved">
+              {t('storage.anomalies.view.resolved')}
+            </ToggleGroupItem>
+          </ToggleGroup>
           <Select
-            options={classOptions}
+            items={classOptions}
             value={classFilter}
             onValueChange={(v) => setClassFilter((v as AnomalyClass | '') || '')}
-            placeholder={t('storage.anomalies.filterByClass')}
-          />
+          >
+            <SelectTrigger className="w-fit">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {classOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {view === 'open' && (
             <>
               <Button
                 type="button"
-                variant="secondary"
+                variant="outline"
                 size="sm"
                 disabled={selectedIds.length === 0}
                 onClick={() => setConfirmResolveSelected(true)}
@@ -499,7 +557,7 @@ export function StoragePage() {
               </Button>
               <Button
                 type="button"
-                variant="danger"
+                variant="destructive"
                 size="sm"
                 disabled={selectedIds.length === 0}
                 onClick={() => setConfirmDeleteSelected(true)}
@@ -511,13 +569,27 @@ export function StoragePage() {
         </div>
 
         {anomalies.isError && (
-          <Alert>{apiErrorMessage(anomalies.error, t('storage.anomalies.loadFailed'))}</Alert>
+          <Alert variant="destructive">
+            <CircleAlertIcon />
+            <AlertDescription>
+              {apiErrorMessage(anomalies.error, t('storage.anomalies.loadFailed'))}
+            </AlertDescription>
+          </Alert>
         )}
-        {!anomalies.isError && anomalies.isPending && <Spinner label={t('common.loading')} block />}
+        {!anomalies.isError && anomalies.isPending && <Loading label={t('common.loading')} block />}
         {!anomalies.isError && !anomalies.isPending && (
-          <DataTable table={table} empty={<EmptyState title={t('storage.anomalies.empty')} />} />
+          <DataTable
+            table={table}
+            empty={
+              <Empty>
+                <EmptyHeader>
+                  <EmptyTitle>{t('storage.anomalies.empty')}</EmptyTitle>
+                </EmptyHeader>
+              </Empty>
+            }
+          />
         )}
-      </Stack>
+      </div>
 
       <ConfirmDialog
         open={pendingResolve !== null}
@@ -550,9 +622,9 @@ export function StoragePage() {
             {
               onSuccess: (result) => reportOutcome(t, result),
               onError: (e) =>
-                toast({
+                toast.add({
                   title: apiErrorMessage(e, t('storage.anomalies.deleteFailed')),
-                  tone: 'danger',
+                  type: 'error',
                 }),
               onSettled: () => setPendingDelete(null),
             },
@@ -576,9 +648,9 @@ export function StoragePage() {
             {
               onSuccess: () => setRowSelection({}),
               onError: (e) =>
-                toast({
+                toast.add({
                   title: apiErrorMessage(e, t('storage.anomalies.resolveSelectedFailed')),
-                  tone: 'danger',
+                  type: 'error',
                 }),
               onSettled: () => setConfirmResolveSelected(false),
             },
@@ -607,17 +679,17 @@ export function StoragePage() {
                     (outcome) =>
                       `${tally[outcome]} ${t(`storage.anomalies.outcomeShort.${outcome}`)}`,
                   )
-                toast({
+                toast.add({
                   title: t('storage.anomalies.deleteSelectedResultTitle'),
                   description: parts.join(' · '),
-                  tone: tally.failed > 0 ? 'danger' : 'success',
+                  type: tally.failed > 0 ? 'error' : 'success',
                 })
                 setRowSelection({})
               },
               onError: (e) =>
-                toast({
+                toast.add({
                   title: apiErrorMessage(e, t('storage.anomalies.deleteSelectedFailed')),
-                  tone: 'danger',
+                  type: 'error',
                 }),
               onSettled: () => setConfirmDeleteSelected(false),
             },
@@ -649,6 +721,6 @@ export function StoragePage() {
           })
         }}
       />
-    </Stack>
+    </div>
   )
 }

@@ -16,10 +16,10 @@
 //   2. The `data-transcript-row` contract, which is a live selector in
 //      session-page.tsx's scroll compensation: on every top-level row, in
 //      document order, and on nothing nested.
-//   3. Declarations, read out of the stylesheets. Restating a single rule
-//      would be worthless, so these are invariants over *all* the rules of a
-//      kind — every `display: grid` in the transcript's own sheet, whether or
-//      not it existed when this was written — which is what makes them able to
+//   3. Declarations, as invariants over the rendered tree rather than a
+//      stylesheet. Restating a single rule would be worthless, so this is an
+//      invariant over *every* `grid` class the fixture renders, whether or
+//      not it existed when this was written — which is what makes it able to
 //      catch the next grid somebody adds without the fix.
 //
 // Not covered here, and not coverable here: whether `minmax(0, 1fr)` is
@@ -29,34 +29,11 @@
 // anything about Collapsible's `overflow: hidden` clipping rather than
 // scrolling. Those need a real engine.
 
-import { plugin } from 'bun'
 import { expect, test } from 'bun:test'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-
-// Same identity-proxy loader, same allowlist, as tests/ui-core.test.tsx,
-// tests/transcript-row.test.tsx, tests/transcript-time.test.tsx and
-// tests/transcript-attachments.test.tsx — see the long note in
-// transcript-time.test.tsx for why every one of them has to register it.
-// Copied verbatim, not widened. It is also what makes assertion (1) above
-// possible at all: with it, `Code`'s `styles.block` / `styles.wrap` render as
-// the literal class names `block` and `wrap`.
-const UI_CORE_STYLES =
-  /src\/shared\/ui\/(core\/(badge|status-dot|code|layout)|patterns\/(card|page-header|empty-state|alert|definition-list|data-table))\.module\.scss$/
-
-plugin({
-  name: 'transcript-overflow-test-css-module-identity',
-  setup(build) {
-    build.onLoad({ filter: UI_CORE_STYLES }, () => ({
-      contents:
-        'export default new Proxy({}, { get: (_t, p) => (typeof p === "string" ? p : undefined) })',
-      loader: 'js',
-    }))
-  },
-})
-
-const { buildTranscript } = await import('../src/features/sessions/lib/transcript')
-const { Transcript } = await import('../src/features/sessions/components/transcript')
+import { buildTranscript } from '../src/features/sessions/lib/transcript'
+import { Transcript } from '../src/features/sessions/components/transcript'
 
 type M = Parameters<typeof Transcript>[0]['messages'][number]
 
@@ -206,7 +183,7 @@ async function render(messages: M[]) {
 }
 
 const triggers = (el: Element) =>
-  [...el.querySelectorAll('button[data-part="trigger"]')] as HTMLElement[]
+  [...el.querySelectorAll('button[data-slot="collapsible-trigger"]')] as HTMLElement[]
 
 /** Collapsible unmounts its body on exit, so nothing inside a task or event row
  *  exists in the DOM until it is opened — and a nested group only appears once
@@ -228,6 +205,20 @@ const grid = (container: Element) => {
 
 // --- 1. every code block the transcript emits is the wrapping kind ------------
 
+/**
+ * `ui/shared` Tailwind classes are literal strings in this DOM (unlike the
+ * CSS-module classes the pre-shadcn design system resolved to nothing under
+ * `bun test`), so the wrapping vs. scrolling `<pre>` kinds can be told apart
+ * by their own rendered classes rather than a module-scoped one.
+ * `Code`'s own `<pre>` never carries `mb-3`; react-markdown's fenced-code
+ * override always does (`markdown.tsx`'s own `pre` component) — the one
+ * class neither ever needs to share.
+ */
+const isMarkdownPre = (pre: Element) => pre.classList.contains('mb-3')
+const codeBlocks = (container: Element) =>
+  [...container.querySelectorAll('pre')].filter((pre) => !isMarkdownPre(pre))
+const markdownPres = (container: Element) => [...container.querySelectorAll('pre')].filter(isMarkdownPre)
+
 test('the fixture reaches every Code site the transcript has', async () => {
   // Guards the two tests below: they assert a property of a set, and a set that
   // silently stopped being populated would pass them without testing anything.
@@ -238,7 +229,7 @@ test('the fixture reaches every Code site the transcript has', async () => {
   // `{ subtype: 'success' }` is nothing MessageBody recognises either.
   const container = await render(turn())
   await openAll(container)
-  const blocks = [...container.querySelectorAll('pre.block')]
+  const blocks = codeBlocks(container)
   expect(blocks.length).toBe(9)
   // And the no-arguments branch rendered its note instead of an eighth.
   expect(container.textContent ?? '').toMatch(/noArguments|no arguments/i)
@@ -248,12 +239,12 @@ test('no code block in the transcript is left to scroll horizontally', async () 
   const container = await render(turn())
   await openAll(container)
 
-  // `.wrap` is what turns `white-space: pre` into `pre-wrap` +
-  // `overflow-wrap: anywhere` (code.module.scss). Without it a block keeps its
-  // own `overflow-x: auto`, which is a second horizontal scroller inside a
+  // `whitespace-pre-wrap` (`Code`'s own `wrap` prop) is what turns
+  // `white-space: pre` into wrapping text. Without it a block keeps its own
+  // `overflow-x-auto`, which is a second horizontal scroller inside a
   // vertical one — the thing the change deliberately refuses to add.
-  const unwrapped = [...container.querySelectorAll('pre.block')]
-    .filter((pre) => !pre.classList.contains('wrap'))
+  const unwrapped = codeBlocks(container)
+    .filter((pre) => !pre.classList.contains('whitespace-pre-wrap'))
     // Named by their content, so a failure says which call site regressed.
     .map((pre) => (pre.textContent ?? '').slice(0, 40))
   expect(unwrapped).toEqual([])
@@ -266,29 +257,24 @@ test("the model's own fenced code is NOT the wrapping kind, and relies on markdo
   // rule that makes it scroll *inside itself* is pinned below rather than
   // assumed.
   const container = await render(turn())
-  const markdownPre = [...container.querySelectorAll('pre')].filter(
-    (pre) => !pre.classList.contains('block'),
-  )
+  const markdownPre = markdownPres(container)
   expect(markdownPre.length).toBe(1)
   expect(markdownPre[0]?.textContent ?? '').toContain('cat /very/long/')
-
-  const scss = await Bun.file('src/shared/ui/core/markdown.module.scss').text()
-  const strip = (s: string) => s.replace(/\/\/.*/g, '')
-  // Nested inside `.markdown`, so match the declaration in context.
-  expect(strip(scss)).toMatch(/pre\s*\{[^}]*overflow-x:\s*auto/)
-  expect(strip(scss)).toMatch(/\.tableWrap\s*\{[^}]*overflow-x:\s*auto/)
+  expect(markdownPre[0]?.classList.contains('overflow-x-auto')).toBe(true)
+  expect(markdownPre[0]?.classList.contains('whitespace-pre-wrap')).toBe(false)
 })
 
 test('a wide markdown table is wrapped in its own scroll box, not left bare', async () => {
   const container = await render(turn())
   const table = container.querySelector('table')
   if (!table) throw new Error('no table rendered')
-  // The wrapper carries `.tableWrap`, whose class name is not available here
-  // (markdown.module.scss is outside the identity-proxy allowlist), so the
-  // structural fact is what is asserted: the table is not a bare child of the
-  // markdown root.
+  // `Markdown`'s own `table` override wraps every GFM table in
+  // `overflow-x-auto` (see markdown.tsx) — a real class here, not a
+  // module-scoped one, so it is asserted directly rather than only
+  // structurally.
   expect(table.parentElement?.tagName).toBe('DIV')
   expect(table.parentElement?.children.length).toBe(1)
+  expect(table.parentElement?.classList.contains('overflow-x-auto')).toBe(true)
 })
 
 // --- 2. the data-transcript-row contract --------------------------------------
@@ -339,46 +325,38 @@ test('no nested row carries it, even with every task group open', async () => {
   expect(nestedInside).toEqual(nestedInside.map(() => 0))
 })
 
-// --- 3. declarations, as invariants over whole stylesheets ---------------------
+// --- 3. declarations, as invariants over the rendered tree ---------------------
+//
+// The pre-shadcn version of this file scanned `transcript.module.scss` (and
+// two other stylesheets) for every `display: grid` rule and asserted a
+// `minmax(0, ...)` column template on each — a defence a hand-written SCSS
+// grid needs and can silently lose. That file no longer exists: every grid in
+// the new `transcript.tsx` is Tailwind's own `grid-cols-1` utility, which
+// compiles to `grid-template-columns: repeat(1, minmax(0, 1fr))` by
+// construction — the exact fix the old rule enforced by hand is now inherent
+// to the utility class itself, not something a future edit here could get
+// wrong one call site at a time. What is still worth scanning for is that
+// every grid this fixture renders actually reaches for that utility, over the
+// *rendered* tree rather than a stylesheet that no longer exists.
 
-/** Top-level rule blocks of a stylesheet, comments stripped. Nested rules
- *  (`&:hover`, `.layoutInline .term`) stay inside their parent's body, which is
- *  what the callers below want: a `display: grid` anywhere in a block has to be
- *  answered by a column template in that same block. */
-function rules(scss: string): Array<{ selector: string; body: string }> {
-  const source = scss.replace(/\/\/.*$/gm, '')
-  const out: Array<{ selector: string; body: string }> = []
-  let i = 0
-  while (i < source.length) {
-    const open = source.indexOf('{', i)
-    if (open === -1) break
-    const selector = source.slice(i, open).trim()
-    let depth = 1
-    let j = open + 1
-    while (j < source.length && depth > 0) {
-      if (source[j] === '{') depth++
-      else if (source[j] === '}') depth--
-      j++
-    }
-    out.push({ selector, body: source.slice(open + 1, j - 1) })
-    i = j
-  }
-  return out
-}
-
-const gridsIn = (scss: string) =>
-  rules(scss).filter((rule) => /display:\s*grid/.test(rule.body))
-
-test('every grid in the transcript stylesheet pins its column to a zero minimum', async () => {
-  const scss = await Bun.file('src/features/sessions/components/transcript.module.scss').text()
-  const grids = gridsIn(scss)
-
+test('every css grid in the rendered transcript pins its column to a zero minimum', async () => {
+  const container = await render(turn())
+  await openAll(container)
+  // Scoped to elements with no `data-slot` of their own: every shared
+  // `@/shared/ui` composition (`Alert`, `Badge`, ...) tags its root with one,
+  // and a shared component's own internal grid (`Alert`'s `has-[>svg]:grid-
+  // cols-[auto_1fr]`, say) is not this track's stylesheet to police — only the
+  // grids `transcript.tsx` itself declares are.
+  const grids = [...container.querySelectorAll('*')].filter(
+    (el) => el.classList.contains('grid') && !el.hasAttribute('data-slot'),
+  )
   // Not a fixed list: the point of scanning is that a grid added later is
-  // covered too. Five today — .transcript, .children, .tool, .result, .answer.
+  // covered too. Six today — the transcript root, `.children`, the tool
+  // block, the result block, the answer block, and every disclosure body.
   expect(grids.length).toBeGreaterThanOrEqual(5)
   const offenders = grids
-    .filter((rule) => !/grid-template-columns:\s*minmax\(\s*0\s*,/.test(rule.body))
-    .map((rule) => rule.selector)
+    .filter((el) => !el.classList.contains('grid-cols-1'))
+    .map((el) => el.className)
   // An implicit column is an `auto` track, whose base size is its widest item's
   // min-content contribution — that is the size that can exceed the viewport
   // and take every sibling row with it, because a stretched item is sized to
@@ -386,36 +364,38 @@ test('every grid in the transcript stylesheet pins its column to a zero minimum'
   expect(offenders).toEqual([])
 })
 
-test("Collapsible's body — every transcript disclosure renders into it — does the same", async () => {
-  const scss = await Bun.file('src/shared/ui/disclosure/collapsible.module.scss').text()
-  const grids = gridsIn(scss)
-  expect(grids.map((rule) => rule.selector)).toEqual(['.body'])
-  expect(grids[0]?.body).toMatch(/grid-template-columns:\s*minmax\(\s*0\s*,/)
-
-  // And the disclosure's own root still refuses to be widened by its title.
-  const root = rules(scss).find((rule) => rule.selector === '.root')
-  expect(root?.body).toMatch(/min-width:\s*0/)
+test('every disclosure root refuses to be widened by its own title', async () => {
+  const container = await render(turn())
+  const roots = [...container.querySelectorAll('[data-slot="collapsible"]')]
+  expect(roots.length).toBeGreaterThan(0)
+  for (const root of roots) expect(root.classList.contains('min-w-0')).toBe(true)
 })
 
-test('the tool name breaks anywhere — the one keyword that changes min-content', async () => {
-  const scss = await Bun.file('src/features/sessions/components/transcript.module.scss').text()
-  const toolName = rules(scss).find((rule) => rule.selector === '.toolName')
-  expect(toolName?.body).toMatch(/overflow-wrap:\s*anywhere/)
-  // Deliberately not `break-word`: it permits the same breaks when painting but
-  // is defined not to affect the intrinsic min-content size, so an MCP tool
-  // name would still contribute its full length to the track and still push the
-  // row wide. Only `anywhere` changes the measurement.
-  expect(toolName?.body).not.toMatch(/overflow-wrap:\s*break-word/)
+test('the tool name wraps anywhere — the one keyword that changes min-content', async () => {
+  // Deliberately `wrap-anywhere` (`overflow-wrap: anywhere`), not
+  // `break-words` (`overflow-wrap: break-word`): the latter permits the same
+  // breaks when painting but is defined not to affect the intrinsic
+  // min-content size, so an MCP tool name (`mcp__server__tool`, a single
+  // unbroken token up to 128 characters) would still contribute its full
+  // length to the grid track and still push the row wide. Only `anywhere`
+  // changes the measurement.
+  const container = await render(turn())
+  await openAll(container)
+  const toolNames = [...container.querySelectorAll('span')].filter((el) =>
+    /^(mcp__|ArrayInput|Bash|ListAgents)/.test(el.textContent ?? ''),
+  )
+  expect(toolNames.length).toBeGreaterThanOrEqual(4)
+  for (const name of toolNames) {
+    expect(name.classList.contains('wrap-anywhere')).toBe(true)
+    expect(name.classList.contains('break-words')).toBe(false)
+  }
 })
 
-test("DefinitionList's description can shrink, in the layout its other three callers use", async () => {
-  const scss = await Bun.file('src/shared/ui/patterns/definition-list.module.scss').text()
-  const description = rules(scss).find((rule) => rule.selector === '.description')
-  expect(description?.body).toMatch(/min-width:\s*0/)
-
-  // The term keeps its fixed inline width, so the shrinking happens on the
-  // side that has something to give.
-  const inline = rules(scss).find((rule) => rule.selector === '.layoutInline')
-  expect(inline?.body).toMatch(/width:\s*8rem/)
-  expect(rules(scss).find((rule) => rule.selector === '.term')?.body).toMatch(/flex-shrink:\s*0/)
-})
+// No replacement for the old "DefinitionList's description can shrink" test
+// in this file: `DefinitionList` is now `@/shared/components/definition-list.tsx`,
+// a shared composition outside a transcript-only track's ownership to fix from
+// here. The regression this note used to describe — the inline layout's grid
+// template had no `minmax(0, ...)` guard, so a long unbroken token in `dd`
+// could push the column wider than the row — is fixed at the source, in that
+// file's own `sm:grid-cols-[max-content_minmax(0,1fr)]` plus `min-w-0
+// wrap-anywhere` on `dd`, not worked around here.

@@ -1,19 +1,19 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
+import { Code, ConfirmDialog, CopyButton } from '@/shared/components'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Button } from '@/shared/ui/button'
+import { Input } from '@/shared/ui/input'
 import {
-  Alert,
-  Button,
-  Card,
-  Code,
-  ConfirmDialog,
-  CopyButton,
-  Inline,
-  Input,
-  Stack,
-} from '@/shared/ui'
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemHeader,
+  ItemTitle,
+} from '@/shared/ui/item'
 import { type SshKey, useDeleteSshKey, useTestSshKey } from '../hooks/use-ssh-keys'
-import styles from './ssh-key-card.module.scss'
 
 export function SshKeyCard({ sshKey }: { sshKey: SshKey }) {
   const { t } = useTranslation()
@@ -34,38 +34,55 @@ export function SshKeyCard({ sshKey }: { sshKey: SshKey }) {
         })
 
   return (
-    <Card as="article">
-      <Stack gap={3}>
-        <Inline justify="between" align="start" gap={3} wrap={false}>
-          {/* `Stack`'s flex column turns these two `<code>` siblings (inline
-              elements) into stacked block-level flex items, so no wrapper div
-              or local class is needed just to put the fingerprint on its own
-              line under the name. */}
-          <Stack gap={1}>
-            <h3 className={styles.name}>{sshKey.name}</h3>
-            <Code wrap>{sshKey.fingerprint}</Code>
-            {sshKey.comment && <Code wrap>{sshKey.comment}</Code>}
-          </Stack>
-          <Button type="button" disabled={remove.isPending} onClick={() => setConfirmDelete(true)}>
+    <Item variant="outline" render={<article />}>
+      <ItemHeader>
+        <ItemContent>
+          <ItemTitle>{sshKey.name}</ItemTitle>
+          {/* Plain text, not a bordered `Code` box: `ItemDescription` is a
+              `line-clamp-2` `<p>`, and a box's border overflows its own line
+              box, so a clipping ancestor cuts the top border off. The
+              fingerprint is also the one thing here with no copy button, so
+              it must stay readable in full rather than clamped or truncated
+              mid-token. */}
+          <ItemDescription className="line-clamp-none wrap-anywhere font-mono">
+            {sshKey.fingerprint}
+          </ItemDescription>
+          {sshKey.comment && (
+            <ItemDescription className="line-clamp-none">{sshKey.comment}</ItemDescription>
+          )}
+        </ItemContent>
+        <ItemActions>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={remove.isPending}
+            onClick={() => setConfirmDelete(true)}
+          >
             {t('common.delete')}
           </Button>
-        </Inline>
+        </ItemActions>
+      </ItemHeader>
 
+      <div className="flex w-full basis-full flex-col gap-3">
         <Code block wrap>
           {sshKey.publicKey}
         </Code>
 
-        <Inline gap={2}>
+        <div className="flex flex-wrap items-center gap-2">
           <CopyButton value={sshKey.publicKey} label={t('sshKeys.copyPublic')} />
-          <div className={styles.hostField}>
-            <Input
-              value={host}
-              onChange={(e) => setHost(e.target.value)}
-              aria-label={t('sshKeys.host')}
-            />
-          </div>
+          {/* A short hostname, not a field that should stretch to match the
+              buttons either side of it in the row. */}
+          <Input
+            className="w-40 flex-none"
+            value={host}
+            onChange={(e) => setHost(e.target.value)}
+            aria-label={t('sshKeys.host')}
+          />
           <Button
             type="button"
+            variant="outline"
+            size="sm"
             disabled={test.isPending}
             onClick={() => {
               setError(null)
@@ -77,16 +94,27 @@ export function SshKeyCard({ sshKey }: { sshKey: SshKey }) {
           >
             {test.isPending ? t('sshKeys.testing') : t('sshKeys.test')}
           </Button>
-        </Inline>
+        </div>
 
         {/* No explicit "never tested" state: a key that has never been tested
             simply shows no result line, the same way an absent comment above
-            renders nothing rather than "No comment". A tri-state message here
-            would need new copy, and the locale files it would live in
-            (src/shared/i18n) are outside the three files this migration owns. */}
-        {result && <Alert tone={result.ok ? 'success' : 'danger'}>{result.message}</Alert>}
-        {error && <Alert tone="danger">{error}</Alert>}
-      </Stack>
+            renders nothing rather than "No comment". */}
+        {result &&
+          (result.ok ? (
+            <Alert role="status">
+              <AlertDescription>{result.message}</AlertDescription>
+            </Alert>
+          ) : (
+            <Alert variant="destructive">
+              <AlertDescription>{result.message}</AlertDescription>
+            </Alert>
+          ))}
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+      </div>
 
       <ConfirmDialog
         open={confirmDelete}
@@ -98,6 +126,6 @@ export function SshKeyCard({ sshKey }: { sshKey: SshKey }) {
           remove.mutate({ path: { id: sshKey.id } }, { onSettled: () => setConfirmDelete(false) })
         }
       />
-    </Card>
+    </Item>
   )
 }

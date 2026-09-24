@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from '@tanstack/react-router'
-import { useAtomValue } from 'jotai'
+import { useAtom, useAtomValue } from 'jotai'
+import type { CSSProperties } from 'react'
 import { useEffect } from 'react'
 import {
   isBareShellPath,
@@ -7,9 +8,9 @@ import {
   projectIdForPath,
   shellModeForPath,
 } from '@/shared/store/tabs'
-import { themeAtom } from '@/shared/store/ui'
-import styles from './layout.module.scss'
-import { ProjectSidebar, SystemSidebar } from './sidebar'
+import { sidebarOpenAtom, themeAtom } from '@/shared/store/ui'
+import { SidebarInset, SidebarProvider, useSidebar } from '@/shared/ui/sidebar'
+import { ShellSidebar } from './sidebar'
 import { StatusBar } from './status-bar'
 import { TabBar } from './tab-bar'
 import { useWorkspaceSync } from './use-tabs'
@@ -20,9 +21,12 @@ export function RootLayout() {
 
   // The one thing both branches below need: applies regardless of whether
   // this render draws the app's own shell or hands the whole viewport to a
-  // bare route.
+  // bare route. `classList`/`colorScheme` are what shadcn's own tokens (and
+  // every native form control) key off.
   useEffect(() => {
-    document.documentElement.dataset.theme = theme
+    const root = document.documentElement
+    root.classList.toggle('dark', theme === 'dark')
+    root.style.colorScheme = theme
   }, [theme])
 
   const { pathname } = useLocation()
@@ -44,11 +48,40 @@ export function RootLayout() {
 }
 
 /**
+ * Base UI's Sheet (the sidebar's phone form) does not close itself on
+ * navigation the way a browser tab does — a tap on a nav link would otherwise
+ * leave the drawer sitting open over the very page it just opened. Renders
+ * nothing: it exists only for the effect, and only needs to live inside
+ * `SidebarProvider` to reach `useSidebar()`.
+ */
+function CloseSidebarOnNavigate() {
+  const { pathname } = useLocation()
+  const { setOpenMobile } = useSidebar()
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pathname is the navigation trigger, not a value read inside this effect
+  useEffect(() => {
+    setOpenMobile(false)
+  }, [pathname, setOpenMobile])
+
+  return null
+}
+
+/**
  * The app's ordinary chrome — tab bar, sidebar, status bar — around whatever
  * page is showing. Its own component, not inlined into `RootLayout`, so the
  * bare launcher route above skips every one of these hooks rather than only
  * their rendered output; `useWorkspaceSync` in particular must never run for
  * that route; see shared/store/tabs.ts's `isBareShellPath`.
+ *
+ * Built on shadcn's `Sidebar variant="inset"` + `SidebarInset` (dashboard-01):
+ * the `SidebarProvider` wrapper and the inset sidebar share one `bg-sidebar`
+ * surface, and `SidebarInset` is the only elevated thing on it — its own
+ * `bg-background`, rounded, with a gap on every side. The tab bar and the
+ * status bar are plain siblings of that row with no background of their own,
+ * so they read as part of the same surface as the sidebar rather than as
+ * separate chrome. See sidebar.tsx's `ShellSidebar` for how the sidebar itself
+ * ends up positioned in the row between the two bars rather than pinned to
+ * the whole viewport.
  */
 function Shell() {
   // Publishes --shell-height from the visual viewport, so the iOS keyboard
@@ -65,22 +98,40 @@ function Shell() {
   const projectId = projectIdForPath(pathname)
   const bleed = isFullBleedPath(pathname)
 
-  // An empty tab has nothing to navigate yet: until it is pointed at a project,
-  // the picker gets the whole width rather than a sidebar of dead links.
-  const withoutSidebar = mode === 'new'
+  // Persisted like the theme — but forced closed for an empty tab, which has
+  // nothing to navigate yet (see `ShellSidebar`): that is a per-render fact
+  // about this mode, not a preference, so it is read past rather than written
+  // back when the provider reports it changed.
+  const [sidebarOpen, setSidebarOpen] = useAtom(sidebarOpenAtom)
 
   return (
-    <div className={`${styles.shell} ${withoutSidebar ? styles.shellBare : ''}`}>
-      <TabBar />
+    <SidebarProvider
+      open={mode !== 'new' && sidebarOpen}
+      onOpenChange={(open) => {
+        if (mode !== 'new') setSidebarOpen(open)
+      }}
+      style={{ '--sidebar-width': 'calc(var(--spacing) * 72)' } as CSSProperties}
+      className="h-[var(--shell-height,100dvh)] min-h-0 flex-col overflow-hidden pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]"
+    >
+      <CloseSidebarOnNavigate />
+      <TabBar mode={mode} />
 
-      {mode === 'project' && projectId && <ProjectSidebar projectId={projectId} />}
-      {mode === 'system' && <SystemSidebar />}
-
-      <main className={`${styles.body} ${bleed ? styles.bodyBleed : ''}`}>
-        <Outlet />
-      </main>
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        <ShellSidebar mode={mode} projectId={projectId} />
+        <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
+          <div
+            className={
+              bleed
+                ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
+                : 'min-h-0 flex-1 overflow-y-auto p-4 lg:p-6'
+            }
+          >
+            <Outlet />
+          </div>
+        </SidebarInset>
+      </div>
 
       <StatusBar />
-    </div>
+    </SidebarProvider>
   )
 }

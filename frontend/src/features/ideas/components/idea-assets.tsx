@@ -1,19 +1,23 @@
+import { CircleAlertIcon, XIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import { formatBytes } from '@/features/system'
+import { ConfirmDialog, Loading, PageHeader } from '@/shared/components'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
 import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  ConfirmDialog,
-  EmptyState,
-  Inline,
-  PageHeader,
-  Spinner,
-  Stack,
-} from '@/shared/ui'
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentTitle,
+  AttachmentTrigger,
+} from '@/shared/ui/attachment'
+import { Button } from '@/shared/ui/button'
+import { Card, CardContent } from '@/shared/ui/card'
+import { Empty, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
+import { Progress } from '@/shared/ui/progress'
 import {
   type IdeaAsset,
   type IdeaAssetUpload,
@@ -22,9 +26,6 @@ import {
   useIdeaAssetUploads,
 } from '../hooks/use-idea-assets'
 import { ideaAssetDownloadUrl } from '../lib/asset-url'
-import styles from './idea-assets.module.scss'
-
-const STATUS_TONE = { ready: 'neutral', missing: 'danger', unreadable: 'danger' } as const
 
 function UploadChip({
   upload,
@@ -36,37 +37,42 @@ function UploadChip({
   onDismiss: (id: string) => void
 }) {
   const { t } = useTranslation()
+  // `Attachment`'s own `state` vocabulary ('idle'/'uploading'/'processing'/
+  // 'error'/'done') is a superset of this upload's three-value status —
+  // 'uploaded' maps to 'done' for the brief instant before the tray clears it
+  // (see `IdeaAssets`'s own effect below).
+  const state =
+    upload.status === 'uploading' ? 'uploading' : upload.status === 'error' ? 'error' : 'done'
+
   return (
-    <li className={styles.chip} data-status={upload.status}>
-      <span className={styles.chipName} title={upload.file.name}>
-        {upload.file.name}
-      </span>
-      <span className={styles.chipSize}>{formatBytes(upload.file.size)}</span>
-      {upload.status === 'uploading' && (
-        <progress className={styles.chipProgress} value={upload.progress} max={100}>
-          {upload.progress}%
-        </progress>
-      )}
-      {upload.status === 'error' && (
-        <span className={styles.chipError}>
-          {upload.precheckFailed
-            ? t('ideas.assets.tooLargeForIdea')
-            : apiErrorMessage(upload.error, t('ideas.assets.uploadFailed'))}
-        </span>
-      )}
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={() => (upload.status === 'uploading' ? onCancel(upload.id) : onDismiss(upload.id))}
-        aria-label={
-          upload.status === 'uploading'
-            ? t('ideas.assets.cancel', { name: upload.file.name })
-            : t('ideas.assets.remove', { name: upload.file.name })
-        }
-      >
-        ✕
-      </Button>
+    <li>
+      <Attachment state={state} className="w-full">
+        <AttachmentContent>
+          <AttachmentTitle>{upload.file.name}</AttachmentTitle>
+          <AttachmentDescription>
+            {upload.status === 'error'
+              ? upload.precheckFailed
+                ? t('ideas.assets.tooLargeForIdea')
+                : apiErrorMessage(upload.error, t('ideas.assets.uploadFailed'))
+              : formatBytes(upload.file.size)}
+          </AttachmentDescription>
+          {upload.status === 'uploading' && <Progress value={upload.progress} className="mt-1.5" />}
+        </AttachmentContent>
+        <AttachmentActions>
+          <AttachmentAction
+            aria-label={
+              upload.status === 'uploading'
+                ? t('ideas.assets.cancel', { name: upload.file.name })
+                : t('ideas.assets.remove', { name: upload.file.name })
+            }
+            onClick={() =>
+              upload.status === 'uploading' ? onCancel(upload.id) : onDismiss(upload.id)
+            }
+          >
+            <XIcon />
+          </AttachmentAction>
+        </AttachmentActions>
+      </Attachment>
     </li>
   )
 }
@@ -75,36 +81,33 @@ function AssetRow({ asset, ideaId }: { asset: IdeaAsset; ideaId: string }) {
   const { t } = useTranslation()
   const remove = useDeleteIdeaAsset(ideaId)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const ready = asset.status === 'ready'
 
   return (
-    <li className={styles.chip} data-status={asset.status}>
-      {asset.status === 'ready' ? (
-        <a
-          className={styles.chipName}
-          href={ideaAssetDownloadUrl(asset.id)}
-          download={asset.originalFilename}
-          title={asset.originalFilename}
-        >
-          {asset.originalFilename}
-        </a>
-      ) : (
-        <span className={styles.chipName} title={asset.originalFilename}>
-          {asset.originalFilename}
-        </span>
-      )}
-      <span className={styles.chipSize}>{formatBytes(asset.sizeBytes)}</span>
-      {asset.status !== 'ready' && (
-        <Badge tone={STATUS_TONE[asset.status]}>{t(`ideas.assets.status.${asset.status}`)}</Badge>
-      )}
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={() => setConfirmDelete(true)}
-        aria-label={t('ideas.assets.remove', { name: asset.originalFilename })}
-      >
-        ✕
-      </Button>
+    <li>
+      <Attachment state={ready ? 'done' : 'error'} className="w-full">
+        {ready && (
+          <AttachmentTrigger
+            render={<a href={ideaAssetDownloadUrl(asset.id)} download={asset.originalFilename} />}
+            aria-label={asset.originalFilename}
+          />
+        )}
+        <AttachmentContent>
+          <AttachmentTitle>{asset.originalFilename}</AttachmentTitle>
+          <AttachmentDescription>
+            {formatBytes(asset.sizeBytes)}
+            {!ready && ` · ${t(`ideas.assets.status.${asset.status}`)}`}
+          </AttachmentDescription>
+        </AttachmentContent>
+        <AttachmentActions>
+          <AttachmentAction
+            aria-label={t('ideas.assets.remove', { name: asset.originalFilename })}
+            onClick={() => setConfirmDelete(true)}
+          >
+            <XIcon />
+          </AttachmentAction>
+        </AttachmentActions>
+      </Attachment>
 
       <ConfirmDialog
         open={confirmDelete}
@@ -146,7 +149,7 @@ export function IdeaAssets({ ideaId }: { ideaId: string }) {
 
   return (
     <Card>
-      <Stack gap={3}>
+      <CardContent className="flex flex-col gap-3">
         <PageHeader
           level={2}
           title={t('ideas.assets.heading')}
@@ -156,7 +159,7 @@ export function IdeaAssets({ ideaId }: { ideaId: string }) {
                 ref={fileInput}
                 type="file"
                 multiple
-                className={styles.fileInput}
+                className="sr-only"
                 aria-hidden="true"
                 tabIndex={-1}
                 onChange={(e) => {
@@ -167,7 +170,7 @@ export function IdeaAssets({ ideaId }: { ideaId: string }) {
               />
               <Button
                 type="button"
-                variant="secondary"
+                variant="outline"
                 size="sm"
                 onClick={() => fileInput.current?.click()}
               >
@@ -178,17 +181,28 @@ export function IdeaAssets({ ideaId }: { ideaId: string }) {
         />
 
         {assets.isError && (
-          <Alert tone="danger">{apiErrorMessage(assets.error, t('ideas.assets.loadFailed'))}</Alert>
+          <Alert variant="destructive">
+            <CircleAlertIcon />
+            <AlertDescription>
+              {apiErrorMessage(assets.error, t('ideas.assets.loadFailed'))}
+            </AlertDescription>
+          </Alert>
         )}
-        {assets.isPending && <Spinner label={t('common.loading')} block />}
+        {assets.isPending && <Loading label={t('common.loading')} block />}
 
         {!assets.isPending &&
           !assets.isError &&
           files.length === 0 &&
-          uploads.uploads.length === 0 && <EmptyState size="sm" title={t('ideas.assets.empty')} />}
+          uploads.uploads.length === 0 && (
+            <Empty>
+              <EmptyHeader>
+                <EmptyTitle>{t('ideas.assets.empty')}</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
+          )}
 
         {(files.length > 0 || uploads.uploads.length > 0) && (
-          <ul className={styles.list}>
+          <ul className="m-0 flex list-none flex-col gap-2 p-0">
             {uploads.uploads.map((upload) => (
               <UploadChip
                 key={upload.id}
@@ -204,18 +218,16 @@ export function IdeaAssets({ ideaId }: { ideaId: string }) {
         )}
 
         {usage && (
-          <Inline gap={2}>
-            <span className={styles.usage}>
-              {t('ideas.assets.usage', {
-                count: usage.fileCount,
-                maxFiles: usage.maxFiles,
-                used: formatBytes(usage.sizeBytes),
-                max: formatBytes(usage.maxIdeaBytes),
-              })}
-            </span>
-          </Inline>
+          <span className="text-xs text-muted-foreground">
+            {t('ideas.assets.usage', {
+              count: usage.fileCount,
+              maxFiles: usage.maxFiles,
+              used: formatBytes(usage.sizeBytes),
+              max: formatBytes(usage.maxIdeaBytes),
+            })}
+          </span>
         )}
-      </Stack>
+      </CardContent>
     </Card>
   )
 }

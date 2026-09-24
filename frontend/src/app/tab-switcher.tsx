@@ -1,7 +1,16 @@
+import { ChevronsUpDownIcon, PlusIcon, SettingsIcon, XIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { Menu, type MenuAction } from '@/shared/ui'
+import { Button } from '@/shared/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/shared/ui/dropdown-menu'
 import { useTabLabel } from './tab-bar'
-import styles from './tab-switcher.module.scss'
 import { useTabs } from './use-tabs'
 
 /**
@@ -14,44 +23,49 @@ import { useTabs } from './use-tabs'
  * bookkeeping duplicated between the two.
  *
  * Closing is offered for the tab you are already on, not one per row: a close
- * button per item would need its own `<button>` inside a `menuitem`, the
- * exact nested-button problem tab-bar.tsx's docblock already ruled out for
- * the row itself.
+ * item per row would need its own click target inside a `MenuRadioItem` that
+ * already claims the whole row for selecting that tab — the same nested-target
+ * problem tab-bar.tsx's docblock rules out for the row's own buttons.
  */
 export function TabSwitcher() {
   const { t } = useTranslation()
   const { tabs, activeId, active, addTab, selectTab, closeTab } = useTabs()
   const labelFor = useTabLabel()
 
-  const items: MenuAction[] = [
-    ...tabs.map((tab) => ({
-      id: tab.id,
-      label: labelFor(tab),
-      onSelect: () => selectTab(tab.id),
-      current: tab.id === activeId,
-    })),
-    { id: '__add', label: t('tabs.add'), onSelect: addTab },
-    ...(active && active.kind !== 'system'
-      ? [
-          {
-            id: '__close',
-            label: t('tabs.close', { name: labelFor(active) }),
-            onSelect: () => closeTab(active.id),
-            destructive: true,
-          },
-        ]
-      : []),
-  ]
-
   const triggerLabel = active ? labelFor(active) : t('tabs.system')
 
   return (
-    <div className={styles.root}>
-      <Menu
-        trigger={<span className={styles.triggerLabel}>{triggerLabel}</span>}
-        items={items}
-        triggerVariant="field"
-      />
-    </div>
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={<Button variant="outline" className="min-w-0 flex-1 justify-between gap-1.5" />}
+      >
+        <span className="min-w-0 truncate">{triggerLabel}</span>
+        <ChevronsUpDownIcon className="shrink-0 text-muted-foreground" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuRadioGroup
+          value={activeId}
+          onValueChange={(value) => selectTab(value as string)}
+        >
+          {tabs.map((tab) => (
+            <DropdownMenuRadioItem key={tab.id} value={tab.id} closeOnClick>
+              {tab.kind === 'system' && <SettingsIcon />}
+              <span className="truncate">{labelFor(tab)}</span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={addTab}>
+          <PlusIcon />
+          {t('tabs.add')}
+        </DropdownMenuItem>
+        {active && active.kind !== 'system' && (
+          <DropdownMenuItem variant="destructive" onClick={() => closeTab(active.id)}>
+            <XIcon />
+            {t('tabs.close', { name: labelFor(active) })}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

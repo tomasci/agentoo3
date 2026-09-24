@@ -1,11 +1,25 @@
+import { PaperclipIcon, TriangleAlertIcon, XIcon } from 'lucide-react'
 import type { DragEvent, KeyboardEvent } from 'react'
 import { useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import { formatBytes } from '@/features/system'
-import { Alert, Button, Spinner, Stack, Textarea } from '@/shared/ui'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle,
+} from '@/shared/ui/attachment'
+import { Button } from '@/shared/ui/button'
+import { Progress } from '@/shared/ui/progress'
+import { Spinner } from '@/shared/ui/spinner'
+import { Textarea } from '@/shared/ui/textarea'
 import type { AttachmentUpload, SessionFilesUsage } from '../hooks/use-session-files'
-import styles from './composer.module.scss'
 
 export interface ComposerAttachments {
   uploads: AttachmentUpload[]
@@ -31,41 +45,38 @@ function AttachmentChip({
   onRemove: (upload: AttachmentUpload) => void
 }) {
   const { t } = useTranslation()
+  const state =
+    upload.status === 'uploading' ? 'uploading' : upload.status === 'error' ? 'error' : 'done'
 
   return (
-    <li className={styles.chip} data-status={upload.status}>
-      <span className={styles.chipName} title={upload.file.name}>
-        {upload.file.name}
-      </span>
-      <span className={styles.chipSize}>{formatBytes(upload.file.size)}</span>
-
-      {upload.status === 'uploading' && (
-        <progress className={styles.chipProgress} value={upload.progress} max={100}>
-          {upload.progress}%
-        </progress>
-      )}
-
-      {upload.status === 'error' && (
-        <span className={styles.chipError}>
-          {upload.precheckFailed
-            ? t('sessions.attachments.tooLargeForSession')
-            : apiErrorMessage(upload.error, t('sessions.attachments.uploadFailed'))}
-        </span>
-      )}
-
-      <button
-        type="button"
-        className={styles.chipRemove}
-        onClick={() => (upload.status === 'uploading' ? onCancel(upload.id) : onRemove(upload))}
-        aria-label={
-          upload.status === 'uploading'
-            ? t('sessions.attachments.cancel', { name: upload.file.name })
-            : t('sessions.attachments.remove', { name: upload.file.name })
-        }
-      >
-        ✕
-      </button>
-    </li>
+    <Attachment state={state} size="sm">
+      <AttachmentMedia>
+        <PaperclipIcon aria-hidden="true" />
+      </AttachmentMedia>
+      <AttachmentContent>
+        <AttachmentTitle title={upload.file.name}>{upload.file.name}</AttachmentTitle>
+        <AttachmentDescription>
+          {upload.status === 'error'
+            ? upload.precheckFailed
+              ? t('sessions.attachments.tooLargeForSession')
+              : apiErrorMessage(upload.error, t('sessions.attachments.uploadFailed'))
+            : formatBytes(upload.file.size)}
+        </AttachmentDescription>
+        {upload.status === 'uploading' && <Progress value={upload.progress} className="mt-1" />}
+      </AttachmentContent>
+      <AttachmentActions>
+        <AttachmentAction
+          aria-label={
+            upload.status === 'uploading'
+              ? t('sessions.attachments.cancel', { name: upload.file.name })
+              : t('sessions.attachments.remove', { name: upload.file.name })
+          }
+          onClick={() => (upload.status === 'uploading' ? onCancel(upload.id) : onRemove(upload))}
+        >
+          <XIcon />
+        </AttachmentAction>
+      </AttachmentActions>
+    </Attachment>
   )
 }
 
@@ -114,107 +125,112 @@ export function Composer({
   }
 
   return (
-    <footer className={styles.composer}>
-      <Stack gap={2}>
-        {queueLine && <span className={styles.queueStatus}>{queueLine}</span>}
+    <footer className="flex flex-col gap-2 border-t pt-2">
+      {queueLine && <span className="text-xs text-muted-foreground">{queueLine}</span>}
 
-        {uploads.length > 0 && (
-          <ul className={styles.chips}>
-            {uploads.map((upload) => (
-              <AttachmentChip
-                key={upload.id}
-                upload={upload}
-                onCancel={onCancel}
-                onRemove={onRemove}
-              />
-            ))}
-          </ul>
-        )}
-
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: a drop target,
-            not a control — the file input and its own button above are the
-            operable, keyboard-reachable way to attach a file; dropping onto
-            this row is a mouse-only convenience layered on top, same as every
-            other drag-and-drop surface. */}
-        <div className={styles.composerRow} onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            className={styles.fileInput}
-            aria-hidden="true"
-            tabIndex={-1}
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? [])
-              e.target.value = ''
-              if (files.length > 0) onAttach(files, usage)
-            }}
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            aria-label={t('sessions.attachments.attach')}
-            onClick={() => fileInput.current?.click()}
-          >
-            📎
-          </Button>
-          <div className={styles.textareaWrap}>
-            <Textarea
-              value={value}
-              autoresize
-              rows={2}
-              maxRows={8}
-              resize="none"
-              onChange={(e) => onChange(e.target.value)}
-              onKeyDown={onKeyDown}
-              onPaste={(e) => {
-                const files = Array.from(e.clipboardData.files)
-                if (files.length > 0) {
-                  // A pasted screenshot carries no text representation at
-                  // all, so there is no typed content here to preserve —
-                  // this only ever pre-empts the no-op paste the browser
-                  // would otherwise do.
-                  e.preventDefault()
-                  onAttach(files, usage)
-                }
-              }}
-              placeholder={t('sessions.composerPlaceholder')}
+      {uploads.length > 0 && (
+        <AttachmentGroup>
+          {uploads.map((upload) => (
+            <AttachmentChip
+              key={upload.id}
+              upload={upload}
+              onCancel={onCancel}
+              onRemove={onRemove}
             />
-          </div>
-          <Button type="button" onClick={onSubmit} disabled={!canSend}>
-            {sending ? t('sessions.sending') : t('sessions.send')}
-          </Button>
-        </div>
+          ))}
+        </AttachmentGroup>
+      )}
 
-        {pendingCount > 0 && (
-          <span className={styles.queueStatus}>
-            {t('sessions.attachments.blockingSend', { count: pendingCount })}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: a drop target,
+          not a control — the file input and its own button above are the
+          operable, keyboard-reachable way to attach a file; dropping onto
+          this row is a mouse-only convenience layered on top, same as every
+          other drag-and-drop surface. */}
+      <div className="flex items-end gap-2" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          className="hidden"
+          aria-hidden="true"
+          tabIndex={-1}
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? [])
+            e.target.value = ''
+            if (files.length > 0) onAttach(files, usage)
+          }}
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={t('sessions.attachments.attach')}
+          onClick={() => fileInput.current?.click()}
+        >
+          <PaperclipIcon />
+        </Button>
+        <div className="min-w-0 flex-1">
+          <Textarea
+            value={value}
+            rows={2}
+            className="max-h-48 resize-none"
+            onChange={(e) => onChange(e.target.value)}
+            onKeyDown={onKeyDown}
+            onPaste={(e) => {
+              const files = Array.from(e.clipboardData.files)
+              if (files.length > 0) {
+                // A pasted screenshot carries no text representation at
+                // all, so there is no typed content here to preserve —
+                // this only ever pre-empts the no-op paste the browser
+                // would otherwise do.
+                e.preventDefault()
+                onAttach(files, usage)
+              }
+            }}
+            placeholder={t('sessions.composerPlaceholder')}
+          />
+        </div>
+        <Button type="button" onClick={onSubmit} disabled={!canSend}>
+          {sending ? t('sessions.sending') : t('sessions.send')}
+        </Button>
+      </div>
+
+      {pendingCount > 0 && (
+        <span className="text-xs text-muted-foreground">
+          {t('sessions.attachments.blockingSend', { count: pendingCount })}
+        </span>
+      )}
+
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        {usagePending && <Spinner aria-hidden="true" />}
+        {Boolean(usageError) && (
+          <span className="text-destructive">
+            {apiErrorMessage(usageError, t('sessions.attachments.usageLoadFailed'))}
           </span>
         )}
+        {usage && (
+          <span className="tabular-nums">
+            {t('sessions.attachments.usage', {
+              count: usage.fileCount,
+              maxFiles: usage.maxFiles,
+              used: formatBytes(usage.sizeBytes),
+              max: formatBytes(usage.maxSessionBytes),
+            })}
+          </span>
+        )}
+      </div>
 
-        <div className={styles.usage}>
-          {usagePending && <Spinner size="sm" label={t('common.loading')} />}
-          {Boolean(usageError) && (
-            <span className={styles.usageError}>
-              {apiErrorMessage(usageError, t('sessions.attachments.usageLoadFailed'))}
-            </span>
-          )}
-          {usage && (
-            <span className={styles.usageText}>
-              {t('sessions.attachments.usage', {
-                count: usage.fileCount,
-                maxFiles: usage.maxFiles,
-                used: formatBytes(usage.sizeBytes),
-                max: formatBytes(usage.maxSessionBytes),
-              })}
-            </span>
-          )}
-        </div>
-
-        {orchestratorMissing && <Alert tone="warning">{t('sessions.needsOrchestrator')}</Alert>}
-        {error && <Alert tone="danger">{error}</Alert>}
-      </Stack>
+      {orchestratorMissing && (
+        <Alert role="status">
+          <TriangleAlertIcon />
+          <AlertDescription>{t('sessions.needsOrchestrator')}</AlertDescription>
+        </Alert>
+      )}
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
     </footer>
   )
 }

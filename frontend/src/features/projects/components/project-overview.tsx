@@ -4,22 +4,20 @@ import { useTranslation } from 'react-i18next'
 import { useDockerDetection } from '@/features/docker'
 import { useSshKeys } from '@/features/ssh-keys'
 import {
-  Alert,
-  Button,
-  Card,
   Code,
   ConfirmDialog,
   type DefinitionItem,
   DefinitionList,
-  Inline,
-  Input,
+  Loading,
   PageHeader,
-  Select,
-  type SelectOption,
-  Spinner,
-  Stack,
   toast,
-} from '@/shared/ui'
+} from '@/shared/components'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Button } from '@/shared/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
+import { Input } from '@/shared/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { Spinner } from '@/shared/ui/spinner'
 import {
   type Project,
   useDeleteProject,
@@ -28,7 +26,6 @@ import {
 } from '../hooks/use-projects'
 import { apiErrorMessage } from '../lib/api-error'
 import { isSshRemote } from '../lib/remote-url'
-import styles from './project-overview.module.scss'
 import { ProjectStatusBadge } from './project-status'
 import { RecoveryPanel } from './recovery-panel'
 
@@ -82,7 +79,7 @@ export function ProjectOverview({
     update.mutate(
       { path: { id: project.id }, body: { sshKeyId: next || null } },
       {
-        onSuccess: () => toast({ title: t('projects.keySaved') }),
+        onSuccess: () => toast.add({ title: t('projects.keySaved'), type: 'success' }),
         onError: (error) => setKeyError(apiErrorMessage(error, t('projects.keyChangeFailed'))),
       },
     )
@@ -96,14 +93,14 @@ export function ProjectOverview({
       // server to set the branch to the empty string, not unset it.
       { path: { id: project.id }, body: { defaultBranch: trimmed || null } },
       {
-        onSuccess: () => toast({ title: t('projects.branchSaved') }),
+        onSuccess: () => toast.add({ title: t('projects.branchSaved'), type: 'success' }),
         onError: (error) =>
           setBranchError(apiErrorMessage(error, t('projects.branchChangeFailed'))),
       },
     )
   }
 
-  const keyOptions: SelectOption[] = [
+  const keyOptions = [
     { value: '', label: t('projects.form.sshKeyNone') },
     ...(sshKeys ?? []).map((k) => ({
       value: k.id,
@@ -131,7 +128,7 @@ export function ProjectOverview({
       id: 'docker',
       term: t('projects.overview.docker.fact'),
       description: (
-        <Inline gap={2} align="center">
+        <div className="flex items-center gap-2">
           <span>
             {dockerDetected?.hasCompose || dockerDetected?.hasDockerfile
               ? t('projects.overview.docker.detected')
@@ -140,7 +137,7 @@ export function ProjectOverview({
           <Link to="/projects/$projectId/docker" params={{ projectId: project.id }}>
             {t('projects.overview.docker.openDocker')}
           </Link>
-        </Inline>
+        </div>
       ),
     },
     {
@@ -149,10 +146,10 @@ export function ProjectOverview({
       // No default is exactly the project whose owner needs this control, so
       // it stays in the list — never omitted — when the value is null.
       description: (
-        <Stack gap={2} align="start">
-          <Inline gap={2}>
+        <div className="flex flex-col items-start gap-2">
+          <div className="flex items-center gap-2">
             <Input
-              mono
+              className="font-mono"
               aria-label={t('projects.meta.branch')}
               value={branchInput}
               onChange={(e) => {
@@ -164,88 +161,123 @@ export function ProjectOverview({
             <Button
               type="button"
               size="sm"
-              loading={updateBranch.isPending}
-              loadingLabel={t('common.working')}
+              disabled={updateBranch.isPending}
               onClick={saveDefaultBranch}
             >
+              {updateBranch.isPending && <Spinner data-icon="inline-start" />}
               {t('common.save')}
             </Button>
-          </Inline>
+          </div>
           {branchError ? (
-            <Alert tone="danger">{branchError}</Alert>
+            <Alert variant="destructive">
+              <AlertDescription>{branchError}</AlertDescription>
+            </Alert>
           ) : (
-            <p className={styles.hint}>{t('projects.branchHint')}</p>
+            <p className="text-xs text-muted-foreground">{t('projects.branchHint')}</p>
           )}
-        </Stack>
+        </div>
       ),
     },
   ]
 
   return (
-    <Stack gap={5}>
+    <div className="flex flex-col gap-5">
       <PageHeader title={project.name} actions={<ProjectStatusBadge project={project} />} />
 
       <Card>
-        <Stack gap={3}>
-          <h3 className={styles.cardTitle}>{t('projects.overview.details')}</h3>
+        <CardHeader>
+          <CardTitle>{t('projects.overview.details')}</CardTitle>
+        </CardHeader>
+        <CardContent>
           <DefinitionList items={facts} />
-        </Stack>
+        </CardContent>
       </Card>
 
       {project.source === 'clone' && isSshRemote(project.remoteUrl) && (
         <Card>
-          <Stack gap={3}>
-            <h3 className={styles.cardTitle}>{t('projects.overview.authentication')}</h3>
-            <Inline gap={3}>
+          <CardHeader>
+            <CardTitle>{t('projects.overview.authentication')}</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex items-center gap-3">
               <Select
-                options={keyOptions}
+                items={keyOptions}
                 value={keyId}
                 onValueChange={(next) => changeKey(next ?? '')}
                 disabled={update.isPending}
-              />
-              {update.isPending && <Spinner label={t('projects.savingKey')} size="sm" />}
-            </Inline>
-            {keyError && <Alert tone="danger">{keyError}</Alert>}
-            <p className={styles.hint}>{t('projects.keyRetryHint')}</p>
-          </Stack>
+              >
+                {/* Key names (plus an optional free-text comment) can run
+                    long — a bounded, shrinkable width keeps this from
+                    crowding the spinner beside it, with an ellipsis for
+                    whatever still overflows. */}
+                <SelectTrigger aria-label={t('projects.form.sshKey')} className="min-w-0 max-w-56">
+                  <SelectValue className="min-w-0 truncate" />
+                </SelectTrigger>
+                <SelectContent>
+                  {keyOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      <span className="min-w-0 flex-1 truncate" title={option.label}>
+                        {option.label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {update.isPending && <Loading label={t('projects.savingKey')} />}
+            </div>
+            {keyError && (
+              <Alert variant="destructive">
+                <AlertDescription>{keyError}</AlertDescription>
+              </Alert>
+            )}
+            <p className="text-xs text-muted-foreground">{t('projects.keyRetryHint')}</p>
+          </CardContent>
         </Card>
       )}
 
       <Card>
-        <Stack gap={3}>
-          <h3 className={styles.cardTitle}>{t('projects.overview.setup')}</h3>
-          <Inline gap={2}>
+        <CardHeader>
+          <CardTitle>{t('projects.overview.setup')}</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
-              loading={retry.isPending}
-              loadingLabel={t('projects.recovery.checking')}
+              disabled={retry.isPending}
               onClick={() => retry.mutate({ path: { id: project.id } })}
             >
+              {retry.isPending && <Spinner data-icon="inline-start" />}
               {t('projects.retry')}
             </Button>
-            <span className={styles.hint}>{t('projects.overview.retryHint')}</span>
-          </Inline>
+            <span className="text-xs text-muted-foreground">
+              {t('projects.overview.retryHint')}
+            </span>
+          </div>
           {project.status === 'failed' && project.lastError && (
-            <Alert tone="danger">{project.lastError}</Alert>
+            <Alert variant="destructive">
+              <AlertDescription>{project.lastError}</AlertDescription>
+            </Alert>
           )}
           {project.status === 'needs_manual' && <RecoveryPanel project={project} />}
-        </Stack>
+        </CardContent>
       </Card>
 
-      <Card tone="danger">
-        <Stack gap={2}>
-          <h3 className={styles.dangerTitle}>{t('projects.overview.danger')}</h3>
-          <p className={styles.hint}>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('projects.overview.danger')}</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground">
             {project.source === 'clone'
               ? t('projects.overview.deleteCloneHint')
               : t('projects.overview.deleteExistingHint')}
           </p>
-          <Inline gap={2}>
-            <Button type="button" onClick={() => setConfirmDelete(true)}>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="destructive" onClick={() => setConfirmDelete(true)}>
               {t('projects.overview.deleteProject')}
             </Button>
-          </Inline>
-        </Stack>
+          </div>
+        </CardContent>
       </Card>
 
       <ConfirmDialog
@@ -268,6 +300,6 @@ export function ProjectOverview({
           )
         }
       />
-    </Stack>
+    </div>
   )
 }

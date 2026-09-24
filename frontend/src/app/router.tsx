@@ -6,7 +6,8 @@ import { SshKeysPage } from '@/features/ssh-keys'
 import { StoragePage } from '@/features/storage'
 import { PromptEditorPage } from '@/features/system'
 import { SYSTEM_HOME } from '@/shared/store/tabs'
-import { Button, EmptyState } from '@/shared/ui'
+import { buttonVariants } from '@/shared/ui/button'
+import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
 import { ProjectLayout } from './project-layout'
 import {
   IdeaDetailRoute,
@@ -242,14 +243,16 @@ export const routeTree = rootRoute.addChildren([
 function NotFound() {
   const { t } = useTranslation()
   return (
-    <EmptyState
-      title={t('notFound.message')}
-      action={
-        <Button asChild variant="secondary">
-          <Link to={SYSTEM_HOME}>{t('notFound.back')}</Link>
-        </Button>
-      }
-    />
+    <Empty>
+      <EmptyHeader>
+        <EmptyTitle>{t('notFound.message')}</EmptyTitle>
+      </EmptyHeader>
+      <EmptyContent>
+        <Link to={SYSTEM_HOME} className={buttonVariants({ variant: 'secondary' })}>
+          {t('notFound.back')}
+        </Link>
+      </EmptyContent>
+    </Empty>
   )
 }
 

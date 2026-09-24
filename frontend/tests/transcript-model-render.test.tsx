@@ -5,49 +5,27 @@
 // happily record either of those as the expected output, so everything below
 // counts elements and compares exact text instead.
 //
-// Two environment facts shape the selectors. `bun test` resolves a
-// `.module.scss` import to its file path, so `className={styles.model}`
-// renders as no class at all (see the note in tests/transcript-row.test.tsx)
-// — the label has to be found by something other than its class. And `bun
-// test` shares one module registry across the whole run, so whether
-// `@/shared/i18n` has been initialised by the time this file renders depends
-// on which other file got there first: without the import below, `t()`
-// returned raw keys when this file ran alone and real English when it ran
-// after tests/ui-core.test.tsx, and eight assertions here flipped with the
-// file order. Importing it (idempotent — i18next initialises once, module
-// cached) is what tests/docker-page.test.tsx and tests/ui-core.test.tsx
-// already do, and for the same reason.
+// The model label carries no class of its own to select on — found instead
+// by its `title` attribute, which is also how the translated string it
+// carries gets asserted below. And `bun test` shares one module registry
+// across the whole run, so whether `@/shared/i18n` has been initialised by
+// the time this file renders depends on which other file got there first:
+// without the import below, `t()` returned raw keys when this file ran alone
+// and real English when it ran after another file that imports it first, and
+// eight assertions here flipped with the file order. Importing it
+// (idempotent — i18next initialises once, module cached) is what
+// tests/docker-page.test.tsx also does, and for the same reason.
 
-import { plugin } from 'bun'
 import { expect, test } from 'bun:test'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { i18n } from '@/shared/i18n'
+import { Transcript } from '../src/features/sessions/components/transcript'
 
 // The language detector reads `navigator.language`, which is the host's, not
 // this suite's business. Pinned so the strings asserted below are the ones in
 // en.json whatever the box is set to.
 await i18n.changeLanguage('en')
-
-// Same identity-proxy loader, same allowlist, as tests/ui-core.test.tsx and
-// the other transcript DOM tests — see the long note in
-// tests/transcript-time.test.tsx for why every one of them has to register it.
-// Copied verbatim, not widened.
-const UI_CORE_STYLES =
-  /src\/shared\/ui\/(core\/(badge|status-dot|code|layout)|patterns\/(card|page-header|empty-state|alert|definition-list|data-table))\.module\.scss$/
-
-plugin({
-  name: 'transcript-model-test-css-module-identity',
-  setup(build) {
-    build.onLoad({ filter: UI_CORE_STYLES }, () => ({
-      contents:
-        'export default new Proxy({}, { get: (_t, p) => (typeof p === "string" ? p : undefined) })',
-      loader: 'js',
-    }))
-  },
-})
-
-const { Transcript } = await import('../src/features/sessions/components/transcript')
 
 type M = Parameters<typeof Transcript>[0]['messages'][number]
 
@@ -94,7 +72,7 @@ async function render(messages: M[]) {
 }
 
 const triggers = (el: Element) =>
-  [...el.querySelectorAll('button[data-part="trigger"]')] as HTMLElement[]
+  [...el.querySelectorAll('button[data-slot="collapsible-trigger"]')] as HTMLElement[]
 
 /** Open every disclosure, including ones that only appear once a parent opens. */
 async function openAll(container: Element) {

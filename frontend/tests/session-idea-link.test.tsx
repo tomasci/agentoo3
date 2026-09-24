@@ -14,10 +14,11 @@
 // generated clients mocked per-file through ./mock-module, and the
 // project-shell queries seeded so nothing reaches for a backend.
 //
-// CSS-module class names are `undefined` under `bun test`, so everything is
-// selected by text, `href` or structure. Assertions are written to fail with
-// primitives (counts, strings) and never with a DOM node: bun pretty-printing
-// a happy-dom element on failure takes minutes.
+// Everything is selected by text, `href` or structure — never a generated
+// class name, since Tailwind utility classes are an implementation detail a
+// later restyle can change without changing behaviour. Assertions are
+// written to fail with primitives (counts, strings) and never with a DOM
+// node: bun pretty-printing a happy-dom element on failure takes minutes.
 
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -105,7 +106,7 @@ await mockModule(EDITOR_STOP_CLIENT, () => ({
   },
 }))
 
-const { Toaster, toaster } = await import('../src/shared/ui/overlay/toast')
+const { Toaster, toast } = await import('../src/shared/ui/toast')
 
 /** happy-dom ships no EventSource, and the transcript stream is not what this
  *  file is about — see tests/use-session-stream-hook.test.tsx for the stream
@@ -194,9 +195,10 @@ afterEach(async () => {
   })
   container.remove()
   client.clear()
-  // The toaster is a module-level singleton (toast.tsx) — clear it so a
-  // toast this test raised is not still alive for the next test's mount().
-  toaster.remove()
+  // The toast manager is a module-level singleton (ui/toast.tsx) — close
+  // every toast so one this test raised is not still alive for the next
+  // test's mount().
+  toast.close()
 })
 
 /** Anchors by their visible text — a `<Link>`'s props are not what a click
@@ -215,12 +217,17 @@ const ideaHrefs = () =>
 /** Scoped to `SessionPage`'s own `<header>`, not the whole container: the
  *  project sidebar's own nav also has a "Docker" link
  *  (`nav.docker`, sidebar.tsx), to the *project*-scope dashboard rather than
- *  this session's — `linkByText` alone would count both. */
-const headerLinkByText = (text: string) => {
-  const header = container.querySelector('header')
+ *  this session's — `linkByText` alone would count both. The shell's own tab
+ *  bar (`app/tab-bar.tsx`) renders its own `<header>` too, ahead of the page
+ *  in document order, so this takes the *last* one rather than the first. */
+const sessionHeader = () => {
+  const headers = [...container.querySelectorAll('header')]
+  const header = headers.at(-1)
   if (!header) throw new Error('no session header rendered')
-  return [...header.querySelectorAll('a')].filter((a) => a.textContent?.trim() === text)
+  return header
 }
+const headerLinkByText = (text: string) =>
+  [...sessionHeader().querySelectorAll('a')].filter((a) => a.textContent?.trim() === text)
 
 test('a session handed off from an idea links back to it', async () => {
   currentSession = session({ ideaId: 'idea-7' })
@@ -312,45 +319,42 @@ test('a shared-checkout session offers neither the Docker nor the Editor link', 
 /** The header's own overflow trigger — there is exactly one `ActionsMenu` on
  *  this page. */
 const actionsMenuTrigger = () => {
-  const header = container.querySelector('header')
-  if (!header) throw new Error('no session header rendered')
-  const trigger = header.querySelector('button[aria-haspopup="menu"]')
+  const trigger = sessionHeader().querySelector('button[aria-haspopup="menu"]')
   if (!trigger) throw new Error('no actions menu trigger in the header')
   return trigger as HTMLElement
 }
 
-/** Opens the header's menu and returns the labels of whatever it offers. */
+/** Opens the header's menu and returns the labels of whatever it offers.
+ *
+ * A closed Base UI menu unmounts entirely rather than staying in the tree
+ * under a `data-state="closed"` qualifier the way the old Ark/Zag menu did —
+ * so an open menu's items are found by presence of `[role="menu"]` alone. */
 async function openActionsMenu(): Promise<string[]> {
   await act(async () => {
     actionsMenuTrigger().click()
   })
-  return [
-    ...document.body.querySelectorAll('[role="menu"][data-state="open"] [role="menuitem"]'),
-  ].map((el) => el.textContent ?? '')
+  return [...document.body.querySelectorAll('[role="menu"] [role="menuitem"]')].map(
+    (el) => el.textContent ?? '',
+  )
 }
 
 /**
  * Opens the header's menu and selects the item whose label is `label`.
  *
- * Two events, each its own `act`, matching tests/storage-page.test.tsx's own
- * `selectRowMenuItem`: Zag's menu machine sets `highlightedValue` off
- * `ITEM_POINTERDOWN` and reads it back synchronously handling `ITEM_CLICK` —
- * a `pointerdown` and a `click` dispatched inside the same `act` land before
- * that transition has applied, and the click fires against a
- * `highlightedValue` that is still unset.
+ * A plain `.click()`, unlike the old Ark/Zag menu's own pointerdown-then-click
+ * dance (see tests/storage-page.test.tsx's `selectRowMenuItem` for that one):
+ * Base UI's menu item handles a bare click directly, with no intermediate
+ * `highlightedValue` state a same-`act` pointerdown would need to land first.
  */
 async function selectActionsMenuItem(label: string) {
   await openActionsMenu()
   const items = [
-    ...document.body.querySelectorAll('[role="menu"][data-state="open"] [role="menuitem"]'),
+    ...document.body.querySelectorAll('[role="menu"] [role="menuitem"]'),
   ] as HTMLElement[]
   const item = items.find((el) => el.textContent === label)
   if (!item) {
     throw new Error(`no open menu item "${label}" among ${items.map((i) => i.textContent).join(', ')}`)
   }
-  await act(async () => {
-    item.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }))
-  })
   await act(async () => {
     item.click()
   })

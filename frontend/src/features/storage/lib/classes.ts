@@ -1,4 +1,4 @@
-import type { Tone } from '@/shared/ui'
+import type { Tone } from '@/shared/components'
 import type { AnomalyClass } from '../hooks/use-storage'
 
 /**

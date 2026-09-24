@@ -3,10 +3,10 @@ import type { NodeProps } from '@xyflow/react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { getApiIdeasIdBlocksQueryKey } from '@/shared/api/generated/hooks/useGetApiIdeasIdBlocks'
-import { ActionsMenu, ConfirmDialog, type MenuAction } from '@/shared/ui'
+import { ActionsMenu, ConfirmDialog, type MenuAction } from '@/shared/components'
+import { Card, CardAction, CardHeader, CardTitle } from '@/shared/ui/card'
 import { useDeleteIdeaGroup } from '../hooks/use-idea-canvas'
 import { useIdeaCanvasActions } from './actions-context'
-import styles from './nodes.module.scss'
 import type { IdeaGroupNode } from './to-nodes'
 
 /**
@@ -15,7 +15,9 @@ import type { IdeaGroupNode } from './to-nodes'
  * nothing here renders its own members: React Flow already renders every
  * block node with this group as `parentId` on top of it, in document order
  * (`to-nodes.ts`'s `buildIdeaCanvasNodes` places every group node before any
- * block), so this component owns only the frame and the title bar.
+ * block), so this component owns only the frame and the title bar. Fixed at
+ * `DEFAULT_GROUP_WIDTH`/`DEFAULT_GROUP_HEIGHT` (`to-nodes.ts`) since no
+ * resize control exists in this track.
  */
 export function GroupNode({ data }: NodeProps<IdeaGroupNode>) {
   const { group } = data
@@ -36,13 +38,27 @@ export function GroupNode({ data }: NodeProps<IdeaGroupNode>) {
   ]
 
   return (
-    <div className={styles.groupRoot}>
-      <div className={styles.groupHeader}>
-        <span className={styles.groupTitle}>{group.title}</span>
-        <div className="nodrag">
-          <ActionsMenu label={t('ideas.actionsFor', { title: group.title })} actions={actions} />
-        </div>
-      </div>
+    <>
+      <Card size="sm" className="h-64 w-104 border-2 border-dashed bg-muted/40">
+        {/* `CardHeader` + `CardAction` (the same pairing `block-node.tsx`'s own
+            header and `session-card.tsx` use) rather than a manual flex
+            override: only a `CardAction` child switches `CardHeader`'s grid
+            into the two-column, title-beside-actions layout
+            (`ui/card.tsx`'s `has-data-[slot=card-action]`). */}
+        <CardHeader>
+          <CardTitle className="min-w-0 truncate" title={group.title}>
+            {group.title}
+          </CardTitle>
+          <CardAction>
+            <div className="nodrag">
+              <ActionsMenu
+                label={t('ideas.actionsFor', { title: group.title })}
+                actions={actions}
+              />
+            </div>
+          </CardAction>
+        </CardHeader>
+      </Card>
 
       <ConfirmDialog
         open={confirmDelete}
@@ -66,6 +82,6 @@ export function GroupNode({ data }: NodeProps<IdeaGroupNode>) {
           )
         }
       />
-    </div>
+    </>
   )
 }

@@ -26,31 +26,11 @@
 // raw key or the real, interpolated copy for every file that runs after it
 // — including this one, regardless of run order. Importing it here too
 // (idempotent — i18next initialises once, module-cached) makes the outcome
-// the same either way, the same reasoning tests/ui-core.test.tsx's own
-// comment gives for doing it there.
+// the same either way.
 //
-// CSS-module class names are `undefined` under `bun test` (see
-// session-idea-link.test.tsx's own note), so every assertion below is by
-// text, `href`, `value` or DOM structure — never a generated class name.
-
-import { plugin } from 'bun'
-
-// Same identity-proxy loader, same allowlist, as tests/ui-core.test.tsx and
-// tests/storage-page.test.tsx: `DockerPage` pulls in the `@/shared/ui` barrel
-// too, and whichever of them `bun test` evaluates first decides how those ten
-// modules are cached for the run. Copied verbatim, not widened.
-const UI_CORE_STYLES =
-  /src\/shared\/ui\/(core\/(badge|status-dot|code|layout)|patterns\/(card|page-header|empty-state|alert|definition-list|data-table))\.module\.scss$/
-plugin({
-  name: 'docker-page-test-css-module-identity',
-  setup(build) {
-    build.onLoad({ filter: UI_CORE_STYLES }, () => ({
-      contents:
-        'export default new Proxy({}, { get: (_t, p) => (typeof p === "string" ? p : undefined) })',
-      loader: 'js',
-    }))
-  },
-})
+// Assertions below are by text, `href`, `value` or DOM structure — never a
+// generated class name, since Tailwind utility classes are an implementation
+// detail a later restyle can change without changing behaviour.
 
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -295,8 +275,7 @@ await mockModule(DOWN_CLIENT, () => ({
   },
 }))
 
-const { REPO_SCOPE } = await import('../src/features/docker/components/docker-scope-bar')
-const { Toaster, toaster } = await import('../src/shared/ui/overlay/toast')
+const { Toaster, toast } = await import('../src/shared/ui/toast')
 
 /** happy-dom ships no `EventSource` (verified in
  *  use-session-stream-hook.test.tsx's own note); tracked rather than fully
@@ -387,9 +366,10 @@ const unmount = async () => {
   })
   container.remove()
   client.clear()
-  // The toaster is a module-level singleton (toast.tsx) — clear it so a
-  // toast this test raised is not still alive for the next test's mount().
-  toaster.remove()
+  // The toast manager is a module-level singleton (ui/toast.tsx) — close
+  // every toast so one this test raised is not still alive for the next
+  // test's mount().
+  toast.close()
 }
 
 beforeEach(() => {
@@ -425,39 +405,54 @@ const settle = async () => {
 }
 
 /** The one row for a given service/heading name — `h4` is each `ServiceRow`'s
- *  own name element, and `Card` (its ancestor) renders as a `<section>`. */
+ *  own name element, and `ServiceRow` wraps its `Card` in a real `<article>`
+ *  landmark (the same idiom session-card.tsx/idea-card.tsx use for their own
+ *  rows), which is what this climbs back up to. */
 const rowFor = (heading: string) => {
   const h4 = [...container.querySelectorAll('h4')].find((h) => h.textContent === heading)
-  const row = h4?.closest('section')
+  const row = h4?.closest('article')
   if (!row) throw new Error(`no row for "${heading}"`)
   return row
 }
 
-/** Ark's Dialog renders through a Portal onto `document.body`, and
- *  `ConfirmDialog` never unmounts its `Content` on close (dialog.tsx's own
- *  note) — `data-state="open"` is load-bearing, not decoration. */
+/** The one `ConfirmDialog` open at a time, if any. Base UI's alert dialog
+ *  unmounts its popup entirely while closed, so a bare `[role="alertdialog"]`
+ *  only ever matches an open one — no `data-state="open"` qualifier needed
+ *  the way Ark's dialog (which never unmounts its content) required. */
 const dialogButtons = () => {
-  const dialog = document.body.querySelector('[role="alertdialog"][data-state="open"]')
+  const dialog = document.body.querySelector('[role="alertdialog"]')
   return dialog ? ([...dialog.querySelectorAll('button')] as HTMLElement[]) : []
 }
 const findDialogButton = (text: string) => dialogButtons().find((b) => b.textContent?.includes(text))
 
-/** The scope switcher's own hidden native `<select>` (see select.tsx's
- *  `ArkSelect.HiddenSelect`) — one per page, always present once the page has
- *  data, so no further scoping is needed. Its `<option value>`s are real
- *  session ids (or `REPO_SCOPE`), never translated text, so a test can drive
- *  it without depending on copy. */
-const scopeSelect = () => {
-  const select = container.querySelector('select')
-  if (!select) throw new Error('no scope select rendered')
-  return select as HTMLSelectElement
+/** The scope switcher's own trigger — a Base UI `Select` now, not a
+ *  `ToggleGroup` of always-mounted buttons, so the currently-chosen scope is
+ *  read off the trigger's own text (`items`, on `docker-scope-bar.tsx`'s
+ *  `Select`, is what lets `SelectValue` show it) rather than an option's
+ *  pressed state. */
+const scopeTrigger = () =>
+  container.querySelector('[data-slot="select-trigger"]') as HTMLElement | null
+
+/** Opens the popup so its `role="option"`s exist to query at all — Base UI
+ *  unmounts a closed `Select`'s popup entirely, unlike the `ToggleGroup` this
+ *  replaced, whose options were always in the DOM. Portalled to `document.body`,
+ *  same as `ConfirmDialog`'s own alert dialog. */
+const openScopeSwitcher = async () => {
+  const trigger = scopeTrigger()
+  if (!trigger) throw new Error('no scope switcher rendered')
+  await click(trigger)
+  // The popup's own positioning settles a tick after the click that opens it
+  // (overlay-nesting.test.tsx's own `flush()` after the same click exists for
+  // the same reason) — without this, `scopeOptions()` can run before its
+  // `role="option"`s exist.
+  await settle()
 }
-const chooseScope = async (value: string) => {
-  const select = scopeSelect()
-  select.value = value
-  await act(async () => {
-    select.dispatchEvent(new Event('change', { bubbles: true }))
-  })
+const scopeOptions = () => [...document.body.querySelectorAll('[role="option"]')] as HTMLElement[]
+const chooseScope = async (label: string) => {
+  await openScopeSwitcher()
+  const option = scopeOptions().find((o) => o.textContent?.trim() === label)
+  if (!option) throw new Error(`no scope option labelled "${label}"`)
+  await click(option)
 }
 
 // --- 1. no config detected ------------------------------------------------------
@@ -643,7 +638,7 @@ test('Clean up asks for confirmation, and sends no removeVolumes/removeImages', 
   if (!cleanup) throw new Error('no Clean up button')
   await click(cleanup)
 
-  expect(document.body.querySelector('[role="alertdialog"][data-state="open"]')).not.toBeNull()
+  expect(document.body.querySelector('[role="alertdialog"]')).not.toBeNull()
   expect(downCalls).toHaveLength(0)
 
   const confirm = findDialogButton('Clean up')
@@ -662,8 +657,15 @@ test("a container's logs only start streaming once its own pane is opened", asyn
   const logStreams = () => TrackedEventSource.opened.filter((u) => u.includes('/logs?'))
   expect(logStreams()).toHaveLength(0)
 
-  const trigger = [...container.querySelectorAll('button[data-part="trigger"]')].find((b) =>
-    b.textContent?.includes('p1-web-1'),
+  // Found via `[data-slot="collapsible-trigger"]` (collapsible.tsx), not by
+  // the trigger's own text (it holds only a chevron icon now, not the
+  // container's name) or by an ancestor `Item` containing "p1-web-1" (the
+  // access-URL list above ServiceList also names this same container in its
+  // own `Item` rows, with no collapsible trigger of their own). Collapsible
+  // is unique to a container row, so its own closest `Item` ancestor is
+  // unambiguously the row this test is after.
+  const trigger = [...container.querySelectorAll('[data-slot="collapsible-trigger"]')].find((el) =>
+    el.closest('[data-slot="item"]')?.textContent?.includes('p1-web-1'),
   )
   if (!trigger) throw new Error('no collapsible trigger for the web container')
   await click(trigger)
@@ -679,10 +681,22 @@ test('at repo scope, the switcher offers only the project checkout when no sessi
   await mount()
 
   expect(container.textContent).toContain("the project's own repo/ checkout")
-  const options = [...scopeSelect().querySelectorAll('option')]
+  // The trigger already names the current scope with the popup closed —
+  // `items` (docker-scope-bar.tsx) is what lets `SelectValue` show it.
+  // `toContain`, not an exact match: Base UI's own trigger icon (ui/select.tsx)
+  // carries a `▼` fallback glyph merged into the trigger's `textContent`
+  // alongside the label (idea-detail-page.test.tsx's own `Orchestrator`
+  // assertion hits the same thing).
+  expect(scopeTrigger()?.textContent).toContain('Project checkout (repo/)')
+
+  await openScopeSwitcher()
+  const options = scopeOptions()
   expect(options).toHaveLength(1)
-  expect(options[0]?.value).toBe(REPO_SCOPE)
-  expect(scopeSelect().value).toBe(REPO_SCOPE)
+  expect(options[0]?.textContent?.trim()).toBe('Project checkout (repo/)')
+  // Base UI's `Select` marks the current option with `aria-selected` — the
+  // switcher's own way of saying "this is the current scope" now that there
+  // is no native `<select>`/`.value` to read.
+  expect(options[0]?.getAttribute('aria-selected')).toBe('true')
 })
 
 test('an isolated session is offered in the switcher; a shared-checkout one is not', async () => {
@@ -692,8 +706,9 @@ test('an isolated session is offered in the switcher; a shared-checkout one is n
   ]
   await mount()
 
-  const values = [...scopeSelect().querySelectorAll('option')].map((o) => o.value)
-  expect(values).toEqual([REPO_SCOPE, 's1'])
+  await openScopeSwitcher()
+  const labels = scopeOptions().map((b) => b.textContent?.trim())
+  expect(labels).toEqual(['Project checkout (repo/)', 'Refactor auth'])
 })
 
 test("session scope's status call, and every mutation it triggers, carry that session's id — repo scope never does", async () => {
@@ -736,7 +751,7 @@ test('picking a session from the switcher navigates to that session\'s own Docke
   currentSessions = [sessionFixture({ id: 's1', title: 'Refactor auth', isolated: true })]
   const router = await mount('/projects/p1/docker')
 
-  await chooseScope('s1')
+  await chooseScope('Refactor auth')
   await settle()
 
   expect(router.state.location.pathname).toBe('/projects/p1/sessions/s1/docker')
@@ -748,7 +763,7 @@ test('picking the project checkout from a session scope navigates back to the pr
   currentStatus = composeStatus({ sessionId: 's1', scopePath: '/srv/worktrees/s1' })
   const router = await mount('/projects/p1/sessions/s1/docker')
 
-  await chooseScope(REPO_SCOPE)
+  await chooseScope('Project checkout (repo/)')
   await settle()
 
   expect(router.state.location.pathname).toBe('/projects/p1/docker')
@@ -759,7 +774,15 @@ test('a session the project no longer lists still shows a selectable placeholder
   currentStatus = composeStatus({ sessionId: 'ghost', scopePath: '/srv/worktrees/ghost' })
   await mount('/projects/p1/sessions/ghost/docker')
 
-  expect(scopeSelect().value).toBe('ghost')
+  // The trigger itself already names the placeholder — the "blank trigger"
+  // this test is about — with the popup still closed (`toContain`, not an
+  // exact match — see the same note above on the trigger's own `▼` glyph).
+  expect(scopeTrigger()?.textContent).toContain('This session')
+
+  await openScopeSwitcher()
+  const placeholder = scopeOptions().find((o) => o.textContent?.trim() === 'This session')
+  expect(placeholder).toBeDefined()
+  expect(placeholder?.getAttribute('aria-selected')).toBe('true')
   expect(container.textContent).toContain('This session')
 })
 

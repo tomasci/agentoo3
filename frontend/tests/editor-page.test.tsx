@@ -53,28 +53,9 @@
 // fallback slot — is never `.use()`d here), so this file gets its own real
 // translations without touching that slot at all.
 //
-// CSS-module class names are `undefined` under `bun test`, so every assertion
-// below is by text, attribute or DOM structure — never a generated class name.
-
-import { plugin } from 'bun'
-
-// Same identity-proxy loader, same allowlist, as tests/ui-core.test.tsx and
-// tests/docker-page.test.tsx: `EditorLauncher` pulls in the `@/shared/ui`
-// barrel too (Alert, Code, EmptyState, Stack), and whichever of them
-// `bun test` evaluates first decides how those ten modules are cached for the
-// run. Copied verbatim, not widened.
-const UI_CORE_STYLES =
-  /src\/shared\/ui\/(core\/(badge|status-dot|code|layout)|patterns\/(card|page-header|empty-state|alert|definition-list|data-table))\.module\.scss$/
-plugin({
-  name: 'editor-page-test-css-module-identity',
-  setup(build) {
-    build.onLoad({ filter: UI_CORE_STYLES }, () => ({
-      contents:
-        'export default new Proxy({}, { get: (_t, p) => (typeof p === "string" ? p : undefined) })',
-      loader: 'js',
-    }))
-  },
-})
+// Assertions below are by text, attribute or DOM structure — never a
+// generated class name, since Tailwind utility classes are an implementation
+// detail a later restyle can change without changing behaviour.
 
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -766,10 +747,10 @@ test('a trailing slash on the launcher URL still matches this route and renders 
 
 // `RootLayout` itself, not `app/router.tsx` — see the header comment for why
 // that boundary matters. A route tree built here has exactly two leaves: the
-// bare editor path, and one ordinary page, so a `<nav>`/`<aside>`/`<footer>`
-// showing up for the second and not the first is a fact about `RootLayout`'s
-// own branching (shared/store/tabs.ts's `isBareShellPath`), not an accident
-// of this harness.
+// bare editor path, and one ordinary page, so a `<nav>`/`[data-slot="sidebar"]`/
+// `<footer>` showing up for the second and not the first is a fact about
+// `RootLayout`'s own branching (shared/store/tabs.ts's `isBareShellPath`),
+// not an accident of this harness.
 const shellRootRoute = createRootRoute({ component: RootLayout })
 const bareShellRoute = createRoute({
   getParentRoute: () => shellRootRoute,
@@ -822,7 +803,7 @@ test('the launcher path renders with no tab bar, sidebar or status bar', async (
 
   expect(container.textContent).toContain('bare child')
   expect(container.querySelector('nav')).toBeNull()
-  expect(container.querySelector('aside')).toBeNull()
+  expect(container.querySelector('[data-slot="sidebar"]')).toBeNull()
   expect(container.querySelector('footer')).toBeNull()
 })
 
@@ -831,7 +812,10 @@ test('an ordinary page, by contrast, gets the full shell — proving the harness
 
   expect(container.textContent).toContain('ordinary child')
   expect(container.querySelector('nav')).not.toBeNull()
-  expect(container.querySelector('aside')).not.toBeNull()
+  // `[data-slot="sidebar"]` (shadcn's `Sidebar`, sidebar.tsx), not `<aside>`
+  // — the new shell has no `<aside>` element at all, on either branch, so
+  // that tag could never have told the two apart in the first place.
+  expect(container.querySelector('[data-slot="sidebar"]')).not.toBeNull()
   expect(container.querySelector('footer')).not.toBeNull()
 })
 
@@ -854,7 +838,7 @@ test('a trailing slash on the launcher path renders bare too, and adopts no tab'
 
   expect(container.textContent).toContain('bare child')
   expect(container.querySelector('nav')).toBeNull()
-  expect(container.querySelector('aside')).toBeNull()
+  expect(container.querySelector('[data-slot="sidebar"]')).toBeNull()
   expect(container.querySelector('footer')).toBeNull()
   expect(localStorage.getItem('agentoo:tabs')).toBeNull()
 })

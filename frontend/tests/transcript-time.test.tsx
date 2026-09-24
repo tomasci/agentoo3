@@ -1,34 +1,8 @@
-import { plugin } from 'bun'
 import { expect, test } from 'bun:test'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-
-// `Transcript` pulls in the whole `@/shared/ui` barrel, which means importing
-// it here also loads the ten `.module.scss` files `ui-core.test.tsx` owns. That
-// file installs an identity-proxy loader for them at its own module scope, and
-// `bun test` does not evaluate files in a documented order — so whichever of
-// the two files runs first decides how those modules are cached for the whole
-// run, and ui-core's class-name assertions fail whenever this one wins.
-// Registering the identical loader here makes the outcome the same either way;
-// it is a no-op when ui-core happens to get there first. (Keep the allowlist in
-// step with the one in tests/ui-core.test.tsx.)
-const UI_CORE_STYLES =
-  /src\/shared\/ui\/(core\/(badge|status-dot|code|layout)|patterns\/(card|page-header|empty-state|alert|definition-list|data-table))\.module\.scss$/
-
-plugin({
-  name: 'transcript-time-test-css-module-identity',
-  setup(build) {
-    build.onLoad({ filter: UI_CORE_STYLES }, () => ({
-      contents:
-        'export default new Proxy({}, { get: (_t, p) => (typeof p === "string" ? p : undefined) })',
-      loader: 'js',
-    }))
-  },
-})
-
-// Dynamic, so the loader above is registered before the barrel resolves.
-const { buildTranscript } = await import('../src/features/sessions/lib/transcript')
-const { Transcript } = await import('../src/features/sessions/components/transcript')
+import { buildTranscript } from '../src/features/sessions/lib/transcript'
+import { Transcript } from '../src/features/sessions/components/transcript'
 
 /**
  * The timestamp on a transcript row, exercised through the rendered DOM rather
@@ -85,8 +59,6 @@ const turn = (at: (i: number) => string) => {
   ]
 }
 
-/** Mounted for real: a closed Collapsible unmounts its children, so nested rows
- *  are not in the markup until the group is clicked open. */
 async function render(messages: M[]) {
   const container = document.createElement('div')
   document.body.append(container)
@@ -96,8 +68,11 @@ async function render(messages: M[]) {
   return container
 }
 
+/** Every collapsible trigger: `ui/collapsible`'s own `data-slot`, set
+ *  unconditionally by the shared component regardless of what a caller wraps
+ *  it in. */
 const triggers = (el: Element) =>
-  [...el.querySelectorAll('button[data-part="trigger"]')] as HTMLElement[]
+  [...el.querySelectorAll('button[data-slot="collapsible-trigger"]')] as HTMLElement[]
 
 /** Open every disclosure, including ones that only appear once a parent opens. */
 async function openAll(container: Element) {
@@ -115,7 +90,7 @@ const times = (el: Element) => stamps(el).map((s) => s.textContent)
 
 /** The transcript's top-level rows, in order.
  *
- * Each is now wrapped in its own `.row` div — the `content-visibility`
+ * Each is now wrapped in its own row div — the `content-visibility`
  * containment boundary that keeps the composer's forced layout from scoping
  * over the whole transcript — so this unwraps one level to hand back what it
  * always did: the node's own root element (a Collapsible, the prompt bubble,
@@ -146,9 +121,9 @@ test('all four row kinds render a time, nested rows included', async () => {
 
   // Shapes, so the rest of the assertions are about the row they claim to be.
   expect(prompt.textContent).toContain('build it')
-  expect(task.getAttribute('data-scope')).toBe('collapsible')
+  expect(task.getAttribute('data-slot')).toBe('collapsible')
   expect(answer.textContent).toContain('done')
-  expect(result.getAttribute('data-scope')).toBe('collapsible')
+  expect(result.getAttribute('data-slot')).toBe('collapsible')
 
   expect(times(prompt)).toEqual([hhmm(AT(0))])
   expect(times(answer)).toEqual([hhmm(AT(3))])
@@ -170,26 +145,36 @@ test('the nested row is genuinely inside the task group, not a sibling', async (
   expect(times(nested)).toEqual([hhmm(AT(2))])
 })
 
-test('the nested row is hidden until the group is opened, then shown', async () => {
-  // Ark keeps the content mounted on first render and hides it, so the nested
-  // row is in the markup while closed. What must change on click is whether it
-  // is exposed: `hidden` on the content, `aria-expanded` on the trigger.
+test('the nested row is not in the DOM until the group is opened, then it is', async () => {
+  // `ui/collapsible`'s own Panel (Base UI) unmounts entirely while closed
+  // (`keepMounted` defaults to false) rather than staying in the tree with a
+  // `hidden` attribute the way the old Ark-based collapsible did — so what
+  // must change on click is presence, not visibility.
   const container = await render(turn(AT))
   const task = rows(container)[1]
   if (!task) throw new Error('no task row')
 
-  const content = task.querySelector(':scope > [data-part="content"]') as HTMLElement | null
-  if (!content) throw new Error('no collapsible content')
-  expect(content.textContent).toContain('reading schema')
-  expect(content.hasAttribute('hidden')).toBe(true)
+  expect(task.querySelector(':scope > [data-slot="collapsible-content"]')).toBeNull()
   expect(triggers(task)[0]?.getAttribute('aria-expanded')).toBe('false')
 
   await openAll(container)
-  expect(content.hasAttribute('hidden')).toBe(false)
+  const content = task.querySelector(':scope > [data-slot="collapsible-content"]')
+  expect(content).not.toBeNull()
+  expect(content?.textContent).toContain('reading schema')
   expect(triggers(task)[0]?.getAttribute('aria-expanded')).toBe('true')
 })
 
 // --- 2. unparsable createdAt renders nothing ----------------------------------
+
+/** What kind of trigger child an element is, without depending on any
+ *  particular class name: the indicator is the icon (an `<svg>`), the badge
+ *  is `ui/badge`'s own `data-slot="badge"`, and everything else is a text
+ *  slot (title, note or meta). */
+const childKind = (el: Element): string => {
+  if (el.tagName.toLowerCase() === 'svg') return 'indicator'
+  if (el.getAttribute('data-slot') === 'badge') return 'badge'
+  return 'text'
+}
 
 for (const bad of ['', 'not-a-date', 'NaN', '2026-13-45T99:99:99Z', 'Invalid Date']) {
   test(`createdAt ${JSON.stringify(bad)} renders no time and no empty slot`, async () => {
@@ -214,14 +199,14 @@ for (const bad of ['', 'not-a-date', 'NaN', '2026-13-45T99:99:99Z', 'Invalid Dat
     // The answer keeps only its markdown body.
     expect(answer.children).toHaveLength(1)
 
-    // No `meta` span on either disclosure trigger: indicator, [badge,] title.
-    const parts = (t: HTMLElement) => [...t.children].map((c) => c.getAttribute('data-part'))
+    // No meta slot on either disclosure trigger: indicator, [badge,] title.
     const resultTrigger = triggers(result)[0]
     const taskTrigger = triggers(task)[0]
     if (!resultTrigger || !taskTrigger) throw new Error('no trigger')
-    expect(parts(resultTrigger)).toEqual(['indicator', null])
+    expect([...resultTrigger.children].map(childKind)).toEqual(['indicator', 'text'])
     expect(resultTrigger.children).toHaveLength(2)
     // The task trigger also carries its agent badge.
+    expect([...taskTrigger.children].map(childKind)).toEqual(['indicator', 'badge', 'text'])
     expect(taskTrigger.children).toHaveLength(3)
   })
 }
@@ -282,26 +267,35 @@ test('a very long row title keeps the time after it, both present', async () => 
   const kids = [...trigger.children]
   // indicator, title, meta — in that order, with nothing dropped.
   expect(kids).toHaveLength(3)
-  expect(kids[0]?.getAttribute('data-part')).toBe('indicator')
+  expect(kids[0]?.tagName.toLowerCase()).toBe('svg')
   expect(kids[1]?.textContent).toBe(long)
   expect(kids[2]?.textContent).toBe(hhmm(AT(1)))
 
   // The time is a sibling of the title, not inside it: an overflowing title
-  // with `text-overflow: ellipsis` would clip anything nested in it.
+  // with `truncate` would clip anything nested in it.
   expect(kids[1]?.contains(kids[2] as Node)).toBe(false)
 })
 
-test('the stylesheet gives the title the ellipsis and the meta slot a fixed width', async () => {
-  // happy-dom does no layout, so the visual truncation itself cannot be
-  // asserted here; what is checkable is that the rules the layout depends on
-  // are declared on the two slots the DOM test above pins down.
-  const scss = await Bun.file('src/shared/ui/disclosure/collapsible.module.scss').text()
-  const block = (name: string) => scss.match(new RegExp(`\\.${name}\\s*\\{[^}]*\\}`))?.[0] ?? ''
-  expect(block('title')).toContain('text-overflow: ellipsis')
-  expect(block('title')).toContain('min-width: 0')
-  expect(block('title')).toContain('flex: 1')
-  expect(block('meta')).toContain('flex: none')
-  expect(block('trigger')).toContain('display: flex')
+test('the title and meta trigger slots carry the classes their layout depends on', async () => {
+  // Tailwind's own utility classes are literal strings in this DOM (unlike the
+  // CSS-module classes the pre-shadcn design system resolved to nothing under
+  // `bun test`), so the layout rule can be checked directly on the rendered
+  // element instead of by reading a stylesheet.
+  const long = `deploy ${'x'.repeat(600)} finished`
+  n = 0
+  const container = await render([
+    msg({ type: 'assistant', title: long, createdAt: AT(1), payload: { tool: 1 } }),
+  ])
+  const trigger = triggers(container)[0]
+  if (!trigger) throw new Error('no trigger')
+  const [, title, meta] = [...trigger.children] as HTMLElement[]
+  if (!title || !meta) throw new Error('expected a title and a meta slot')
+
+  expect(trigger.classList.contains('flex')).toBe(true)
+  expect(title.classList.contains('truncate')).toBe(true)
+  expect(title.classList.contains('min-w-0')).toBe(true)
+  expect(title.classList.contains('flex-1')).toBe(true)
+  expect(meta.classList.contains('shrink-0')).toBe(true)
 })
 
 // --- 5. buildTranscript carries createdAt onto every node kind ----------------

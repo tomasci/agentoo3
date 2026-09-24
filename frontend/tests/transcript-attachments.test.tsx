@@ -10,31 +10,22 @@
 // separate "does it survive a reload" mechanism to test.
 
 import { afterEach, expect, test } from 'bun:test'
-
-// Same identity-proxy loader, same allowlist, as tests/ui-core.test.tsx,
-// tests/transcript-row.test.tsx and tests/transcript-time.test.tsx: `Transcript`
-// pulls in the `@/shared/ui` barrel too, and whichever of them `bun test`
-// evaluates first decides how those ten modules are cached for the run — see
-// the long note in transcript-time.test.tsx. Copied verbatim, not widened.
-import { plugin } from 'bun'
-
-const UI_CORE_STYLES =
-  /src\/shared\/ui\/(core\/(badge|status-dot|code|layout)|patterns\/(card|page-header|empty-state|alert|definition-list|data-table))\.module\.scss$/
-
-plugin({
-  name: 'transcript-attachments-test-css-module-identity',
-  setup(build) {
-    build.onLoad({ filter: UI_CORE_STYLES }, () => ({
-      contents:
-        'export default new Proxy({}, { get: (_t, p) => (typeof p === "string" ? p : undefined) })',
-      loader: 'js',
-    }))
-  },
-})
+import i18next from 'i18next'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { I18nextProvider } from 'react-i18next'
+import { Transcript } from '../src/features/sessions/components/transcript'
 
-const { Transcript } = await import('../src/features/sessions/components/transcript')
+// The placeholder is asserted by its raw key, so this file renders under a
+// private `cimode` instance (i18next's always-return-the-key mode) rather
+// than react-i18next's process-wide default. That default is installed by
+// whichever earlier file first imports `@/shared/i18n` (directly, or through
+// `src/app/router`); after it, a provider-less render shows "File removed"
+// and the placeholder assertions below failed, while the "renders none of
+// this" case turned vacuous. Never `.use(initReactI18next)` on this instance —
+// see tests/settings-page.test.tsx.
+const testI18n = i18next.createInstance()
+await testI18n.init({ lng: 'cimode', fallbackLng: 'cimode' })
 
 type M = Parameters<typeof Transcript>[0]['messages'][number]
 type MessageFile = M['files'][number]
@@ -70,7 +61,11 @@ function mount(files: MessageFile[]) {
   document.body.append(container)
   root = createRoot(container)
   act(() => {
-    root.render(<Transcript messages={[promptMessage(files)]} sessionId="s1" />)
+    root.render(
+      <I18nextProvider i18n={testI18n}>
+        <Transcript messages={[promptMessage(files)]} sessionId="s1" />
+      </I18nextProvider>,
+    )
   })
 }
 

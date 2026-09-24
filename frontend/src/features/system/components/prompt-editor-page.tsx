@@ -1,18 +1,12 @@
+import { CircleAlertIcon, InfoIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import {
-  Alert,
-  Badge,
-  Button,
-  ConfirmDialog,
-  Field,
-  Inline,
-  PageHeader,
-  Spinner,
-  Stack,
-  Textarea,
-} from '@/shared/ui'
+import { ConfirmDialog, Loading, PageHeader, StatusBadge } from '@/shared/components'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Button } from '@/shared/ui/button'
+import { Field, FieldDescription, FieldLabel } from '@/shared/ui/field'
+import { Textarea } from '@/shared/ui/textarea'
 import { usePrompt, useResetPrompt, useUpdatePrompt } from '../hooks/use-prompts'
 
 /**
@@ -49,56 +43,72 @@ export function PromptEditorPage({ name }: { name: string }) {
   const busy = update.isPending
   const isDefault = prompt?.source === 'default'
 
-  if (isPending) return <Spinner label={t('common.loading')} block />
+  if (isPending) return <Loading label={t('common.loading')} block />
 
   return (
-    <Stack gap={5}>
+    <div className="flex flex-col gap-5">
       <PageHeader
         title={t('prompts.title')}
         description={t('prompts.description')}
         actions={
           prompt && (
-            <Badge tone={isDefault ? 'neutral' : 'accent'}>
+            <StatusBadge tone={isDefault ? 'neutral' : 'accent'}>
               {isDefault ? t('prompts.sourceDefault') : t('prompts.sourceFile')}
-            </Badge>
+            </StatusBadge>
           )
         }
       />
 
       {loadError && (
-        <Alert tone="danger">{apiErrorMessage(loadError, t('prompts.loadFailed'))}</Alert>
+        <Alert variant="destructive">
+          <CircleAlertIcon />
+          <AlertDescription>{apiErrorMessage(loadError, t('prompts.loadFailed'))}</AlertDescription>
+        </Alert>
       )}
 
       {prompt && (
-        <Stack gap={5}>
-          {isDefault && <Alert tone="neutral">{t('prompts.defaultNotice')}</Alert>}
+        <div className="flex flex-col gap-5">
+          {isDefault && (
+            <Alert role="status">
+              <InfoIcon />
+              <AlertDescription>{t('prompts.defaultNotice')}</AlertDescription>
+            </Alert>
+          )}
 
-          <Field label={t('prompts.body')} hint={t('prompts.bodyHint')}>
+          <Field>
+            <FieldLabel htmlFor="prompt-body">{t('prompts.body')}</FieldLabel>
             <Textarea
-              mono
+              id="prompt-body"
+              className="field-sizing-fixed font-mono"
               rows={20}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               spellCheck={false}
             />
+            <FieldDescription>{t('prompts.bodyHint')}</FieldDescription>
           </Field>
 
-          {error && <Alert tone="danger">{error}</Alert>}
+          {error && (
+            <Alert variant="destructive">
+              <CircleAlertIcon />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
 
-          <Inline gap={2}>
+          <div className="flex flex-wrap items-center gap-2">
             <Button type="button" disabled={busy || !draft.trim()} onClick={save}>
               {busy ? t('common.working') : t('common.save')}
             </Button>
             <Button
               type="button"
-              variant="secondary"
+              variant="outline"
               disabled={isDefault || reset.isPending}
               onClick={() => setConfirmReset(true)}
             >
               {t('prompts.resetToDefault')}
             </Button>
-          </Inline>
-        </Stack>
+          </div>
+        </div>
       )}
 
       <ConfirmDialog
@@ -121,6 +131,6 @@ export function PromptEditorPage({ name }: { name: string }) {
           )
         }
       />
-    </Stack>
+    </div>
   )
 }

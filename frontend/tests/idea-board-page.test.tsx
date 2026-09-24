@@ -160,38 +160,30 @@ const menuTriggers = () =>
     ...(container.querySelector('main')?.querySelectorAll('button[aria-haspopup="menu"]') ?? []),
   ] as HTMLElement[]
 
-/** Opens the given card's menu and selects the item labelled `label` — two
- * events, each its own `act`, for the same reason storage-page.test.tsx's
- * `selectRowMenuItem` documents (Zag's menu machine sets `highlightedValue`
- * off `pointerdown` and reads it back on `click`). */
+/** Opens the given card's menu and selects the item labelled `label`. Base
+ * UI's menu unmounts its popup entirely while closed, and a plain click both
+ * opens the menu and picks an item — no `pointerdown` priming and no
+ * open-state qualifier needed the way Ark/Zag's menu required. */
 async function selectMenuItem(triggerIndex: number, label: string) {
   const trigger = menuTriggers()[triggerIndex]
   if (!trigger) throw new Error(`no menu trigger at index ${triggerIndex}`)
-  await act(async () => {
-    trigger.click()
-  })
+  await click(trigger, 'menu trigger')
   const items = [
-    ...document.body.querySelectorAll('[role="menu"][data-state="open"] [role="menuitem"]'),
+    ...document.body.querySelectorAll('[role="menu"] [role="menuitem"]'),
   ] as HTMLElement[]
   const item = items.find((el) => el.textContent?.includes(label))
   if (!item) {
     throw new Error(`no open menu item "${label}" among ${items.map((i) => i.textContent).join(', ')}`)
   }
-  await act(async () => {
-    item.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }))
-  })
-  await act(async () => {
-    item.click()
-  })
-  await settle()
+  await click(item, 'menu item')
 }
 
-/** The one `ConfirmDialog` open at a time, if any — see
- * tests/storage-page.test.tsx's identical helper and its own comment on why
- * `data-state="open"` is load-bearing (Ark's Dialog never unmounts its
- * `Content`, so a bare `[role="alertdialog"]` would match a closed one). */
+/** The one `ConfirmDialog` open at a time, if any. Base UI's alert dialog
+ * unmounts its popup entirely while closed, so a bare `[role="alertdialog"]`
+ * only ever matches an open one — no `data-state="open"` qualifier needed the
+ * way Ark's dialog (which never unmounts `Content`) required. */
 const openDialogButtons = () => {
-  const dialog = document.body.querySelector('[role="alertdialog"][data-state="open"]')
+  const dialog = document.body.querySelector('[role="alertdialog"]')
   return dialog ? ([...dialog.querySelectorAll('button')] as HTMLElement[]) : []
 }
 const findDialogButton = (text: string) => openDialogButtons().find((b) => b.textContent?.includes(text))
@@ -214,8 +206,8 @@ test('every column renders, including the ones with nothing in it', async () => 
   }
   expect(container.textContent).toContain('Only one so far')
   // Five empty columns, each saying so.
-  const emptyCount = [...container.querySelectorAll('p')].filter(
-    (p) => p.textContent === 'No ideas in this column yet.',
+  const emptyCount = [...container.querySelectorAll('[data-slot="empty-title"]')].filter(
+    (el) => el.textContent === 'No ideas in this column yet.',
   ).length
   expect(emptyCount).toBe(5)
 })
@@ -243,7 +235,7 @@ test('moving a card into "Selected for development" asks first, and only fires o
 
   // Asked, not acted on yet.
   expect(moveCalls).toEqual([])
-  expect(document.body.querySelector('[role="alertdialog"][data-state="open"]')).not.toBeNull()
+  expect(document.body.querySelector('[role="alertdialog"]')).not.toBeNull()
   expect(document.body.textContent).toContain('Start development on this idea?')
 
   const confirm = findDialogButton('Start development')
@@ -260,7 +252,7 @@ test('moving a card anywhere else fires immediately, with no confirmation', asyn
   await selectMenuItem(0, 'To do')
 
   expect(moveCalls).toEqual([{ path: { id: 'i1' }, body: { status: 'todo' } }])
-  expect(document.body.querySelector('[role="alertdialog"][data-state="open"]')).toBeNull()
+  expect(document.body.querySelector('[role="alertdialog"]')).toBeNull()
 })
 
 test('dismissing the confirm dialog never moves the card', async () => {

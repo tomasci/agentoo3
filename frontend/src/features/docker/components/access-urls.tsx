@@ -1,8 +1,10 @@
 import { useTranslation } from 'react-i18next'
-import { Card, CopyButton, EmptyState, Inline, PageHeader, Stack } from '@/shared/ui'
+import { CopyButton, PageHeader } from '@/shared/components'
+import { Card, CardContent } from '@/shared/ui/card'
+import { Empty, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
+import { Item, ItemActions, ItemContent } from '@/shared/ui/item'
 import { type AccessHost, buildAccessUrls, collectHosts, type ServerHost } from '../lib/access-urls'
 import type { DockerContainer } from '../lib/state'
-import styles from './access-urls.module.scss'
 
 function hostLabel(host: AccessHost, t: (key: string) => string): string {
   // Every server-reported kind already carries its own label (tailscale.ts's
@@ -34,35 +36,48 @@ export function AccessUrls({
 
   return (
     <Card>
-      <Stack gap={3}>
+      <CardContent className="flex flex-col gap-3">
         <PageHeader level={3} title={t('docker.accessUrls.heading')} />
 
         {entries.length === 0 ? (
-          <EmptyState size="sm" title={t('docker.accessUrls.empty')} />
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>{t('docker.accessUrls.empty')}</EmptyTitle>
+            </EmptyHeader>
+          </Empty>
         ) : (
-          <Stack gap={2}>
+          <div className="flex flex-col gap-2">
             {entries.map((entry) => (
-              <Inline key={entry.key} gap={3} justify="between" align="center">
-                <Stack gap={0}>
-                  <span className={styles.label}>
+              <Item key={entry.key} variant="outline" size="sm">
+                <ItemContent className="gap-0.5">
+                  <span className="text-xs text-muted-foreground">
                     {hostLabel(entry.host, t)} · {entry.containerName}
                   </span>
                   {entry.url ? (
-                    <a href={entry.url} target="_blank" rel="noreferrer" className={styles.urlLink}>
+                    <a
+                      href={entry.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="break-all font-mono text-sm text-primary hover:underline"
+                    >
                       {entry.url}
                     </a>
                   ) : (
-                    <span className={styles.udp}>
+                    <span className="text-sm text-muted-foreground">
                       {entry.host.host}:{entry.port}/udp — {t('docker.accessUrls.udpNote')}
                     </span>
                   )}
-                </Stack>
-                {entry.url && <CopyButton value={entry.url} label={t('common.copy')} />}
-              </Inline>
+                </ItemContent>
+                {entry.url && (
+                  <ItemActions>
+                    <CopyButton value={entry.url} label={t('common.copy')} />
+                  </ItemActions>
+                )}
+              </Item>
             ))}
-          </Stack>
+          </div>
         )}
-      </Stack>
+      </CardContent>
     </Card>
   )
 }

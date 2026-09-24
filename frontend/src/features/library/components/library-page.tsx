@@ -5,18 +5,17 @@ import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import {
   ActionsMenu,
-  Alert,
-  Badge,
-  Button,
   Code,
   ConfirmDialog,
   DataTable,
-  EmptyState,
+  Loading,
   type MenuAction,
   PageHeader,
-  Spinner,
-  Stack,
-} from '@/shared/ui'
+  StatusBadge,
+} from '@/shared/components'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Button } from '@/shared/ui/button'
+import { Empty, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
 import {
   type AgentSummary,
   type Skill,
@@ -25,7 +24,6 @@ import {
   useDeleteSkill,
   useSkills,
 } from '../hooks/use-library'
-import styles from './library.module.scss'
 
 const agentColumn = createColumnHelper<AgentSummary>()
 const skillColumn = createColumnHelper<Skill>()
@@ -51,7 +49,7 @@ export function LibraryPage() {
           <Link
             to="/library/agents/$name"
             params={{ name: info.getValue() }}
-            className={styles.nameLink}
+            className="font-medium text-foreground hover:underline"
           >
             {info.getValue()}
           </Link>
@@ -61,15 +59,15 @@ export function LibraryPage() {
         header: () => t('library.table.role'),
         meta: { role: 'meta', label: t('library.table.role') },
         cell: (info) => (
-          <Badge tone={info.getValue() === 'orchestrator' ? 'accent' : 'neutral'} variant="outline">
+          <StatusBadge tone={info.getValue() === 'orchestrator' ? 'accent' : 'neutral'}>
             {t(`library.role.${info.getValue()}`)}
-          </Badge>
+          </StatusBadge>
         ),
       }),
       agentColumn.accessor('description', {
         header: () => t('library.table.description'),
         meta: { role: 'secondary', label: t('library.table.description') },
-        cell: (info) => <span className={styles.muted}>{info.getValue()}</span>,
+        cell: (info) => <span className="text-sm text-muted-foreground">{info.getValue()}</span>,
       }),
       agentColumn.accessor('model', {
         header: () => t('library.table.model'),
@@ -80,7 +78,7 @@ export function LibraryPage() {
         header: () => t('library.table.usedBy'),
         meta: { role: 'meta', label: t('library.table.usedBy') },
         cell: (info) => (
-          <span className={styles.muted}>
+          <span className="text-sm text-muted-foreground">
             {t('library.usedByCount', { count: info.getValue() })}
           </span>
         ),
@@ -123,7 +121,7 @@ export function LibraryPage() {
           <Link
             to="/library/skills/$name"
             params={{ name: info.getValue() }}
-            className={styles.nameLink}
+            className="font-medium text-foreground hover:underline"
           >
             {info.getValue()}
           </Link>
@@ -132,7 +130,7 @@ export function LibraryPage() {
       skillColumn.accessor('description', {
         header: () => t('library.table.description'),
         meta: { role: 'secondary', label: t('library.table.description') },
-        cell: (info) => <span className={styles.muted}>{info.getValue()}</span>,
+        cell: (info) => <span className="text-sm text-muted-foreground">{info.getValue()}</span>,
       }),
       skillColumn.accessor('extraFiles', {
         header: () => t('library.table.files'),
@@ -149,7 +147,7 @@ export function LibraryPage() {
         header: () => t('library.table.usedBy'),
         meta: { role: 'meta', label: t('library.table.usedBy') },
         cell: (info) => (
-          <span className={styles.muted}>
+          <span className="text-sm text-muted-foreground">
             {t('library.usedByCount', { count: info.getValue() })}
           </span>
         ),
@@ -195,10 +193,10 @@ export function LibraryPage() {
   })
 
   return (
-    <Stack gap={8}>
-      <p className={styles.intro}>{t('library.intro')}</p>
+    <div className="flex flex-col gap-8">
+      <p className="text-sm text-muted-foreground">{t('library.intro')}</p>
 
-      <Stack gap={3}>
+      <div className="flex flex-col gap-3">
         <PageHeader
           level={2}
           title={t('library.agents')}
@@ -209,14 +207,29 @@ export function LibraryPage() {
           }
         />
 
-        {agents.isError && <Alert>{apiErrorMessage(agents.error, t('library.loadFailed'))}</Alert>}
-        {!agents.isError && agents.isPending && <Spinner label={t('common.loading')} block />}
-        {!agents.isError && !agents.isPending && (
-          <DataTable table={agentTable} empty={<EmptyState title={t('library.noAgents')} />} />
+        {agents.isError && (
+          <Alert variant="destructive">
+            <AlertDescription>
+              {apiErrorMessage(agents.error, t('library.loadFailed'))}
+            </AlertDescription>
+          </Alert>
         )}
-      </Stack>
+        {!agents.isError && agents.isPending && <Loading label={t('common.loading')} block />}
+        {!agents.isError && !agents.isPending && (
+          <DataTable
+            table={agentTable}
+            empty={
+              <Empty>
+                <EmptyHeader>
+                  <EmptyTitle>{t('library.noAgents')}</EmptyTitle>
+                </EmptyHeader>
+              </Empty>
+            }
+          />
+        )}
+      </div>
 
-      <Stack gap={3}>
+      <div className="flex flex-col gap-3">
         <PageHeader
           level={2}
           title={t('library.skills')}
@@ -227,12 +240,27 @@ export function LibraryPage() {
           }
         />
 
-        {skills.isError && <Alert>{apiErrorMessage(skills.error, t('library.loadFailed'))}</Alert>}
-        {!skills.isError && skills.isPending && <Spinner label={t('common.loading')} block />}
-        {!skills.isError && !skills.isPending && (
-          <DataTable table={skillTable} empty={<EmptyState title={t('library.noSkills')} />} />
+        {skills.isError && (
+          <Alert variant="destructive">
+            <AlertDescription>
+              {apiErrorMessage(skills.error, t('library.loadFailed'))}
+            </AlertDescription>
+          </Alert>
         )}
-      </Stack>
+        {!skills.isError && skills.isPending && <Loading label={t('common.loading')} block />}
+        {!skills.isError && !skills.isPending && (
+          <DataTable
+            table={skillTable}
+            empty={
+              <Empty>
+                <EmptyHeader>
+                  <EmptyTitle>{t('library.noSkills')}</EmptyTitle>
+                </EmptyHeader>
+              </Empty>
+            }
+          />
+        )}
+      </div>
 
       <ConfirmDialog
         open={pendingAgent !== null}
@@ -270,6 +298,6 @@ export function LibraryPage() {
           )
         }}
       />
-    </Stack>
+    </div>
   )
 }

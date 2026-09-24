@@ -1,10 +1,14 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
+import { OctagonXIcon } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useEditorStop } from '@/features/editor'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { ActionsMenu, Alert, Badge, Button, Code, Spinner, StatusDot, toast } from '@/shared/ui'
+import { ActionsMenu, Code, Loading, StatusBadge, StatusDot, toast } from '@/shared/components'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Button, buttonVariants } from '@/shared/ui/button'
+import { Spinner } from '@/shared/ui/spinner'
 import {
   type AttachmentUpload,
   useAttachmentUploads,
@@ -20,7 +24,6 @@ import {
 } from '../hooks/use-sessions'
 import { type MessagesData, sessionMessagesKey } from '../lib/message-cache'
 import { Composer } from './composer'
-import styles from './session-page.module.scss'
 import { Transcript } from './transcript'
 
 const BUSY = ['queued', 'running']
@@ -151,7 +154,7 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // it reports nothing left to correct for two frames running, or 500ms have
   // passed since the hold started — whichever comes first, cancelling
   // whatever an earlier call left outstanding. A row inserted under
-  // `content-visibility: auto` (transcript.module.scss) contributes its 6rem
+  // `content-visibility: auto` (transcript.tsx) contributes its 6rem
   // placeholder at commit and its real height only once the engine judges it
   // relevant and renders it — which takes an unpredictable number of frames,
   // because every correction moves the viewport, which changes which rows
@@ -352,9 +355,9 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
 
   // Keeps the transcript pinned to the bottom while its content changes, not
   // only when a message arrives: `.row`'s `content-visibility: auto` (see
-  // transcript.module.scss) makes `scrollHeight` an *estimate* for a row never
-  // yet rendered, so `hold`'s later passes are what catch a row settling
-  // taller than its placeholder once markdown or code in it resolves.
+  // transcript.tsx) makes `scrollHeight` an *estimate* for a row never yet
+  // rendered, so `hold`'s later passes are what catch a row settling taller
+  // than its placeholder once markdown or code in it resolves.
   //
   // Keyed on `messages.messages`' own identity, not a ResizeObserver on the
   // rendered content: `mergeSessionMessages`/`selectMessages`
@@ -445,9 +448,28 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
     )
   }
 
-  if (session.isPending) return <Spinner label={t('common.loading')} block />
+  // Full-bleed route (see root-layout.tsx's `isFullBleedPath`): the shell
+  // hands this page zero padding of its own, so every render path — not just
+  // the loaded one below — has to supply the `p-4 lg:p-6` an ordinary page
+  // gets for free, or its content sits flush against the panel's edges.
+  if (session.isPending) {
+    return (
+      <div className="p-4 lg:p-6">
+        <Loading label={t('common.loading')} block />
+      </div>
+    )
+  }
   if (session.isError || !session.data) {
-    return <Alert tone="danger">{apiErrorMessage(session.error, t('sessions.loadFailed'))}</Alert>
+    return (
+      <div className="p-4 lg:p-6">
+        <Alert variant="destructive">
+          <OctagonXIcon />
+          <AlertDescription>
+            {apiErrorMessage(session.error, t('sessions.loadFailed'))}
+          </AlertDescription>
+        </Alert>
+      </div>
+    )
   }
 
   const data = session.data
@@ -482,49 +504,51 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   }
 
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <Badge tone={STATUS_TONE[data.status]}>{t(`sessions.status.${data.status}`)}</Badge>
-        <h1 className={styles.title}>{title}</h1>
-        <div className={styles.meta}>
+    <div className="flex min-h-0 flex-1 flex-col gap-2 p-4 lg:p-6">
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b pb-2">
+        <StatusBadge tone={STATUS_TONE[data.status]}>
+          {t(`sessions.status.${data.status}`)}
+        </StatusBadge>
+        <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
+        <div className="order-1 flex basis-full flex-wrap items-center gap-2 overflow-hidden text-xs text-muted-foreground md:order-none md:basis-auto md:flex-nowrap md:text-sm">
           {/* Set-once configuration, not live status — it steps aside below
               `md` so the row has room for what actually changes. */}
-          {data.orchestrator && <span className={styles.orchestrator}>{data.orchestrator}</span>}
+          {data.orchestrator && <span className="hidden md:inline">{data.orchestrator}</span>}
           {data.branch && <Code>{data.branch}</Code>}
           {data.totalCostUsd > 0 && <span>${data.totalCostUsd.toFixed(4)}</span>}
-          <span className={styles.live}>
+          <span className="order-first inline-flex items-center gap-2 whitespace-nowrap md:order-none">
             <StatusDot tone={connected ? 'accent' : 'neutral'} />
             {connected ? t('sessions.live') : t('sessions.reconnecting')}
           </span>
         </div>
-        <div className={styles.actions}>
+        <div className="flex shrink-0 items-center gap-2">
           {/* Only sessions handed off from an idea have anywhere to link back
               to; a session created directly has no `ideaId` and shows nothing
               here. Placed ahead of Stop/the menu so navigation reads to the
-              left of the destructive and overflow actions. */}
+              left of the destructive and overflow actions. Styled through
+              `buttonVariants` rather than `Button render={<Link/>}` — see the
+              track's own rule on link-as-button. */}
           {data.ideaId && (
-            <Button asChild variant="secondary" size="sm">
-              <Link
-                to="/projects/$projectId/ideas/$ideaId"
-                params={{ projectId: data.projectId, ideaId: data.ideaId }}
-              >
-                {t('sessions.backToIdea')}
-              </Link>
-            </Button>
+            <Link
+              to="/projects/$projectId/ideas/$ideaId"
+              params={{ projectId: data.projectId, ideaId: data.ideaId }}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              {t('sessions.backToIdea')}
+            </Link>
           )}
           {/* Only an isolated session has a worktree of its own to run docker
               against — a shared-checkout session has none, and the backend
               400s on it (features/docker/scope.ts) — so the link is never
               offered for one at all. */}
           {data.isolated && (
-            <Button asChild variant="secondary" size="sm">
-              <Link
-                to="/projects/$projectId/sessions/$sessionId/docker"
-                params={{ projectId: data.projectId, sessionId: data.id }}
-              >
-                {t('sessions.docker')}
-              </Link>
-            </Button>
+            <Link
+              to="/projects/$projectId/sessions/$sessionId/docker"
+              params={{ projectId: data.projectId, sessionId: data.id }}
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              {t('sessions.docker')}
+            </Link>
           )}
           {/* Same gate as Docker above, for the same reason: a code-server
               container runs against this session's own worktree
@@ -543,16 +567,15 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
               *new* tab rather than an in-app navigation: this tab's own
               workspace state must stay exactly as the reader left it. */}
           {data.isolated && (
-            <Button asChild variant="secondary" size="sm">
-              <Link
-                to="/projects/$projectId/sessions/$sessionId/editor"
-                params={{ projectId: data.projectId, sessionId: data.id }}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {t('sessions.editor')}
-              </Link>
-            </Button>
+            <Link
+              to="/projects/$projectId/sessions/$sessionId/editor"
+              params={{ projectId: data.projectId, sessionId: data.id }}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            >
+              {t('sessions.editor')}
+            </Link>
           )}
           {/* Visible at every size while busy: the only way to halt a running
               agent does not belong behind a menu. */}
@@ -600,11 +623,12 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
                         stopEditor.mutate(
                           { path: { id: data.projectId, sessionId: data.id } },
                           {
-                            onSuccess: () => toast({ title: t('sessions.editorStopped') }),
+                            onSuccess: () =>
+                              toast.add({ title: t('sessions.editorStopped'), type: 'success' }),
                             onError: (e) =>
-                              toast({
+                              toast.add({
                                 title: apiErrorMessage(e, t('editor.errors.stopFailed')),
-                                tone: 'danger',
+                                type: 'error',
                               }),
                           },
                         )
@@ -617,10 +641,15 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
         </div>
       </header>
 
-      {data.lastError && <Alert tone="danger">{data.lastError}</Alert>}
+      {data.lastError && (
+        <Alert variant="destructive" className="shrink-0">
+          <OctagonXIcon />
+          <AlertDescription>{data.lastError}</AlertDescription>
+        </Alert>
+      )}
 
       <div
-        className={styles.scroll}
+        className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain pr-1"
         ref={scroller}
         onScroll={onScroll}
         onTouchStart={onTouchStart}
@@ -628,33 +657,45 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
         onTouchCancel={onTouchCancel}
       >
         {messages.isPending ? (
-          <Spinner label={t('common.loading')} block />
+          <Loading label={t('common.loading')} block />
         ) : messages.isError ? (
           // Distinct from an empty transcript: a rejected initial page (the
           // boundary validator in use-sessions.ts rejecting a malformed
           // envelope, or any other failure) must not render as though the
           // session simply has nothing in it yet.
-          <Alert tone="danger">
-            {apiErrorMessage(messages.error, t('sessions.transcript.loadFailed'))}
+          <Alert variant="destructive">
+            <OctagonXIcon />
+            <AlertDescription>
+              {apiErrorMessage(messages.error, t('sessions.transcript.loadFailed'))}
+            </AlertDescription>
           </Alert>
         ) : (
           <div>
             {messages.hasPreviousPage && (
               <>
-                <div ref={setSentinelNode} className={styles.olderSentinel} />
-                <div className={styles.loadOlder}>
+                <div ref={setSentinelNode} className="h-0" />
+                <div className="flex flex-col items-center gap-2 pb-2">
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={requestOlder}
-                    loading={messages.isLoadingOlder}
-                    loadingLabel={t('sessions.transcript.loadingOlder')}
+                    disabled={messages.isLoadingOlder}
                   >
-                    {t('sessions.transcript.loadOlder')}
+                    {messages.isLoadingOlder && (
+                      <Spinner data-icon="inline-start" aria-hidden="true" />
+                    )}
+                    {messages.isLoadingOlder
+                      ? t('sessions.transcript.loadingOlder')
+                      : t('sessions.transcript.loadOlder')}
                   </Button>
                   {messages.isLoadOlderError && (
-                    <Alert tone="danger">{t('sessions.transcript.loadOlderFailed')}</Alert>
+                    <Alert variant="destructive">
+                      <OctagonXIcon />
+                      <AlertDescription>
+                        {t('sessions.transcript.loadOlderFailed')}
+                      </AlertDescription>
+                    </Alert>
                   )}
                 </div>
               </>

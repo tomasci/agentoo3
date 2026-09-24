@@ -1,10 +1,14 @@
 import { Link } from '@tanstack/react-router'
+import { CircleAlertIcon } from 'lucide-react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { Alert, Button, Code, EmptyState, Inline, Spinner, Stack } from '@/shared/ui'
+import { Code, Loading } from '@/shared/components'
+import { Alert, AlertDescription, AlertTitle } from '@/shared/ui/alert'
+import { Button, buttonVariants } from '@/shared/ui/button'
+import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
+import { Spinner } from '@/shared/ui/spinner'
 import { type EditorOperation, useEditorStart, useEditorStatus } from '../hooks/use-editor'
-import styles from './editor-launcher.module.scss'
 import { EditorStartLog } from './editor-start-log'
 import { RunningEditorsPanel } from './running-editors'
 
@@ -85,11 +89,13 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
     : null
 
   const backToSession = (
-    <Button asChild variant="secondary" size="sm">
-      <Link to="/projects/$projectId/sessions/$sessionId" params={{ projectId, sessionId }}>
-        {t('editor.backToSession')}
-      </Link>
-    </Button>
+    <Link
+      to="/projects/$projectId/sessions/$sessionId"
+      params={{ projectId, sessionId }}
+      className={buttonVariants({ variant: 'outline', size: 'sm' })}
+    >
+      {t('editor.backToSession')}
+    </Link>
   )
 
   let body: ReactNode
@@ -105,7 +111,7 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
   let title: string
   if (status.isPending) {
     title = t('editor.launcher.opening')
-    body = <Spinner label={t('editor.launcher.opening')} block />
+    body = <Loading label={t('editor.launcher.opening')} block />
   } else if (status.isError || !data) {
     // Covers every shape of GET failure worth telling apart here (a shared
     // checkout with no worktree of its own, a session that no longer
@@ -113,81 +119,100 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
     // there is nothing this page can do about any of them itself.
     title = t('editor.loadFailed')
     body = (
-      <EmptyState
-        title={t('editor.loadFailed')}
-        description={apiErrorMessage(status.error, t('editor.loadFailed'))}
-        action={backToSession}
-      />
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>{title}</EmptyTitle>
+          <EmptyDescription>
+            {apiErrorMessage(status.error, t('editor.loadFailed'))}
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>{backToSession}</EmptyContent>
+      </Empty>
     )
   } else if (!data.enabled) {
     title = t('editor.empty.title')
     body = (
-      <EmptyState
-        title={t('editor.empty.title')}
-        description={t('editor.empty.description')}
-        action={backToSession}
-      />
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>{title}</EmptyTitle>
+          <EmptyDescription>{t('editor.empty.description')}</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>{backToSession}</EmptyContent>
+      </Empty>
     )
   } else if (!data.daemon.cliInstalled || !data.daemon.available) {
-    // `Alert`, not `EmptyState`: the daemon's own raw error is block content
-    // (a `<Code block>`, which renders a `<pre>`) and `EmptyState` wraps its
-    // `description` in a `<p>` — nesting a `<pre>` (or another block element)
-    // inside a `<p>` is invalid HTML, which is exactly what this used to do
-    // before it was an `Alert`, whose `children` sit in a plain `<div>`.
     title = data.daemon.cliInstalled
       ? t('editor.daemon.unavailableTitle')
       : t('editor.daemon.notInstalledTitle')
     body = (
-      <Alert tone="danger" title={title} action={backToSession}>
-        <Stack gap={2}>
-          <p>
-            {data.daemon.cliInstalled
-              ? t('editor.daemon.unavailable')
-              : t('editor.daemon.notInstalled')}
-          </p>
-          {data.daemon.error && (
-            <Code block wrap>
-              {data.daemon.error}
-            </Code>
-          )}
-        </Stack>
-      </Alert>
+      <div className="flex flex-col gap-3">
+        <Alert variant="destructive">
+          <CircleAlertIcon />
+          <AlertTitle>{title}</AlertTitle>
+          <AlertDescription>
+            <div className="flex flex-col gap-2">
+              <p>
+                {data.daemon.cliInstalled
+                  ? t('editor.daemon.unavailable')
+                  : t('editor.daemon.notInstalled')}
+              </p>
+              {data.daemon.error && (
+                <Code block wrap>
+                  {data.daemon.error}
+                </Code>
+              )}
+            </div>
+          </AlertDescription>
+        </Alert>
+        <div>{backToSession}</div>
+      </div>
     )
   } else if (data.state === 'running') {
     // Transient — the effect above is already replacing this document.
     title = t('editor.launcher.opening')
-    body = <Spinner label={t('editor.launcher.opening')} block />
+    body = <Loading label={t('editor.launcher.opening')} block />
   } else if (data.state === 'unresponsive') {
     title = t('editor.state.unresponsiveTitle')
     const actions = (
-      <Inline gap={2}>
+      <div className="flex flex-wrap gap-2">
         <Button type="button" onClick={() => window.location.assign(data.proxyPath)}>
           {t('editor.launcher.openAnyway')}
         </Button>
-        <Button type="button" variant="secondary" loading={start.isPending} onClick={retry}>
+        <Button type="button" variant="outline" disabled={start.isPending} onClick={retry}>
+          {start.isPending && <Spinner data-icon="inline-start" />}
           {t('editor.restart')}
         </Button>
-      </Inline>
+      </div>
     )
-    // `Alert`, not `EmptyState`, once there is a start error to show: the
-    // same nesting problem as the daemon branch above — a second `<p>` passed
-    // as `EmptyState`'s `description` would land inside the one it already
-    // wraps its own description in. Restart stays available either way, so a
-    // 409 (the running-editor cap) or any other rejected Restart is never a
-    // dead end. `RunningEditorsPanel` is what turns that dead end into
-    // something actionable: it renders nothing on its own until the fetch it
-    // triggers confirms the cap is actually the problem (see its own header
-    // comment), so an unrelated Restart failure never grows an empty panel.
+    // Once there is a start error to show, this becomes an active problem
+    // rather than a quiet dead end — an `Alert` for the message, with
+    // `RunningEditorsPanel` (turns a cap failure into something actionable;
+    // see its own header comment) and the actions underneath. Restart stays
+    // available either way, so a 409 (the running-editor cap) or any other
+    // rejected Restart is never a dead end.
     body = startError ? (
-      <Alert tone="danger" title={title} action={actions}>
-        <Stack gap={3}>
-          <p>{t('editor.state.unresponsiveBody')}</p>
-          <p>{startError}</p>
-          <RunningEditorsPanel onSlotFreed={retry} />
-        </Stack>
-      </Alert>
+      <div className="flex flex-col gap-3">
+        <Alert variant="destructive">
+          <CircleAlertIcon />
+          <AlertTitle>{title}</AlertTitle>
+          <AlertDescription>
+            <div className="flex flex-col gap-2">
+              <p>{t('editor.state.unresponsiveBody')}</p>
+              <p>{startError}</p>
+            </div>
+          </AlertDescription>
+        </Alert>
+        <RunningEditorsPanel onSlotFreed={retry} />
+        {actions}
+      </div>
     ) : (
-      <EmptyState title={title} description={t('editor.state.unresponsiveBody')} action={actions} />
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>{title}</EmptyTitle>
+          <EmptyDescription>{t('editor.state.unresponsiveBody')}</EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>{actions}</EmptyContent>
+      </Empty>
     )
   } else if (data.state === 'starting') {
     title = t('editor.launcher.opening')
@@ -208,21 +233,21 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
     // worker's own cap check fails the operation it queued, which lands here
     // as an ordinary `operation.status === 'failed'`.
     body = failure ? (
-      <Alert
-        tone="danger"
-        title={t('editor.operationFailed')}
-        action={
-          <Button type="button" loading={start.isPending} onClick={retry}>
+      <div className="flex flex-col gap-3">
+        <Alert variant="destructive">
+          <CircleAlertIcon />
+          <AlertTitle>{t('editor.operationFailed')}</AlertTitle>
+          <AlertDescription>{failure}</AlertDescription>
+        </Alert>
+        <div>
+          <Button type="button" disabled={start.isPending} onClick={retry}>
+            {start.isPending && <Spinner data-icon="inline-start" />}
             {t('editor.launcher.retry')}
           </Button>
-        }
-      >
-        <Stack gap={3}>
-          <p>{failure}</p>
-          {data.operation && <EditorStartLog operation={data.operation} />}
-          <RunningEditorsPanel onSlotFreed={retry} />
-        </Stack>
-      </Alert>
+        </div>
+        {data.operation && <EditorStartLog operation={data.operation} />}
+        <RunningEditorsPanel onSlotFreed={retry} />
+      </div>
     ) : (
       <StartingPanel operation={data.operation} />
     )
@@ -233,8 +258,8 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
   }, [title])
 
   return (
-    <div className={styles.page}>
-      <div className={styles.panel}>{body}</div>
+    <div className="flex min-h-dvh items-center justify-center bg-background p-6">
+      <div className="flex w-full max-w-2xl flex-col gap-4">{body}</div>
     </div>
   )
 }
@@ -255,15 +280,11 @@ const START_DETAILS_DELAY_MS = 3000
  * just reached through different doors.
  *
  * Renders nothing but the spinner at first, on purpose: a quick, warm start
- * never shows the note or the log at all, and the spinner's own row is then
- * byte-for-byte the same markup the loading and running states render, so
- * `.panel`'s height — and with it, the spinner's centred position within the
- * full-viewport `.page` — never moves between those three states. Only once
- * the timer below fires (this attempt is still running after
- * `START_DETAILS_DELAY_MS`) does the note and log get appended beneath it;
- * that is a single, deliberate shift, not the back-and-forth the fix here is
- * about, and it never reverses — `showDetails` only ever goes false→true for
- * the life of this component.
+ * never shows the note or the log at all. Only once the timer below fires
+ * (this attempt is still running after `START_DETAILS_DELAY_MS`) does the
+ * note and log get appended beneath it; that is a single, deliberate shift,
+ * not the back-and-forth the fix here is about, and it never reverses —
+ * `showDetails` only ever goes false→true for the life of this component.
  */
 function StartingPanel({ operation }: { operation: EditorOperation | null }) {
   const { t } = useTranslation()
@@ -275,14 +296,16 @@ function StartingPanel({ operation }: { operation: EditorOperation | null }) {
   }, [])
 
   return (
-    <Stack gap={4}>
-      <Spinner label={t('editor.launcher.opening')} block />
+    <div className="flex flex-col gap-4">
+      <Loading label={t('editor.launcher.opening')} block />
       {showDetails && (
         <>
-          <p className={styles.note}>{t('editor.state.startingNote')}</p>
+          <p className="text-center text-sm text-muted-foreground">
+            {t('editor.state.startingNote')}
+          </p>
           <EditorStartLog operation={operation} />
         </>
       )}
-    </Stack>
+    </div>
   )
 }

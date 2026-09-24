@@ -4,6 +4,18 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
+    <!-- Runs before first paint so a dark-mode reader never sees a flash of the
+         light theme while main.tsx and React are still loading. Mirrors
+         themeAtom (src/shared/store/ui.ts): jotai's atomWithStorage JSON-encodes
+         the value, and 'dark' is the same default used there. -->
+    <script>
+      try {
+        var theme = JSON.parse(localStorage.getItem('agentoo:theme') || '"dark"')
+        if (theme !== 'light') document.documentElement.classList.add('dark')
+      } catch {
+        document.documentElement.classList.add('dark')
+      }
+    </script>
     <title>agentoo</title>
   </head>
   <body>

@@ -2,10 +2,9 @@ import { createColumnHelper, getCoreRowModel, useReactTable } from '@tanstack/re
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { DockerDetectedBadge, useDockerDetection } from '@/features/docker'
-import { ActionsMenu, Code, ConfirmDialog, DataTable, type MenuAction } from '@/shared/ui'
+import { ActionsMenu, Code, ConfirmDialog, DataTable, type MenuAction } from '@/shared/components'
 import { type Project, useDeleteProject } from '../hooks/use-projects'
 import { ProjectStatusBadge } from './project-status'
-import styles from './projects-table.module.scss'
 
 const columnHelper = createColumnHelper<Project>()
 
@@ -44,11 +43,15 @@ export function ProjectsTable({
           const project = info.row.original
           // Only a ready project has a checkout to open.
           return project.status === 'ready' ? (
-            <button type="button" className={styles.nameLink} onClick={() => onOpen(project.id)}>
+            <button
+              type="button"
+              className="font-medium text-foreground hover:underline"
+              onClick={() => onOpen(project.id)}
+            >
               {project.name}
             </button>
           ) : (
-            <span className={styles.namePlain}>{project.name}</span>
+            <span className="text-muted-foreground">{project.name}</span>
           )
         },
       }),
@@ -73,7 +76,11 @@ export function ProjectsTable({
       }),
       columnHelper.accessor('path', {
         header: () => t('projects.table.path'),
-        meta: { role: 'secondary', label: t('projects.table.path') },
+        // Not `role: 'secondary'` — that role now also means "truncate to an
+        // ellipsis at lg+" (data-table.tsx), and a path is exactly the kind of
+        // value where cutting off the tail is actively unhelpful; `<Code wrap>`
+        // already keeps a long one from overrunning the row by wrapping it.
+        meta: { label: t('projects.table.path') },
         cell: (info) => <Code wrap>{info.getValue()}</Code>,
       }),
       columnHelper.display({

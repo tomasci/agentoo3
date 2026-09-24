@@ -2,3 +2,6 @@
 # before any test file imports React or the router.
 [test]
 preload = ["./tests/setup.ts"]
+
+[install]
+exact = true

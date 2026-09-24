@@ -1,5 +1,4 @@
 import '@xyflow/react/dist/base.css'
-import './idea-canvas-theme.scss'
 
 import {
   applyNodeChanges,
@@ -15,12 +14,12 @@ import {
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { cn } from '@/shared/lib/utils'
 import type { IdeaBlock, IdeaGroup } from '../hooks/use-idea-canvas'
 import { useUpdateIdeaBlock, useUpdateIdeaGroup } from '../hooks/use-idea-canvas'
 import { IdeaCanvasActionsProvider } from './actions-context'
 import { BlockNode } from './block-node'
 import { GroupNode } from './group-node'
-import styles from './idea-flow-canvas.module.scss'
 import {
   BLOCK_NODE_TYPE,
   blockNodeId,
@@ -31,6 +30,39 @@ import {
 } from './to-nodes'
 
 const NODE_TYPES = { [BLOCK_NODE_TYPE]: BlockNode, [GROUP_NODE_TYPE]: GroupNode }
+
+// React Flow's own theme, expressed through the handful of `--xy-*` custom
+// properties it exposes on `.react-flow` (see `@xyflow/react/dist/base.css`),
+// mapped to this project's shadcn semantic tokens rather than the library's
+// bundled `style.css` (never imported — only `base.css`'s structural rules
+// are). Every value here points at a real shadcn variable, so dark mode
+// follows the app's own `.dark` class with no second signal, the same as
+// every other themed surface.
+//
+// Edge, handle, connection-line and minimap variables are omitted on
+// purpose: this canvas renders `nodesConnectable={false}`, no edges, no
+// `<Handle>` and no `<MiniMap>`, so nothing ever reads them. `--xy-node-*`
+// variables are omitted too — `BlockNode`/`GroupNode` are custom node types,
+// not React Flow's *built-in* ones, so they never read those either; a
+// custom node's look comes entirely from its own `Card`-based markup.
+// `--xy-controls-box-shadow` is left at base.css's own default: it isn't a
+// colour and has no shadcn token to point at.
+const XY_THEME_CLASSNAME = cn(
+  '[--xy-background-color:var(--background)]',
+  '[--xy-background-pattern-color:var(--border)]',
+  '[--xy-controls-button-background-color:var(--card)]',
+  '[--xy-controls-button-background-color-hover:var(--muted)]',
+  '[--xy-controls-button-color:var(--muted-foreground)]',
+  '[--xy-controls-button-color-hover:var(--foreground)]',
+  '[--xy-controls-button-border-color:var(--border)]',
+  '[--xy-selection-background-color:var(--accent)]',
+  '[--xy-selection-border:1px_dotted_var(--primary)]',
+  // Transparent, not a translucent white/gray pill (the library's own
+  // default in both themes): this app's canvas background is neither of
+  // those colours, and a mismatched patch behind the credit link would read
+  // as a rendering bug rather than a deliberate choice.
+  '[--xy-attribution-background-color:transparent]',
+)
 
 export interface IdeaFlowCanvasProps {
   ideaId: string
@@ -150,11 +182,12 @@ function IdeaFlowCanvasInner({
   return (
     <IdeaCanvasActionsProvider value={actionsValue}>
       <section
-        className={styles.canvas}
+        className="relative h-[var(--idea-canvas-height,32rem)] overflow-hidden rounded-lg border"
         aria-label={t('ideas.canvas.flow.heading')}
         onDoubleClick={onDoubleClick}
       >
         <ReactFlow<IdeaCanvasNode>
+          className={XY_THEME_CLASSNAME}
           nodes={nodes}
           onNodesChange={onNodesChange}
           onNodeDragStop={onNodeDragStop}

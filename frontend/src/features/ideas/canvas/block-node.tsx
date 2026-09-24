@@ -3,28 +3,21 @@ import { useViewport } from '@xyflow/react'
 import { type KeyboardEvent, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import {
-  ActionsMenu,
-  Badge,
-  Button,
-  Card,
-  ConfirmDialog,
-  Dialog,
-  Markdown,
-  type MenuAction,
-  Textarea,
-  toast,
-} from '@/shared/ui'
+import { ActionsMenu, ConfirmDialog, Markdown, type MenuAction, toast } from '@/shared/components'
+import { Badge } from '@/shared/ui/badge'
+import { Button } from '@/shared/ui/button'
+import { Card, CardAction, CardContent, CardHeader } from '@/shared/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/dialog'
+import { Textarea } from '@/shared/ui/textarea'
 import { type IdeaBlock, useDeleteIdeaBlock, useUpdateIdeaBlock } from '../hooks/use-idea-canvas'
 import { ideaAssetDownloadUrl, isInlineImage } from '../lib/asset-url'
 import { useIdeaCanvasActions } from './actions-context'
-import styles from './nodes.module.scss'
 import type { IdeaBlockNode } from './to-nodes'
 
 /** Below this zoom, a `Textarea` renders too small to use — the click that
- * would start editing opens the shared `BlockDialog` (an Ark `Dialog`,
- * portalled to `document.body`) instead, which escapes the viewport
- * transform entirely rather than rendering a text field at 60% scale. */
+ * would start editing opens the shared `BlockDialog` (a `Dialog`, portalled
+ * to `document.body`) instead, which escapes the viewport transform entirely
+ * rather than rendering a text field at 60% scale. */
 const INLINE_EDIT_MIN_ZOOM = 0.6
 
 const TEXT_KINDS = new Set(['note', 'requirement', 'example'])
@@ -75,19 +68,24 @@ function ImageBlockBody({
       <>
         <button
           type="button"
-          className={`nodrag ${styles.imageThumbButton}`}
+          className="nodrag block w-full cursor-zoom-in rounded-sm p-0"
           onClick={() => setOpen(true)}
         >
           <img
             src={url}
             alt={title}
-            className={styles.imageThumb}
+            className="block max-h-40 w-full max-w-full rounded-sm object-contain"
             onError={() => setBroken(true)}
           />
         </button>
-        {block.caption && <p className={styles.imageCaption}>{block.caption}</p>}
-        <Dialog open={open} onOpenChange={setOpen} title={title} size="lg">
-          <img src={url} alt={title} className={styles.imageFull} />
+        {block.caption && <p className="mt-1 text-xs text-muted-foreground">{block.caption}</p>}
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>{title}</DialogTitle>
+            </DialogHeader>
+            <img src={url} alt={title} className="block h-auto max-w-full" />
+          </DialogContent>
         </Dialog>
       </>
     )
@@ -97,7 +95,7 @@ function ImageBlockBody({
     <button
       type="button"
       aria-label={t('common.edit')}
-      className={`nodrag ${styles.contentButton}`}
+      className="nodrag block w-full rounded-sm p-0 text-left focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
       onClick={onOpenEdit}
     >
       {asset?.originalFilename ?? block.assetId}
@@ -145,7 +143,7 @@ export function BlockNode({ data, selected }: NodeProps<IdeaBlockNode>) {
         // written (the same principle `idea-canvas.tsx`'s `BlockDialog`
         // follows for its own server errors).
         onError: (e) =>
-          toast({ tone: 'danger', title: apiErrorMessage(e, t('ideas.canvas.updateFailed')) }),
+          toast.add({ type: 'error', title: apiErrorMessage(e, t('ideas.canvas.updateFailed')) }),
       },
     )
   }
@@ -185,21 +183,30 @@ export function BlockNode({ data, selected }: NodeProps<IdeaBlockNode>) {
   ]
 
   return (
-    <div className={styles.root} data-selected={selected || undefined}>
-      <Card padding="sm">
-        <div className={styles.header}>
-          <Badge tone="accent" variant="soft">
-            {t(`ideas.canvas.kind.${block.kind}`)}
-          </Badge>
-          <div className="nodrag">
-            <ActionsMenu label={t('ideas.actionsFor', { title: block.kind })} actions={actions} />
-          </div>
-        </div>
+    <div className="relative w-64" data-selected={selected || undefined}>
+      <Card size="sm">
+        {/* `CardHeader` is a grid, one row per child by default — it only gains
+            the two-column, badge-beside-actions layout once a `CardAction`
+            child is present (`ui/card.tsx`'s `has-data-[slot=card-action]`),
+            the same pairing `session-card.tsx` uses for its own title + menu. */}
+        <CardHeader>
+          <Badge>{t(`ideas.canvas.kind.${block.kind}`)}</Badge>
+          <CardAction>
+            <div className="nodrag">
+              <ActionsMenu label={t('ideas.actionsFor', { title: block.kind })} actions={actions} />
+            </div>
+          </CardAction>
+        </CardHeader>
 
-        <div className={styles.body}>
+        <CardContent className="flex min-h-6 flex-col gap-2">
           {block.kind === 'link' && (
             <div className="nodrag">
-              <a href={block.url} target="_blank" rel="noopener noreferrer" className={styles.link}>
+              <a
+                href={block.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="wrap-anywhere text-sm text-primary underline underline-offset-4 hover:no-underline"
+              >
                 {block.label || block.url}
               </a>
             </div>
@@ -230,7 +237,7 @@ export function BlockNode({ data, selected }: NodeProps<IdeaBlockNode>) {
               role="button"
               tabIndex={0}
               aria-label={t('common.edit')}
-              className={`nodrag nowheel ${styles.contentButton} ${styles.contentScroll}`}
+              className="nodrag nowheel max-h-40 overflow-y-auto rounded-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
               onClick={activateContent}
               onKeyDown={(e) => onActivateKeyDown(e, activateContent)}
             >
@@ -239,28 +246,22 @@ export function BlockNode({ data, selected }: NodeProps<IdeaBlockNode>) {
           )}
 
           {isTextKind && editing && (
-            <div className="nodrag">
+            <div className="nodrag flex flex-col gap-2">
               <Textarea
                 rows={3}
-                maxRows={8}
-                autoresize
                 autoFocus
+                className="max-h-48 resize-none"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
               />
-              <div className={styles.editActions}>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => setEditing(false)}
-                >
+              <div className="flex justify-end gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => setEditing(false)}>
                   {t('common.cancel')}
                 </Button>
                 <Button
                   type="button"
                   size="sm"
-                  loading={update.isPending}
+                  disabled={update.isPending}
                   onClick={commitInlineEdit}
                 >
                   {t('common.save')}
@@ -268,7 +269,7 @@ export function BlockNode({ data, selected }: NodeProps<IdeaBlockNode>) {
               </div>
             </div>
           )}
-        </div>
+        </CardContent>
       </Card>
 
       <ConfirmDialog

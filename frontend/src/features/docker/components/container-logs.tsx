@@ -1,15 +1,16 @@
+import { CircleAlertIcon } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Alert, Inline, Stack, StatusDot } from '@/shared/ui'
-import { cx } from '@/shared/ui/lib/cx'
+import { StatusDot } from '@/shared/components'
+import { cn } from '@/shared/lib/utils'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
 import { useContainerLogs } from '../hooks/use-container-logs'
-import styles from './container-logs.module.scss'
 
 /**
  * One container's live logs, streamed — see use-container-logs.ts for the
  * reconnect and cap behaviour. The caller (service-list.tsx's
  * `ContainerPanel`) only ever mounts this while its own log pane is open
- * (`{open && <ContainerLogs .../>}`, not `Collapsible`'s `unmountOnExit` —
+ * (`{open && <ContainerLogs .../>}`, not `Collapsible`'s own unmounting —
  * see that file's own comment on why): this component's effect starts the
  * connection on mount and tears it down on unmount, so that mount/unmount is
  * what actually keeps a closed pane from streaming at all.
@@ -44,8 +45,8 @@ export function ContainerLogs({
   }, [entries])
 
   return (
-    <Stack gap={2}>
-      <Inline gap={2} align="center">
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
         {/* Three states, not two: a reader stuck on "disconnected" during a
             30s backoff wait has no way to tell a stalled stream (the server's
             8-per-process cap, or the daemon down) from a container that is
@@ -55,28 +56,34 @@ export function ContainerLogs({
           tone={connected ? 'success' : reconnecting ? 'warning' : 'neutral'}
           pulse={connected || reconnecting}
         />
-        <span className={styles.status}>
+        <span className="text-xs text-muted-foreground">
           {connected
             ? t('docker.logs.streaming')
             : reconnecting
               ? t('docker.logs.reconnecting')
               : t('docker.logs.connecting')}
         </span>
-      </Inline>
+      </div>
 
-      <div ref={paneRef} className={styles.pane}>
+      <div
+        ref={paneRef}
+        className="max-h-64 overflow-y-auto rounded-md border bg-muted p-3 font-mono text-xs leading-relaxed"
+      >
         {entries.length === 0 ? (
-          <p className={styles.empty}>{t('docker.logs.empty')}</p>
+          <p className="m-0 text-muted-foreground">{t('docker.logs.empty')}</p>
         ) : (
           entries.map((entry) =>
             entry.kind === 'dropped' ? (
-              <p key={entry.id} className={styles.dropped}>
+              <p key={entry.id} className="my-1 text-muted-foreground italic">
                 {t('docker.logs.dropped', { count: entry.lines })}
               </p>
             ) : (
               <p
                 key={entry.id}
-                className={cx(styles.line, entry.stream === 'stderr' && styles.stderr)}
+                className={cn(
+                  'm-0 break-words whitespace-pre-wrap',
+                  entry.stream === 'stderr' && 'text-destructive',
+                )}
               >
                 {entry.text}
               </p>
@@ -85,12 +92,26 @@ export function ContainerLogs({
         )}
       </div>
 
-      {ended && (
-        <Alert tone={ended.reason === 'error' ? 'danger' : 'neutral'}>
-          {t(`docker.logs.ended.${ended.reason}`)}
-          {ended.message ? `: ${ended.message}` : ''}
-        </Alert>
-      )}
-    </Stack>
+      {ended &&
+        (ended.reason === 'error' ? (
+          <Alert variant="destructive">
+            <CircleAlertIcon />
+            <AlertDescription>
+              {t(`docker.logs.ended.${ended.reason}`)}
+              {ended.message ? `: ${ended.message}` : ''}
+            </AlertDescription>
+          </Alert>
+        ) : (
+          // A plain, untinted note rather than a destructive alert — the
+          // container exiting cleanly or the stream simply ending is not a
+          // problem this page needs to flag red.
+          <Alert role="status">
+            <AlertDescription>
+              {t(`docker.logs.ended.${ended.reason}`)}
+              {ended.message ? `: ${ended.message}` : ''}
+            </AlertDescription>
+          </Alert>
+        ))}
+    </div>
   )
 }

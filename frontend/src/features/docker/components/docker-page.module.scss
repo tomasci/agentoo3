@@ -1,8 +1,0 @@
-// Matches storage-page.module.scss's own `.cardTitle` byte for byte — the
-// same "card's own h3" idiom, not yet generic enough to lift into shared/ui.
-.cardTitle {
-  margin: 0;
-  font-size: var(--text-base);
-  line-height: var(--leading-base);
-  font-weight: var(--weight-semibold);
-}

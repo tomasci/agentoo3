@@ -8,10 +8,6 @@
 // can supply exactly the pairs a real phone produces, including the two the
 // previous implementation got wrong and no laptop ever reproduces.
 //
-// No CSS-module identity plugin in this file, unlike the component tests:
-// `use-visual-viewport.ts` imports React and nothing else, so nothing in the
-// graph resolves a `.module.scss`.
-//
 // What is NOT proved here: that `--shell-height` on `<html>` actually moves the
 // composer, that a real iOS keyboard produces the height this asserts on, or
 // that Android's `innerHeight` really is pinned to the URL-bar-hidden maximum.

@@ -3,7 +3,8 @@ import { Provider as JotaiProvider } from 'jotai'
 import type { ReactNode } from 'react'
 import { VersionSkewAlert } from '@/features/health'
 import { configureApiClient } from '@/shared/api/client'
-import { Toaster } from '@/shared/ui'
+import { Toaster } from '@/shared/ui/toast'
+import { TooltipProvider } from '@/shared/ui/tooltip'
 import '@/shared/i18n'
 
 configureApiClient()
@@ -22,9 +23,11 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <JotaiProvider>
       <QueryClientProvider client={queryClient}>
-        {children}
-        <Toaster />
-        <VersionSkewAlert />
+        <TooltipProvider>
+          {children}
+          <Toaster />
+          <VersionSkewAlert />
+        </TooltipProvider>
       </QueryClientProvider>
     </JotaiProvider>
   )

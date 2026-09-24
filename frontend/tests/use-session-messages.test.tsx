@@ -50,8 +50,8 @@ const CLIENT_SPECIFIER = '@/shared/api/generated/clients/getApiSessionsIdMessage
 let delay = 0
 
 // Registered once, at module scope, before the dynamic import below resolves
-// `use-sessions.ts` — the same ordering `tests/transcript-time.test.tsx` uses
-// for its own module-identity plugin, and for the same reason: the mock has
+// `use-sessions.ts` — the same ordering `tests/session-page-scroll.test.tsx`
+// uses for its own mocked clients, and for the same reason: the mock has
 // to be in place before anything imports the real module. Through
 // tests/mock-module.ts rather than `mock.module` directly, so it is taken back
 // when this file is done: `use-sessions.ts` is on the router's static import

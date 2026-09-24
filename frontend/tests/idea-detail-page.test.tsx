@@ -235,17 +235,18 @@ afterEach(unmount)
 
 /**
  * The explorer's own tree root: the first `<ul>` in document order holding
- * either a block row (`<li><button title=…>`) or a group row
- * (`<li><div><button aria-expanded=…>`). Both anchors are needed — a tree of
+ * either a block row (`<li>` wrapping a `<button title=…>`, an `Item`'s worth
+ * of markup deep) or a group row (`<li>` wrapping a `<button aria-expanded>`).
+ * Descendant selectors, not child ones — `Item`'s own wrapper `<div>` is an
+ * implementation detail of shadcn's component, not something this test
+ * should have to know the exact depth of. Both anchors are needed — a tree of
  * nothing but a collapsed group has no block row in it at all. Neither the
  * workspace tab bar's `<ul>` nor the sidebar carries either shape, and a
  * group's nested sublist always comes after the tree containing it.
  */
 function tree(): HTMLElement {
   const found = [...container.querySelectorAll('ul')].find(
-    (ul) =>
-      ul.querySelector('li > button[title]') ||
-      ul.querySelector('li > div > button[aria-expanded]'),
+    (ul) => ul.querySelector('li button[title]') || ul.querySelector('li button[aria-expanded]'),
   )
   if (!found) throw new Error('no explorer tree in the rendered page')
   return found
@@ -254,23 +255,24 @@ function tree(): HTMLElement {
 /** Every block row's name, in render order — the row's `title` is exactly the
  *  single-line name it displays. */
 const rowNames = (scope: HTMLElement = tree()) =>
-  [...scope.querySelectorAll('li > button[title]')].map((b) => b.getAttribute('title'))
+  [...scope.querySelectorAll('li button[title]')].map((b) => b.getAttribute('title'))
 
 /** Only the tree's own top-level items — a group's members live in a nested
  *  `<ul>` and must not show up here. */
 const topLevelItems = (): HTMLElement[] =>
   [...tree().children].filter((el): el is HTMLElement => el.tagName === 'LI')
 
-/** Opens `trigger`'s menu and returns its item labels. Two events in two
- *  separate `act`s is only needed to *select* an item (see
- *  tests/storage-page.test.tsx); reading the labels needs the open click. */
+/** Opens `trigger`'s menu and returns its item labels. Base UI's menu
+ *  unmounts its popup entirely while closed, so a bare `[role="menu"]` only
+ *  ever matches an open one — no `data-state="open"` qualifier needed the way
+ *  Ark/Zag's menu required. */
 async function openMenuLabels(trigger: HTMLElement): Promise<(string | null)[]> {
   await act(async () => {
     trigger.click()
   })
-  return [
-    ...document.body.querySelectorAll('[role="menu"][data-state="open"] [role="menuitem"]'),
-  ].map((el) => el.textContent)
+  return [...document.body.querySelectorAll('[role="menu"] [role="menuitem"]')].map(
+    (el) => el.textContent,
+  )
 }
 
 test('the explorer lists blocks in seq order, not in the order the DTO array arrives in', async () => {
@@ -301,7 +303,7 @@ test('the explorer is structure only — no ordinals, no <ol>, no body, no image
   expect(pane.textContent).not.toContain('A second line that is body, not a name')
 
   // A kind badge, and the name — nothing else in the row's own click target.
-  const rowButton = pane.querySelector('li > button[title]') as HTMLElement
+  const rowButton = pane.querySelector('li button[title]') as HTMLElement
   expect([...rowButton.children].map((el) => el.tagName)).toEqual(['SPAN', 'SPAN'])
   expect(rowButton.children[0]?.textContent).toBe('Note')
 })
@@ -421,9 +423,43 @@ const buttonsByText = (scope: ParentNode, text: string) =>
 
 const settingsForm = () => document.getElementById(SETTINGS_FORM_ID) as HTMLFormElement | null
 
-/** The dialog panel holding the settings form — `data-part="content"` is
- *  Ark's own naming, and it is the element carrying open/closed state. */
-const settingsPanel = () => settingsForm()?.closest('[data-part="content"]') as HTMLElement | null
+/** The dialog panel holding the settings form. Base UI's `Dialog` unmounts
+ *  its popup entirely while closed (unlike Ark's, which kept a closed
+ *  dialog's content in the DOM, hidden), so this is `null` exactly when the
+ *  dialog is closed — no `data-state`/`hidden` check needed to tell. */
+const settingsPanel = () =>
+  (settingsForm()?.closest('[data-slot="dialog-content"]') ?? null) as HTMLElement | null
+
+/** The control a `FieldLabel`'s `for` points at, for the field whose label
+ *  starts with `text` — an `<input>` for every field but Orchestrator, whose
+ *  Base UI `Select` has no native `<select>`; that field's own control is its
+ *  trigger `<button>`, read by visible text (`SelectValue`) rather than
+ *  `.value`. */
+const labelledControl = (scope: ParentNode, text: string): HTMLElement => {
+  const label = [...scope.querySelectorAll('label')].find((l) => l.textContent?.startsWith(text))
+  if (!label) throw new Error(`no label starting with ${JSON.stringify(text)}`)
+  const control = document.getElementById(label.getAttribute('for') ?? '')
+  if (!control) throw new Error(`no control for label ${JSON.stringify(text)}`)
+  return control
+}
+
+/** Opens the orchestrator trigger's popup and clicks the option whose text
+ *  starts with `optionText`. A plain click both opens the popup and selects
+ *  an option — no `pointerdown` priming needed the way Zag's select did. */
+const chooseOrchestrator = async (trigger: HTMLElement, optionText: string) => {
+  await act(async () => {
+    trigger.click()
+  })
+  await settle()
+  const option = [...document.body.querySelectorAll('[role="option"]')].find((el) =>
+    el.textContent?.startsWith(optionText),
+  ) as HTMLElement | undefined
+  if (!option) throw new Error(`no open option starting with ${JSON.stringify(optionText)}`)
+  await act(async () => {
+    option.click()
+  })
+  await settle()
+}
 
 const openSettings = async () => {
   const triggers = buttonsByText(container, 'Settings')
@@ -463,32 +499,6 @@ const type = async (el: HTMLInputElement, value: string) => {
 
 const field = <T extends HTMLElement>(selector: string) =>
   settingsForm()?.querySelector(selector) as T | null
-
-/**
- * Raises the budget by one step through the NumberInput's own increment
- * trigger.
- *
- * Not by typing: Zag's number input reads keystrokes through React's
- * `onInput`, which — unlike `onChange` — React does not dispatch for a
- * programmatic `input` event, so a synthetic keystroke changes the DOM node's
- * value and nothing else (verified against `NumberInput` in isolation). The
- * trigger is a real user affordance and goes through the same
- * `onValueChange` -> `Controller` path a keystroke would.
- */
-const bumpBudget = async () => {
-  const inc = settingsForm()?.querySelector(
-    '[data-part="increment-trigger"]',
-  ) as HTMLElement | null
-  if (!inc) throw new Error('no budget increment trigger in the settings dialog')
-  // pointerdown starts Zag's press-and-hold spinner, pointerup ends it; the
-  // click alone is not what the machine listens for.
-  await act(async () => {
-    inc.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, button: 0 }))
-    inc.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, button: 0 }))
-    inc.click()
-  })
-  await settle()
-}
 
 test('the title is the first thing on the page, with the canvas directly under it', async () => {
   await mount()
@@ -540,7 +550,6 @@ test('the run settings are nowhere on the page body — the dialog holding them 
 
   // None of the four controls, and none of their labels, in the page itself.
   expect(container.querySelector('input[name="title"]')).toBeNull()
-  expect(container.querySelector('select[name="orchestrator"]')).toBeNull()
   expect(container.querySelector('input[name="baseBranch"]')).toBeNull()
   expect(container.querySelector('input[name="maxBudgetUsd"]')).toBeNull()
   expect(buttonsByText(container, 'Save changes')).toHaveLength(0)
@@ -549,14 +558,12 @@ test('the run settings are nowhere on the page body — the dialog holding them 
   expect(container.textContent).not.toContain('Spend cap')
   expect(container.textContent).not.toContain('Orchestrator')
 
-  // The form is mounted — Ark keeps a closed dialog's content in the DOM —
-  // but in document.body's portal, behind a `hidden` panel, never in the page.
-  const form = settingsForm()
-  expect(form).not.toBeNull()
-  expect(container.contains(form)).toBe(false)
-  const panel = settingsPanel()
-  expect(panel?.getAttribute('data-state')).toBe('closed')
-  expect(panel?.hasAttribute('hidden')).toBe(true)
+  // Base UI's `Dialog` unmounts a closed popup entirely — unlike Ark, which
+  // kept its content in the DOM, hidden, behind a `data-state="closed"`
+  // panel — so the form (and the dialog holding it) simply is not anywhere
+  // in the document while closed.
+  expect(settingsForm()).toBeNull()
+  expect(settingsPanel()).toBeNull()
 })
 
 test('the Settings button opens a dialog holding all four run-settings fields', async () => {
@@ -565,26 +572,27 @@ test('the Settings button opens a dialog holding all four run-settings fields', 
   await mount()
   await openSettings()
 
-  const panel = settingsPanel() as HTMLElement
-  expect(panel.getAttribute('data-state')).toBe('open')
-  expect(panel.hasAttribute('hidden')).toBe(false)
+  const panel = settingsPanel()
+  expect(panel).not.toBeNull()
 
   // Each field is present, labelled, and seeded from the loaded row.
-  const labelled = (text: string) => {
-    const label = [...panel.querySelectorAll('label')].find((l) => l.textContent?.startsWith(text))
-    expect(label).toBeDefined()
-    const control = document.getElementById(label?.getAttribute('for') ?? '')
-    expect(control).not.toBeNull()
-    return control as HTMLInputElement | HTMLSelectElement
-  }
-  expect(labelled('Title').getAttribute('name')).toBe('title')
-  expect((labelled('Title') as HTMLInputElement).value).toBe('An idea')
-  expect(labelled('Orchestrator').getAttribute('name')).toBe('orchestrator')
-  expect((labelled('Orchestrator') as HTMLSelectElement).value).toBe('lead')
-  expect(labelled('Base branch').getAttribute('name')).toBe('baseBranch')
-  expect((labelled('Base branch') as HTMLInputElement).value).toBe('release/7')
-  expect(labelled('Spend cap (USD)').getAttribute('name')).toBe('maxBudgetUsd')
-  expect((labelled('Spend cap (USD)') as HTMLInputElement).value).toBe('42')
+  const title = labelledControl(panel as HTMLElement, 'Title') as HTMLInputElement
+  expect(title.getAttribute('name')).toBe('title')
+  expect(title.value).toBe('An idea')
+
+  // Orchestrator's own control is a trigger button, not a native `<select>`
+  // — its "value" is the selected item's visible label.
+  const orchestrator = labelledControl(panel as HTMLElement, 'Orchestrator')
+  expect(orchestrator.tagName).toBe('BUTTON')
+  expect(orchestrator.textContent).toContain('lead')
+
+  const baseBranch = labelledControl(panel as HTMLElement, 'Base branch') as HTMLInputElement
+  expect(baseBranch.getAttribute('name')).toBe('baseBranch')
+  expect(baseBranch.value).toBe('release/7')
+
+  const budget = labelledControl(panel as HTMLElement, 'Spend cap (USD)') as HTMLInputElement
+  expect(budget.getAttribute('name')).toBe('maxBudgetUsd')
+  expect(budget.value).toBe('42')
 
   expect(saveButton()).toBeDefined()
 })
@@ -594,9 +602,12 @@ test('the budget field still bounds itself to 1..1000', async () => {
   await mount()
   await openSettings()
 
+  // A plain native `<input type="number">` now, not Ark's own spinbutton
+  // widget — the bound lives in the HTML `min`/`max` attributes themselves
+  // rather than an `aria-valuemin`/`aria-valuemax` pair a custom widget adds.
   const budget = field<HTMLInputElement>('input[name="maxBudgetUsd"]') as HTMLInputElement
-  expect(budget.getAttribute('aria-valuemin')).toBe('1')
-  expect(budget.getAttribute('aria-valuemax')).toBe('1000')
+  expect(budget.getAttribute('min')).toBe('1')
+  expect(budget.getAttribute('max')).toBe('1000')
 })
 
 test('the orchestrator options are the library\'s orchestrators plus None — subagents excluded', async () => {
@@ -608,16 +619,18 @@ test('the orchestrator options are the library\'s orchestrators plus None — su
   await mount()
   await openSettings()
 
-  const select = field<HTMLSelectElement>('select[name="orchestrator"]') as HTMLSelectElement
-  expect([...select.options].map((o) => [o.value, o.textContent])).toEqual([
-    ['', 'None'],
-    ['lead', 'lead'],
-    ['second-lead', 'second-lead'],
-  ])
+  const panel = settingsPanel() as HTMLElement
+  const trigger = labelledControl(panel, 'Orchestrator')
+  await act(async () => {
+    trigger.click()
+  })
+  await settle()
+  const optionLabel = (o: Element) => o.querySelector('span > span')?.textContent?.trim() ?? o.textContent?.trim()
+  const options = [...document.body.querySelectorAll('[role="option"]')].map(optionLabel)
+  expect(options).toEqual(['None', 'lead', 'second-lead'])
 
   // With orchestrators in the library the field shows the hint, not the
   // "library is empty" message.
-  const panel = settingsPanel() as HTMLElement
   expect(panel.textContent).toContain(
     'The agent from the library that drives the session once this idea is handed off.',
   )
@@ -629,10 +642,16 @@ test('an empty agent library swaps the orchestrator hint for the empty-library m
   await mount()
   await openSettings()
 
-  const select = field<HTMLSelectElement>('select[name="orchestrator"]') as HTMLSelectElement
-  expect([...select.options].map((o) => o.value)).toEqual([''])
-
   const panel = settingsPanel() as HTMLElement
+  const trigger = labelledControl(panel, 'Orchestrator')
+  await act(async () => {
+    trigger.click()
+  })
+  await settle()
+  const optionLabel = (o: Element) => o.querySelector('span > span')?.textContent?.trim() ?? o.textContent?.trim()
+  const options = [...document.body.querySelectorAll('[role="option"]')].map(optionLabel)
+  expect(options).toEqual(['None'])
+
   expect(panel.textContent).toContain(
     'No orchestrator agents in the library yet. Add one with role: orchestrator.',
   )
@@ -676,7 +695,7 @@ test('clicking the footer save button submits the form and PATCHes the idea', as
   })
 
   // A saved dialog closes itself.
-  expect(settingsPanel()?.getAttribute('data-state')).toBe('closed')
+  expect(settingsPanel()).toBeNull()
 })
 
 test('edited values reach the PATCH body, with the base branch trimmed', async () => {
@@ -689,7 +708,10 @@ test('edited values reach the PATCH body, with the base branch trimmed', async (
     field<HTMLInputElement>('input[name="baseBranch"]') as HTMLInputElement,
     '  release/8  ',
   )
-  await bumpBudget()
+  // A plain number input now, not Ark's stepper widget — typed like any
+  // other field rather than nudged through an increment trigger that no
+  // longer exists.
+  await type(field<HTMLInputElement>('input[name="maxBudgetUsd"]') as HTMLInputElement, '100')
 
   await act(async () => {
     saveButton().click()
@@ -701,7 +723,7 @@ test('edited values reach the PATCH body, with the base branch trimmed', async (
     title: 'Renamed idea',
     orchestrator: null,
     baseBranch: 'release/8',
-    maxBudgetUsd: 43,
+    maxBudgetUsd: 100,
   })
 })
 
@@ -737,28 +759,10 @@ test('choosing an orchestrator in the dialog carries it into the PATCH body', as
   await openSettings()
 
   const panel = settingsPanel() as HTMLElement
-  const trigger = panel.querySelector(
-    '[data-scope="select"][data-part="trigger"]',
-  ) as HTMLElement
-  await act(async () => {
-    trigger.click()
-  })
-  await settle()
-  const option = [...document.body.querySelectorAll('[data-scope="select"][role="option"]')].find(
-    (el) => el.textContent?.startsWith('lead'),
-  ) as HTMLElement
-  expect(option).toBeDefined()
-  // Two events in two `act`s — see selectRowMenuItem in storage-page.test.tsx
-  // for why zag needs the highlight transition to land before the click.
-  await act(async () => {
-    option.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }))
-  })
-  await act(async () => {
-    option.click()
-  })
-  await settle()
+  const trigger = labelledControl(panel, 'Orchestrator')
+  await chooseOrchestrator(trigger, 'lead')
 
-  expect((field<HTMLSelectElement>('select[name="orchestrator"]') as HTMLSelectElement).value).toBe(
+  expect(labelledControl(settingsPanel() as HTMLElement, 'Orchestrator').textContent).toContain(
     'lead',
   )
 
@@ -784,7 +788,7 @@ test('an empty title is refused by the resolver and never reaches the API', asyn
   expect(updateCalls).toHaveLength(0)
   expect(settingsPanel()?.textContent).toContain('Give the idea a title')
   // Still open, so the reader can fix it.
-  expect(settingsPanel()?.getAttribute('data-state')).toBe('open')
+  expect(settingsPanel()).not.toBeNull()
 })
 
 test('a rejected save shows the API message and leaves the dialog open', async () => {
@@ -799,7 +803,7 @@ test('a rejected save shows the API message and leaves the dialog open', async (
 
   expect(updateCalls).toHaveLength(1)
   expect(settingsPanel()?.textContent).toContain('Base branch does not exist')
-  expect(settingsPanel()?.getAttribute('data-state')).toBe('open')
+  expect(settingsPanel()).not.toBeNull()
   // Re-enabled, not stuck in its loading state.
   expect(saveButton().hasAttribute('disabled')).toBe(false)
 })
@@ -819,7 +823,7 @@ test('cancelling and reopening re-seeds the form from the saved row, not the aba
     cancel?.click()
   })
   await settle()
-  expect(settingsPanel()?.getAttribute('data-state')).toBe('closed')
+  expect(settingsPanel()).toBeNull()
 
   await openSettings()
   expect((field<HTMLInputElement>('input[name="title"]') as HTMLInputElement).value).toBe('An idea')
@@ -1070,7 +1074,7 @@ test("a run's detail renders as markdown elements, not as literal ## and - chara
   expect(entry.textContent ?? '').not.toContain('- one')
 
   // The shared `Markdown` component and not some other renderer: only that one
-  // forces links away from the app (shared/ui/core/markdown.tsx).
+  // forces links away from the app (shared/components/markdown.tsx).
   const link = entry.querySelector('a[href="https://example.com"]')
   expect(link?.getAttribute('target') ?? '(no link to example.com)').toBe('_blank')
   expect(link?.getAttribute('rel') ?? '(no link to example.com)').toBe('noopener noreferrer')
@@ -1079,7 +1083,7 @@ test("a run's detail renders as markdown elements, not as literal ## and - chara
 test("a run's detail is displayed, never executed", async () => {
   // A run detail is written by the handoff track from whatever the session
   // reported, so it is not trusted markup. The shared renderer escapes raw
-  // HTML (shared/ui/core/markdown.tsx); this pins that the run path gets the
+  // HTML (shared/components/markdown.tsx); this pins that the run path gets the
   // same treatment rather than an `innerHTML` of its own.
   currentRuns = [run({ detail: 'Boom <img src=x onerror="alert(1)"> <script>alert(2)</script>' })]
   await mount()
