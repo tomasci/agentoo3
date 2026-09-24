@@ -3,10 +3,15 @@
 // daemon down, stopped/starting/running/unresponsive), exactly-once auto-start
 // when stopped, the running→redirect via `window.location.replace`, a failed
 // start's error+log+Retry with no second auto-start, and the back-to-session
-// link on every terminal state. Also covers the launcher's place in the app
-// around it: no shell (TabBar/sidebar/StatusBar) at all, and no workspace tab
-// created by merely visiting it. Everything this file can prove without a
-// real code-server container.
+// link on every terminal state. Also covers the one label
+// (`editor.launcher.opening`) that loading, starting and running all now
+// share, and `StartingPanel`'s own delayed reveal of the note and log (only
+// once a start is still running a few seconds in, never on a quick warm
+// start, and never delayed at all once a start has actually failed). Also
+// covers the launcher's place in the app around it: no shell
+// (TabBar/sidebar/StatusBar) at all, and no workspace tab created by merely
+// visiting it. Everything this file can prove without a real code-server
+// container.
 //
 // Router-mounted, but through this file's OWN tiny route tree — never
 // `import { routeTree } from '../src/app/router'` (contrast
@@ -180,6 +185,10 @@ function editorStatus(overrides: Partial<Status> = {}): Status {
 
 let currentStatus: Status = editorStatus()
 let statusReject: unknown = null
+// Held pending by a test that needs to assert on the loading spinner itself
+// (`status.isPending`, before the query resolves either way) — `null` means
+// "resolve straight away", the default for every other test here.
+let statusGate: Promise<void> | null = null
 
 type StatusCall = { path: { id: string; sessionId: string } }
 let statusCalls: StatusCall[] = []
@@ -187,6 +196,7 @@ let statusCalls: StatusCall[] = []
 await mockModule(STATUS_CLIENT, () => ({
   getApiProjectsIdSessionsSessionidEditor: async (opts: StatusCall) => {
     statusCalls.push(opts)
+    if (statusGate) await statusGate
     if (statusReject) throw statusReject
     return { data: currentStatus }
   },
@@ -220,6 +230,43 @@ const offlineTransport = (() =>
     },
   }) as unknown as AxiosInstance)()
 const originalTransport = apiClient.getConfig().transport
+
+// StartingPanel (editor-launcher.tsx) delays its note-and-log reveal by its
+// own `START_DETAILS_DELAY_MS` (3s). Faked below the same way
+// tests/use-container-logs.test.tsx fakes its hook's own retry backoff — but
+// matched on this *exact* delay, not "anything at that scale": `useQuery`
+// (`useEditorStatus`) schedules its own real `setTimeout`s too (query-core's
+// `gcTime`, 5 minutes by default and not overridden by this file's
+// `QueryClient`), and a broad `>= 1000` threshold here was catching those
+// instead of the reveal timer, since both are live at once around a fresh
+// mount. Matching the literal value keeps this file's own 0ms polling ticks
+// (`settle`, `refetchStatus`, `mount`'s own flush loop) and every other
+// timer react-query schedules on the real clock, untouched.
+const REVEAL_DELAY_MS = 3000
+const realSetTimeout = globalThis.setTimeout
+const realClearTimeout = globalThis.clearTimeout
+interface ScheduledRevealTimer {
+  id: number
+  callback: () => void
+}
+let scheduledReveals: ScheduledRevealTimer[] = []
+let nextRevealTimerId = 1
+function fakeSetTimeout(callback: () => void, delay?: number): ReturnType<typeof setTimeout> {
+  if (delay === REVEAL_DELAY_MS) {
+    const id = nextRevealTimerId++
+    scheduledReveals.push({ id, callback })
+    return id as unknown as ReturnType<typeof setTimeout>
+  }
+  return realSetTimeout(callback, delay)
+}
+function fakeClearTimeout(id?: ReturnType<typeof setTimeout>): void {
+  const index = scheduledReveals.findIndex((s) => s.id === id)
+  if (index !== -1) {
+    scheduledReveals.splice(index, 1)
+    return
+  }
+  realClearTimeout(id as Parameters<typeof clearTimeout>[0])
+}
 
 let client: QueryClient
 let container: HTMLDivElement
@@ -275,12 +322,17 @@ beforeEach(() => {
   localStorage.clear()
   currentStatus = editorStatus()
   statusReject = null
+  statusGate = null
   statusCalls = []
   startCalls = []
   startReject = null
   startResponse = null
   replaceCalls = []
   assignCalls = []
+  scheduledReveals = []
+  nextRevealTimerId = 1
+  globalThis.setTimeout = fakeSetTimeout as typeof setTimeout
+  globalThis.clearTimeout = fakeClearTimeout as typeof clearTimeout
   // The same technique tests/version-skew-alert.test.tsx uses for
   // `window.location.reload`: happy-dom's own `location.replace`/`.assign`
   // throw "Not implemented" rather than merely navigating nowhere, so the
@@ -306,6 +358,8 @@ afterAll(() => {
   Object.defineProperty(window.location, 'replace', { configurable: true, value: realReplace })
   Object.defineProperty(window.location, 'assign', { configurable: true, value: realAssign })
   apiClient.setConfig({ transport: originalTransport })
+  globalThis.setTimeout = realSetTimeout
+  globalThis.clearTimeout = realClearTimeout
 })
 
 const buttons = () => [...container.querySelectorAll('button')]
@@ -323,6 +377,19 @@ const settle = async () => {
       await new Promise((r) => setTimeout(r, 0))
     })
   }
+}
+
+/** Fires `StartingPanel`'s own reveal timer as if `START_DETAILS_DELAY_MS`
+ *  had elapsed — the note and the log are absent until this runs. Throws if
+ *  nothing scheduled one, which is itself useful: it means the page was not
+ *  actually showing `StartingPanel` when this was called. */
+const revealStartingDetails = async () => {
+  const next = scheduledReveals.shift()
+  if (!next) throw new Error('no starting-details reveal timer was scheduled')
+  await act(async () => {
+    next.callback()
+  })
+  await settle()
 }
 
 /** Forces the status query to refetch against whatever `currentStatus` holds
@@ -388,13 +455,17 @@ test('the daemon installed but unreachable gets its own message, with a way back
 
 // --- 4. auto-start when stopped -----------------------------------------------
 
-test('stopped auto-starts exactly once, with only the path, and shows the starting panel', async () => {
+test('stopped auto-starts exactly once, with only the path, and shows the opening spinner alone', async () => {
   await mount()
   await settle()
 
   expect(startCalls).toHaveLength(1)
   expect(startCalls[0]?.path).toEqual({ id: 'p1', sessionId: 's1' })
-  expect(container.textContent).toContain('Starting the editor')
+  expect(container.textContent).toContain('Opening the editor')
+  // A warm start (the common case, and the only one this default status ever
+  // exercises) never shows the note or the log at all — see the reveal-delay
+  // tests below.
+  expect(container.textContent).not.toContain('Waiting for output')
   // The mocked start response above moves the cache to 'starting' — further
   // ticks (standing in for `useEditorStatus`'s own polling) must not start it
   // again just because it is still not 'running' yet.
@@ -424,7 +495,7 @@ test('starting, opened directly, never auto-starts a second time', async () => {
 
 // --- 5. starting ---------------------------------------------------------------
 
-test('starting shows the note about the image pull and the start log', async () => {
+test('starting shows only the opening spinner at first — no note, no log', async () => {
   currentStatus = editorStatus({
     state: 'starting',
     operation: operation({
@@ -434,8 +505,31 @@ test('starting shows the note about the image pull and the start log', async () 
   })
   await mount()
 
+  expect(container.textContent).toContain('Opening the editor')
+  expect(container.textContent).not.toContain('370')
+  expect(container.textContent).not.toContain('Pulling codercom/code-server:4.138.0')
+  expect(container.textContent).not.toContain('Waiting for output')
+})
+
+test('the note about the image pull and the start log appear once a start is still running a few seconds in', async () => {
+  currentStatus = editorStatus({
+    state: 'starting',
+    operation: operation({
+      status: 'running',
+      output: [{ stream: 'stdout', text: 'Pulling codercom/code-server:4.138.0', at: T }],
+    }),
+  })
+  await mount()
+  expect(container.textContent).not.toContain('370')
+
+  await revealStartingDetails()
+
   expect(container.textContent).toContain('370')
   expect(container.textContent).toContain('Pulling codercom/code-server:4.138.0')
+  // Never flashes back off once shown, even as later polling ticks keep
+  // re-rendering this same 'starting' status.
+  await settle()
+  expect(container.textContent).toContain('370')
 })
 
 // --- 6. running ------------------------------------------------------------------
@@ -470,6 +564,10 @@ test("the auto-start's own failure shows the error and the log, offers Retry, an
   })
   await refetchStatus()
 
+  // Immediately — unlike `StartingPanel`'s own delayed reveal, a failed
+  // start's log is never held back. No `revealStartingDetails()` call here:
+  // if this were still waiting on that timer, `Start log` would be missing.
+  expect(container.textContent).toContain('Start log')
   expect(container.textContent).toContain('docker pull failed: no space left on device')
   expect(container.textContent).toContain('no space left on device')
   const retry = findButton('Retry')
@@ -556,7 +654,7 @@ test("sets the browser tab's own title while mounted, and restores it on unmount
   // default status from 'stopped' to 'starting' (see the auto-start tests
   // above) — the title tracks that, same as the body does.
   expect(document.title).not.toBe('agentoo')
-  expect(document.title).toBe('Starting the editor…')
+  expect(document.title).toBe('Opening the editor…')
 
   await unmount()
   expect(document.title).toBe('agentoo')
@@ -592,22 +690,40 @@ test('the title matches whatever error page is actually showing, not a generic "
   await unmount()
 })
 
-test('the title reads "starting" only while a start is actually in flight or the tab is about to leave', async () => {
+test('the loading, starting and running states all read the same "Opening the editor…" title — no other label in between', async () => {
+  // Loading: the status query itself has not resolved yet.
+  let release: () => void = () => {
+    throw new Error('release called before it was assigned')
+  }
+  statusGate = new Promise((resolve) => {
+    release = resolve
+  })
+  await mount()
+  expect(container.textContent).toContain('Opening the editor')
+  expect(document.title).toBe('Opening the editor…')
+  release()
+  await settle()
+  statusGate = null
+  await unmount()
+
+  // Starting, reported directly by the backend.
   currentStatus = editorStatus({
     state: 'starting',
     operation: operation({ status: 'running' }),
   })
   await mount()
-  expect(document.title).toBe('Starting the editor…')
+  expect(document.title).toBe('Opening the editor…')
   await unmount()
 
   // 'stopped' with no failure yet — the auto-start effect just fired (or is
   // about to) — reads the same as an explicit 'starting', not as idle.
+  currentStatus = editorStatus()
   await mount()
   await settle()
-  expect(document.title).toBe('Starting the editor…')
+  expect(document.title).toBe('Opening the editor…')
   await unmount()
 
+  // Running, about to redirect.
   currentStatus = editorStatus({
     state: 'running',
     container: { name: 'agentoo_editor-alpha_s-abc123', state: 'running', startedAt: T },
@@ -642,7 +758,7 @@ test('a trailing slash on the launcher URL still matches this route and renders 
   })
   await mount('/projects/p1/sessions/s1/editor/')
 
-  expect(container.textContent).toContain('Starting the editor')
+  expect(container.textContent).toContain('Opening the editor')
   expect(statusCalls[0]?.path).toEqual({ id: 'p1', sessionId: 's1' })
 })
 
