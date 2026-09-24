@@ -20,6 +20,10 @@ export function SessionCard({ session, projectId }: { session: Session; projectI
   const navigate = useNavigate()
   const remove = useDeleteSession(projectId)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // Shared by the title link's visible text and its `title` attribute (the
+  // full name, reachable even once the visible text is clipped), so the two
+  // can never drift from each other.
+  const displayTitle = session.title ?? t('sessions.untitled', { id: session.id.slice(0, 8) })
 
   const metaItems: DefinitionItem[] = [
     {
@@ -75,15 +79,21 @@ export function SessionCard({ session, projectId }: { session: Session; projectI
       <Card>
         <CardHeader>
           <CardTitle className="min-w-0">
+            {/* `block`, not just `truncate`: a `Link` renders an inline `<a>`,
+                and `text-overflow: ellipsis` has no effect on an inline box, so
+                the title kept its full min-content width and ran under the
+                badges instead of eliding. `title` keeps the full name reachable
+                once the visible text is clipped. */}
             <Link
               to="/projects/$projectId/sessions/$sessionId"
               params={{ projectId, sessionId: session.id }}
-              className="truncate text-inherit no-underline hover:text-primary hover:underline"
+              className="block truncate text-inherit no-underline hover:text-primary hover:underline"
+              title={displayTitle}
             >
-              {session.title ?? t('sessions.untitled', { id: session.id.slice(0, 8) })}
+              {displayTitle}
             </Link>
           </CardTitle>
-          <CardAction>
+          <CardAction className="shrink-0">
             <div className="flex items-center gap-2">
               <Badge variant="outline">{t(`sessions.status.${session.status}`)}</Badge>
               {/* Worth surfacing: a shared checkout means two sessions on this

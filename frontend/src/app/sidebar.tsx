@@ -85,7 +85,7 @@ function SystemNav() {
       />
       <SidebarContent>
         <SidebarGroup>
-          <SidebarMenu>
+          <SidebarMenu className="gap-1">
             <SidebarMenuItem>
               <SidebarMenuButton
                 render={
@@ -185,7 +185,7 @@ function ProjectNav({ projectId }: { projectId: string }) {
       />
       <SidebarContent>
         <SidebarGroup>
-          <SidebarMenu>
+          <SidebarMenu className="gap-1">
             <SidebarMenuItem>
               <SidebarMenuButton
                 render={
