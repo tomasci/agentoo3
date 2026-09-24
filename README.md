@@ -3,7 +3,10 @@
 An AI system that installs onto a bare Ubuntu server with one command.
 
 Targets **Ubuntu 22.04+** (developed on 26.04), `x86_64` / `aarch64`, headless.
-No desktop and no interactive prompts required.
+No desktop, and no interactive prompts required beyond one optional question at
+the very end — whether to also serve HTTPS on a domain of your own (`--yes`
+skips it, and it can always be set up later; see "Your own domain (optional)"
+below).
 
 ## Install
 
@@ -425,9 +428,12 @@ Claude Code asks for 4 GB RAM; the step warns below that but does not fail.
 
 ## Serving over Tailscale
 
-There is no certbot and no Let's Encrypt. The system is reached over Tailscale,
-and WireGuard already encrypts every byte between client and host, so plain HTTP
-on `tailscale0` is not traffic in the clear.
+By default there is no certbot and no Let's Encrypt. The system is reached over
+Tailscale, and WireGuard already encrypts every byte between client and host,
+so plain HTTP on `tailscale0` is not traffic in the clear. (Certbot enters the
+picture only if you opt into a domain of your own — see "Your own domain
+(optional)" below — and even then only for that domain's certificate, never for
+the tailnet.)
 
 nginx runs after Tailscale so it can pick up the node's identity, and the site's
 `server_name` is filled in automatically:
@@ -462,6 +468,75 @@ enabled for the tailnet in the admin console under DNS. If that is off, the step
 says so and leaves nginx serving plain HTTP.
 
 Set `NGINX_DOMAIN` only to override the detected name with a domain of your own.
+(That just changes nginx's `server_name` on the tailnet listener — it does not
+get you a browser-trusted certificate. For that, see the next section.)
+
+### Your own domain (optional)
+
+At the end of an install, if a terminal is available and you didn't pass
+`--yes`, the installer asks for a domain to serve over HTTPS. Answer with a
+domain you control that is on Cloudflare, and it will:
+
+1. Ask for the Let's Encrypt account email and a Cloudflare API token.
+2. Look up which Cloudflare zone covers the domain, to make sure the token
+   actually covers it.
+3. Make sure the domain's DNS **A** record points at this node's Tailscale
+   IPv4 — **DNS-only** (Cloudflare's orange-cloud proxy off), never proxied.
+   The installer creates the record if there is none, and only repoints an
+   existing single A record when it already looks like its own to begin with
+   (Tailscale's own address range, a private/local IP, or carrying the
+   installer's own comment). Anything else — including someone else's
+   proxied, publicly-reachable site — is left alone with a warning; the
+   certificate is still issued either way, since DNS-01 doesn't need this
+   record at all.
+4. Get a certificate from Let's Encrypt via certbot's Cloudflare DNS-01
+   plugin — nothing is exposed to the public internet to prove ownership,
+   because the challenge is answered over the Cloudflare API, not by
+   serving a file or a port.
+5. Have nginx terminate TLS on port 443 for that domain and 301-redirect
+   its plain HTTP.
+
+The Cloudflare **API token** needs only **Zone → DNS → Edit**, scoped to the
+one zone that covers your domain — never the account-wide Global API Key. It
+is stored at `/etc/letsencrypt/<app>-cloudflare.ini` (root, mode 0600), never
+in the settings file the installer otherwise remembers choices in, because
+certbot's renewal timer needs it again later.
+
+The host itself stays tailnet-only either way: this only opens port 443, and
+only for nginx to terminate TLS on the one domain you configured — nothing
+else about the firewall or the tailnet posture changes. Once a custom domain
+takes over port 443, `tailscale serve` is turned off (tailscaled and nginx
+cannot both hold that port), so `https://<name>.ts.net/` stops answering; the
+plain `http://` tailnet URLs keep working exactly as before. Your hostname
+will appear in public Certificate Transparency logs, as it would for any
+publicly-trusted certificate.
+
+Only Cloudflare DNS is supported (the DNS-01 plugin is Cloudflare-specific).
+
+```
+# unattended (also works non-interactively with --yes)
+HTTPS_DOMAIN=ai.example.com HTTPS_EMAIL=you@example.com \
+  CLOUDFLARE_API_TOKEN=... /opt/agentoo/install.sh --only https
+
+# change to a different domain (reuses the stored token unless a new one is given)
+HTTPS_DOMAIN=new.example.com /opt/agentoo/install.sh --only https
+
+# disable (certificate and DNS record are left in place; the step prints
+# a `certbot delete` hint if you want to remove the certificate too)
+HTTPS_DOMAIN=none /opt/agentoo/install.sh --only https
+
+# forget the answer and be asked again next time
+HTTPS_DOMAIN= /opt/agentoo/install.sh --only https
+```
+
+Fully idempotent: a later plain `curl .../bootstrap.sh | sudo bash` neither
+re-asks nor undoes any of this — it just confirms the certificate, the DNS
+record and nginx still agree, and quietly fixes anything that has drifted.
+
+Left on disk once configured: the Cloudflare credentials file above, a certbot
+deploy hook at `/etc/letsencrypt/renewal-hooks/deploy/<app>-reload-nginx` (reloads
+nginx after every renewal), and the certificate itself under
+`/etc/letsencrypt/live/<your-domain>/`.
 
 ## What gets exposed
 
@@ -473,6 +548,7 @@ Nothing is published on the public interface except a way in.
 | SSH (detected, usually 22) | tailnet only, once Tailscale is up | rate-limited with `ufw limit` while still public |
 | 41641/udp | anywhere | Tailscale WireGuard — this is what makes the rest reachable |
 | 80 (nginx), backend 8000, frontend 3000 | **`tailscale0` only** | the app is served over the tailnet |
+| 443 (nginx) | **`tailscale0` only** — unless a custom domain is configured, in which case nginx alone terminates TLS there for that one domain | see "Your own domain (optional)" above |
 | PostgreSQL 5432, Redis 6379 | **nothing** — loopback only | never exposed |
 
 80 and 443 are **closed** on the public interface. Set
@@ -547,6 +623,11 @@ WORKER_CONCURRENCY=6 /opt/agentoo/install.sh --only backend
 
 # soft memory ceiling for the worker and everything its agents run
 WORKER_MEMORY_HIGH=3G /opt/agentoo/install.sh --only backend
+
+# your own domain over HTTPS (see "Your own domain (optional)" above)
+HTTPS_DOMAIN=ai.example.com /opt/agentoo/install.sh --only https
+HTTPS_EMAIL=you@example.com /opt/agentoo/install.sh --only https
+CLOUDFLARE_API_TOKEN=... /opt/agentoo/install.sh --only https
 ```
 
 Adding a package means appending to `PKGS_UTILS` in that file — nothing else.

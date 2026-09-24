@@ -1,0 +1,4 @@
+#!/usr/bin/bash
+. "$(dirname "$0")/_lib.sh"
+_fake_log dig "$@"
+echo "${FAKE_DIG_ANSWER-100.101.102.103}"

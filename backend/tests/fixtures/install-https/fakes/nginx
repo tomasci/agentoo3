@@ -1,0 +1,21 @@
+#!/usr/bin/bash
+# Fake nginx. -v prints FAKE_NGINX_VERSION to stderr like the real one;
+# -t passes, always fails (FAKE_NGINX_T=fail), or fails only while the site
+# file contains a 443 listener (FAKE_NGINX_T=fail443).
+. "$(dirname "$0")/_lib.sh"
+_fake_log nginx "$@"
+case "${1:-}" in
+  -v) echo "nginx version: nginx/${FAKE_NGINX_VERSION:-1.28.3}" >&2; exit 0 ;;
+  -t)
+    site="$NGINX_CONF_DIR/sites-available/agentoo"
+    case "${FAKE_NGINX_T:-ok}" in
+      ok) exit 0 ;;
+      fail) echo "nginx: [emerg] fake failure" >&2; exit 1 ;;
+      fail443)
+        if grep -q 'listen 443' "$site" 2>/dev/null; then
+          echo "nginx: [emerg] fake: cannot load certificate" >&2; exit 1
+        fi
+        exit 0 ;;
+    esac ;;
+esac
+exit 1

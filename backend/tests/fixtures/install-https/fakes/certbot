@@ -1,0 +1,26 @@
+#!/usr/bin/bash
+# Fake certbot: either fails (FAKE_CERTBOT=fail) or "issues" a certificate by
+# creating $LETSENCRYPT_DIR/live/<cert-name>/{fullchain,privkey}.pem.
+. "$(dirname "$0")/_lib.sh"
+_fake_log certbot "$@"
+creds="" name=""
+args=("$@")
+for (( i = 0; i < ${#args[@]}; i++ )); do
+  case "${args[i]}" in
+    --dns-cloudflare-credentials) creds="${args[i+1]}" ;;
+    --cert-name) name="${args[i+1]}" ;;
+  esac
+done
+if [[ -n "$creds" ]]; then
+  if [[ -f "$creds" ]]; then stat -c '%a' "$creds" >>"$FAKE_DIR/certbot.creds-mode"
+  else echo missing >>"$FAKE_DIR/certbot.creds-mode"; fi
+fi
+if [[ "${FAKE_CERTBOT:-ok}" == "fail" ]]; then
+  echo "An unexpected error occurred: fake DNS-01 failure" >&2
+  exit 1
+fi
+[[ -n "$name" ]] || { echo "fake certbot: no --cert-name" >&2; exit 2; }
+mkdir -p "$LETSENCRYPT_DIR/live/$name"
+echo "FAKE FULLCHAIN $name" >"$LETSENCRYPT_DIR/live/$name/fullchain.pem"
+echo "FAKE PRIVKEY $name" >"$LETSENCRYPT_DIR/live/$name/privkey.pem"
+exit 0

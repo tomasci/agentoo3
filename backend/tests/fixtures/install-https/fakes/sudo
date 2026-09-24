@@ -1,0 +1,25 @@
+#!/usr/bin/bash
+# Fake sudo: log, strip sudo's own options, refuse anything aimed at the real
+# /etc (a safety net — every path the scripts touch should be in the sandbox),
+# then exec the rest unprivileged.
+. "$(dirname "$0")/_lib.sh"
+_fake_log sudo "$@"
+while (( $# )); do
+  case "$1" in
+    -v|--validate) exit 0 ;;
+    -u|-g|-p|-C|-h|-U|-r|-t|-D) shift 2 ;;
+    --) shift; break ;;
+    -*) shift ;;
+    *) break ;;
+  esac
+done
+for a in "$@"; do
+  case "$a" in
+    /etc/*|*=/etc/*)
+      printf '%s\n' "$*" >>"$FAKE_DIR/BLOCKED"
+      echo "fake sudo: refusing to touch real path: $a" >&2
+      exit 1 ;;
+  esac
+done
+(( $# )) || exit 0
+exec "$@"

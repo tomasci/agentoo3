@@ -1,0 +1,7 @@
+#!/usr/bin/bash
+. "$(dirname "$0")/_lib.sh"
+_fake_log systemctl "$@"
+case "${1:-}" in
+  is-active|is-enabled) exit "${FAKE_SYSTEMCTL_QUERY_RC:-0}" ;;
+esac
+exit 0

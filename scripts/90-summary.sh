@@ -154,8 +154,8 @@ if have ufw; then
   fi
 fi
 
+ts_endpoints=()
 if have tailscale; then
-  ts_endpoints=()
   while read -r endpoint; do
     [[ -n "$endpoint" ]] && ts_endpoints+=("$endpoint")
   done < <(tailscale_endpoints)
@@ -173,6 +173,33 @@ if have tailscale; then
   else
     log_warn "Tailscale is installed but this node has not joined a tailnet."
     log_warn "Run: sudo tailscale up"
+  fi
+fi
+
+# --- custom-domain HTTPS (optional; outside report/svc_report, like Docker) ---
+# setting_recall, not sticky_recall: this is read-only reporting, and
+# sticky_recall logs "Using remembered ..." as though this run had just
+# decided something, which it has not.
+https_domain="$(setting_recall HTTPS_DOMAIN || true)"
+if [[ -n "$https_domain" && "$https_domain" != "none" ]]; then
+  if https_cert_present "$https_domain"; then
+    if https_probe "$https_domain"; then
+      log_ok "Custom domain: https://${https_domain}/"
+      cert_end="$(sudo -n openssl x509 -enddate -noout \
+        -in "$LETSENCRYPT_DIR/live/${https_domain}/fullchain.pem" 2>/dev/null | sed -n 's/^notAfter=//p')"
+      [[ -n "$cert_end" ]] && log_info "    certificate expires $cert_end"
+      log_ok "Reachable at:"
+      printf '    https://%s/\n' "$https_domain" >&2
+      for endpoint in "${ts_endpoints[@]}"; do
+        printf '    %s\n' "$(tailscale_url "$endpoint")" >&2
+      done
+    else
+      log_warn "HTTPS_DOMAIN=$https_domain has a certificate, but https://${https_domain}/ is not answering."
+      log_warn "Run: sudo $INSTALL_SH --only nginx"
+    fi
+  else
+    log_warn "HTTPS_DOMAIN=$https_domain is configured, but no certificate exists for it yet."
+    log_warn "Run: sudo $INSTALL_SH --only https"
   fi
 fi
 

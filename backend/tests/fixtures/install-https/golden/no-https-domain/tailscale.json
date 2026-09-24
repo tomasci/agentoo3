@@ -1,0 +1,6 @@
+{
+  "sudoTailscaleCalls": [
+    "tailscale serve --bg 80"
+  ],
+  "serveBgCalled": true
+}
