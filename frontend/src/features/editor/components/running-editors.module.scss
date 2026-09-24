@@ -1,0 +1,33 @@
+// Same "card's own h3" idiom as docker-page.module.scss's `.cardTitle` and
+// editor-start-log.module.scss's `.heading` — not yet generic enough to lift
+// into shared/ui.
+.heading {
+  margin: 0;
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+  font-weight: var(--weight-semibold);
+}
+
+.projectName {
+  font-weight: var(--weight-semibold);
+}
+
+.sessionTitle {
+  color: var(--color-text-muted);
+}
+
+.lastActive {
+  font-size: var(--text-xs);
+  line-height: var(--leading-xs);
+  color: var(--color-text-muted);
+}
+
+// The otherInstalls line and the "can't list these" explanation — both a
+// plain caption, not an error, so `Alert`'s own danger-tinted body text
+// (this panel sits inside one) would overstate them.
+.muted {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-text-muted);
+}

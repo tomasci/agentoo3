@@ -677,6 +677,22 @@
       "opening": "Opening the editor…",
       "openAnyway": "Open anyway",
       "retry": "Retry"
+    },
+    "runningPanel": {
+      "heading": "Running editors — {{running}} of {{cap}}",
+      "open": "Open",
+      "stop": "Stop",
+      "health": {
+        "inUse": "In use",
+        "idle": "Idle — no open tab",
+        "unresponsive": "Not responding"
+      },
+      "lastActive": "last active {{time}}",
+      "confirmStopTitle": "Stop this editor?",
+      "confirmStopBody": "Someone has this editor open in a tab. Stopping it closes their session; unsaved changes in it may be lost.",
+      "otherInstalls_one": "{{count}} more editor running from another agentoo installation on this machine",
+      "otherInstalls_other": "{{count}} more editors running from another agentoo installation on this machine",
+      "unlisted": "The available slots are held by editors this installation can't list. They free up automatically within a few minutes."
     }
   },
   "prompts": {
