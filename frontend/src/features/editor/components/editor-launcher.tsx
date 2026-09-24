@@ -6,6 +6,7 @@ import { Alert, Button, Code, EmptyState, Inline, Spinner, Stack } from '@/share
 import { type EditorOperation, useEditorStart, useEditorStatus } from '../hooks/use-editor'
 import styles from './editor-launcher.module.scss'
 import { EditorStartLog } from './editor-start-log'
+import { RunningEditorsPanel } from './running-editors'
 
 /**
  * The landing page for a session's own code-server — opened only as its own
@@ -173,12 +174,16 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
     // as `EmptyState`'s `description` would land inside the one it already
     // wraps its own description in. Restart stays available either way, so a
     // 409 (the running-editor cap) or any other rejected Restart is never a
-    // dead end.
+    // dead end. `RunningEditorsPanel` is what turns that dead end into
+    // something actionable: it renders nothing on its own until the fetch it
+    // triggers confirms the cap is actually the problem (see its own header
+    // comment), so an unrelated Restart failure never grows an empty panel.
     body = startError ? (
       <Alert tone="danger" title={title} action={actions}>
         <Stack gap={3}>
           <p>{t('editor.state.unresponsiveBody')}</p>
           <p>{startError}</p>
+          <RunningEditorsPanel onSlotFreed={retry} />
         </Stack>
       </Alert>
     ) : (
@@ -197,6 +202,11 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
     const failure = startError ?? opError
 
     title = failure ? t('editor.operationFailed') : t('editor.launcher.opening')
+    // Same `RunningEditorsPanel` as the unresponsive branch above — mounted
+    // here too because a cap failure reaches this branch a second way: the
+    // POST itself can succeed (200, `startError` stays null) while the
+    // worker's own cap check fails the operation it queued, which lands here
+    // as an ordinary `operation.status === 'failed'`.
     body = failure ? (
       <Alert
         tone="danger"
@@ -210,6 +220,7 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
         <Stack gap={3}>
           <p>{failure}</p>
           {data.operation && <EditorStartLog operation={data.operation} />}
+          <RunningEditorsPanel onSlotFreed={retry} />
         </Stack>
       </Alert>
     ) : (

@@ -1,8 +1,13 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import { errorSchema } from '@/features/projects/schema'
 import { AppError, errorBody } from '@/lib/errors'
-import { editorStatusSchema } from './schema'
-import { getEditorStatus, requestEditorStart, requestEditorStop } from './service'
+import { editorStatusSchema, runningEditorsSchema } from './schema'
+import {
+  getEditorStatus,
+  listRunningEditors,
+  requestEditorStart,
+  requestEditorStop,
+} from './service'
 
 const params = z.object({
   id: z
@@ -29,6 +34,29 @@ editorRouter.onError((error, c) => {
   if (error instanceof AppError) return c.json(errorBody(error), error.status as 400)
   throw error
 })
+
+editorRouter.openapi(
+  createRoute({
+    method: 'get',
+    path: '/editors',
+    tags: ['editor'],
+    summary: 'Every editor container currently holding the running cap',
+    description:
+      'Always 200 — a disabled feature (`enabled: false`) and an unreachable docker daemon both ' +
+      'answer with every count at zero, the same "not a server fault" discipline GET .../editor ' +
+      "follows. `editors` lists only THIS install's own running containers whose session still " +
+      'resolves, sorted idle first, then unresponsive, then in-use; `otherInstallsRunning` is the ' +
+      "box-wide `running` total minus this install's own, never broken out by name. Meant for the " +
+      'moment a start is refused at the cap, so a user can see who is holding it.',
+    responses: {
+      200: json(
+        runningEditorsSchema,
+        'The running-cap slots, and who (of this install) holds them',
+      ),
+    },
+  }),
+  async (c) => c.json(await listRunningEditors(), 200),
+)
 
 const statusResponses = {
   200: json(editorStatusSchema, "The session's editor status"),

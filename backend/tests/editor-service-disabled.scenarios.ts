@@ -31,7 +31,9 @@ mock.module(`${B}/features/sessions/service.ts`, () => ({
   },
 }))
 
-const { requestEditorStart, requestEditorStop } = await import(`${B}/features/editor/service.ts`)
+const { listRunningEditors, requestEditorStart, requestEditorStop } = await import(
+  `${B}/features/editor/service.ts`,
+)
 const { AppError } = await import(`${B}/lib/errors.ts`)
 
 const PROJECT_ID = '11111111-1111-4111-8111-111111111111'
@@ -65,4 +67,20 @@ test('the 403 names which flag is responsible', async () => {
     expect(error).toBeInstanceOf(AppError)
     expect((error as InstanceType<typeof AppError>).message).toContain('disabled')
   }
+})
+
+// GET /editors answers 200 with the disabled zero-state, unlike start/stop's
+// 403 above — the same "a disabled feature is a legitimate state to report,
+// not a server fault" discipline getEditorStatus's own `enabled: false`
+// already follows (see this route's own description in routes.ts). Never
+// touches docker either: passing `cliThatMustNotBeCalled` proves the disabled
+// check short-circuits before any daemon read.
+test('GET /editors reports enabled: false with every count and list empty, never touching docker', async () => {
+  const result = await listRunningEditors(cliThatMustNotBeCalled as never)
+  expect(result).toMatchObject({
+    enabled: false,
+    running: 0,
+    otherInstallsRunning: 0,
+    editors: [],
+  })
 })
