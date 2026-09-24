@@ -90,7 +90,7 @@ test('editorRunArgs produces the exact argv the design doc specifies', () => {
     '--idle-timeout-seconds',
     String(env.EDITOR_IDLE_TIMEOUT_SECONDS),
     '--user-data-dir',
-    '/tmp/home/.local/share/code-server',
+    '/run/agentoo-editor/data',
     '--extensions-dir',
     '/tmp/home/.local/share/code-server/extensions',
     OPTS.worktreePath,

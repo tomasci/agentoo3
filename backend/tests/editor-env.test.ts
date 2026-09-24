@@ -13,7 +13,7 @@ const ENV_PATH = new URL('../src/env.ts', import.meta.url).pathname
 
 async function runWithEnv(vars: Record<string, string | undefined>) {
   const proc = Bun.spawn(
-    ['bun', '-e', `import('${ENV_PATH}').then(m => console.log(JSON.stringify({ editorEnabled: m.editorEnabled, EDITOR_IMAGE: m.env.EDITOR_IMAGE, EDITOR_MAX_RUNNING: m.env.EDITOR_MAX_RUNNING, EDITOR_MEMORY_LIMIT: m.env.EDITOR_MEMORY_LIMIT, EDITOR_CPUS: m.env.EDITOR_CPUS, EDITOR_IDLE_TIMEOUT_SECONDS: m.env.EDITOR_IDLE_TIMEOUT_SECONDS, EDITOR_START_TIMEOUT_MS: m.env.EDITOR_START_TIMEOUT_MS })))`],
+    ['bun', '-e', `import('${ENV_PATH}').then(m => console.log(JSON.stringify({ editorEnabled: m.editorEnabled, EDITOR_IMAGE: m.env.EDITOR_IMAGE, EDITOR_MAX_RUNNING: m.env.EDITOR_MAX_RUNNING, EDITOR_MEMORY_LIMIT: m.env.EDITOR_MEMORY_LIMIT, EDITOR_CPUS: m.env.EDITOR_CPUS, EDITOR_IDLE_TIMEOUT_SECONDS: m.env.EDITOR_IDLE_TIMEOUT_SECONDS, EDITOR_START_TIMEOUT_MS: m.env.EDITOR_START_TIMEOUT_MS, EDITOR_SETTINGS_FILE: m.env.EDITOR_SETTINGS_FILE })))`],
     {
       env: {
         ...process.env,
@@ -110,4 +110,28 @@ test('EDITOR_IDLE_TIMEOUT_SECONDS floors at 60', async () => {
 test('EDITOR_START_TIMEOUT_MS must be a positive integer', async () => {
   expect((await runWithEnv({ EDITOR_START_TIMEOUT_MS: '0' })).exitCode).toBe(1)
   expect((await runWithEnv({ EDITOR_START_TIMEOUT_MS: '1' })).exitCode).toBe(0)
+})
+
+test('EDITOR_SETTINGS_FILE is unset by default (undefined, not the literal empty string)', async () => {
+  const { stdout, exitCode } = await runWithEnv({})
+  expect(exitCode).toBe(0)
+  expect(JSON.parse(stdout).EDITOR_SETTINGS_FILE).toBeUndefined()
+})
+
+test('EDITOR_SETTINGS_FILE accepts an absolute path', async () => {
+  const { stdout, exitCode } = await runWithEnv({ EDITOR_SETTINGS_FILE: '/etc/agentoo/editor-settings.json' })
+  expect(exitCode).toBe(0)
+  expect(JSON.parse(stdout).EDITOR_SETTINGS_FILE).toBe('/etc/agentoo/editor-settings.json')
+})
+
+test('EDITOR_SETTINGS_FILE rejects a relative path', async () => {
+  const { exitCode, stderr } = await runWithEnv({ EDITOR_SETTINGS_FILE: 'config/editor-settings.json' })
+  expect(exitCode).toBe(1)
+  expect(stderr).toContain('EDITOR_SETTINGS_FILE')
+})
+
+test('a blank EDITOR_SETTINGS_FILE (what an unfilled .env line parses to) is treated as unset', async () => {
+  const { stdout, exitCode } = await runWithEnv({ EDITOR_SETTINGS_FILE: '' })
+  expect(exitCode).toBe(0)
+  expect(JSON.parse(stdout).EDITOR_SETTINGS_FILE).toBeUndefined()
 })

@@ -574,6 +574,26 @@ code-server itself would otherwise keep. v1 ships with only the built-in
 TS/JS/JSON/HTML/CSS/Markdown IntelliSense and no extension marketplace, which
 follows directly from `--network none`.
 
+**Default settings, reseeded on every start.** `--user-data-dir` is the one
+exception to "no persistence" above: it points at `/run/agentoo-editor/data`
+— inside the same per-session runtime dir the socket lives in, never
+`/tmp/home`'s writable layer — so the backend can write
+`data/User/settings.json` there on the host before `docker run`, and
+code-server can still read (and, if a user changes a setting inside the
+running editor, rewrite) it. Before every start,
+`features/editor/settings.ts` overwrites that one file with this
+installation's own defaults — `config/editor-settings.json` at the repo
+root, which hides the Welcome page, disables the built-in Copilot/AI
+features, and keeps the secondary sidebar closed. An operator can replace
+that file entirely with `EDITOR_SETTINGS_FILE` (an absolute path — see
+`.env.example`), so customising the defaults never means hand-editing a
+tracked file `git pull` would then conflict with. A user's own in-editor
+changes last only until that editor stops: the next start resets to the
+defaults, unconditionally. A missing or invalid defaults file (a typo in an
+operator's override, or a packaging bug in the shipped one) never blocks the
+start — the editor still comes up, just without seeded settings, and the
+start log names the file and the reason.
+
 **Lifecycle is its own queue (`editor-op`), its own Redis lock, its own
 5-minute reap sweep** — deliberately separate from `docker-op` above: sharing
 that queue would leak editor starts into `GET /projects/{id}/docker/operations`
