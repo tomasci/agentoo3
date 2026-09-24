@@ -11,6 +11,9 @@
 // `sessionId`, never an optional one.
 
 import { randomUUID } from 'node:crypto'
+import { inArray } from 'drizzle-orm'
+import { db } from '@/db/client'
+import { projects, sessions } from '@/db/schema'
 import { editorEnabled, env } from '@/env'
 import { type DockerCli, realDockerCli } from '@/features/docker/cli'
 import { type ContainerState, getDaemonVersion } from '@/features/docker/inspect'
@@ -21,7 +24,10 @@ import { editorSocketPath } from '@/lib/paths'
 import { enqueueEditorStart } from '@/queue'
 import {
   countRunningEditorContainers,
+  type EditorHealthProbe,
   inspectEditorContainer,
+  listThisInstallRunningEditors,
+  probeEditorHealth,
   probeEditorHealthz,
   removeEditorContainer,
 } from './container'
@@ -36,7 +42,14 @@ import {
   releaseEditorLock,
 } from './operations'
 import { editorProxyPath } from './proxy'
-import type { EditorOperationDto, EditorState, EditorStatusDto } from './schema'
+import type {
+  EditorHealth,
+  EditorOperationDto,
+  EditorState,
+  EditorStatusDto,
+  RunningEditorDto,
+  RunningEditorsDto,
+} from './schema'
 
 /** Duplicated from docker/service.ts's own two constants, deliberately —
  * see the design doc's own note: this feature's 503s should not have to
@@ -261,4 +274,212 @@ export async function requestEditorStop(
   }
 
   return getEditorStatus(projectId, sessionId, cli)
+}
+
+// --- GET /editors: every editor holding a running-cap slot -------------------
+//
+// Deliberately its own section, not folded into getEditorStatus above: that
+// function answers "what is THIS session's own editor doing"; this answers
+// "who, box-wide install-scoped, is holding the cap this session just got
+// refused by" — see the design brief's own "Why" for the report this exists
+// to answer.
+
+/** Probed with a short timeout so this endpoint stays fast even at the cap —
+ * every listed editor is probed in parallel (Promise.all below), never in a
+ * loop, so the total wait is one timeout, not N of them. */
+const RUNNING_EDITORS_HEALTHZ_TIMEOUT_MS = 1_000
+
+/**
+ * The session title/branch and project name `listRunningEditors` needs to
+ * name who is using each running slot — one pair of bulk selects for every
+ * session id at once (never `getSessionLocation`/`getProject` per container,
+ * docker/scope.ts's own single-lookup pattern): the id count here is bounded
+ * by EDITOR_MAX_RUNNING, but there is still no reason to pay N+1 queries for
+ * it. Two selects rather than one SQL join, the same discipline
+ * sessions/service.ts's own `filesForMessages` already uses for a bulk
+ * by-ids read: simpler to fake in a test, and just as correct here since
+ * this is never on a hot path a join's single round trip would meaningfully
+ * help.
+ *
+ * A session id absent from the returned map — its row deleted, or its
+ * project's — is exactly the orphan case `listRunningEditors` already treats
+ * as "leave out of `editors`, still counted in `running`" (see that
+ * function's own comment), so this never throws for a vanished session; it
+ * simply omits it.
+ */
+async function sessionSummariesFor(
+  sessionIds: string[],
+): Promise<
+  Map<
+    string,
+    { projectId: string; projectName: string; title: string | null; branch: string | null }
+  >
+> {
+  if (sessionIds.length === 0) return new Map()
+
+  const sessionRows = await db
+    .select({
+      id: sessions.id,
+      projectId: sessions.projectId,
+      title: sessions.title,
+      branch: sessions.branch,
+    })
+    .from(sessions)
+    .where(inArray(sessions.id, sessionIds))
+  if (sessionRows.length === 0) return new Map()
+
+  const projectIds = [...new Set(sessionRows.map((row) => row.projectId))]
+  const projectRows = await db
+    .select({ id: projects.id, name: projects.name })
+    .from(projects)
+    .where(inArray(projects.id, projectIds))
+  const projectNameById = new Map(projectRows.map((row) => [row.id, row.name]))
+
+  const out = new Map<
+    string,
+    { projectId: string; projectName: string; title: string | null; branch: string | null }
+  >()
+  for (const row of sessionRows) {
+    const projectName = projectNameById.get(row.projectId)
+    // The project itself is gone (deleted out from under a session that
+    // somehow survived it) — as much an orphan as a deleted session; treated
+    // identically by simply not appearing in the map.
+    if (projectName === undefined) continue
+    out.set(row.id, { projectId: row.projectId, projectName, title: row.title, branch: row.branch })
+  }
+  return out
+}
+
+/** `alive` -> 'in-use', `expired` -> 'idle', anything else (no answer, or an
+ * unparseable body) -> 'unresponsive' — the design brief's own mapping,
+ * verbatim. `alive === null` covers both "didn't answer" and "answered with
+ * garbage" identically: neither is evidence of a connected tab, and neither
+ * is evidence of one having left either, so 'unresponsive' (not 'idle') is
+ * the honest label for both. */
+function editorHealthFrom(probe: EditorHealthProbe): EditorHealth {
+  if (probe.alive === true) return 'in-use'
+  if (probe.alive === false) return 'idle'
+  return 'unresponsive'
+}
+
+/** `0` is code-server's own "never seen a heartbeat", not a real timestamp —
+ * reported as `null`, same as a probe that never got a `lastHeartbeat` back
+ * at all, rather than as the epoch. */
+function lastActiveAtFrom(probe: EditorHealthProbe): string | null {
+  return probe.lastHeartbeat ? new Date(probe.lastHeartbeat).toISOString() : null
+}
+
+/** idle, then unresponsive, then in-use (the design brief's own order: the
+ * editors least likely to be wanted first) — within each group, oldest
+ * `lastActiveAt` first, nulls first. ISO strings sort lexicographically in
+ * the same order they sort chronologically, so a plain string compare is
+ * exact here, not an approximation. */
+const RUNNING_EDITOR_HEALTH_ORDER: Record<EditorHealth, number> = {
+  idle: 0,
+  unresponsive: 1,
+  'in-use': 2,
+}
+
+function compareRunningEditors(a: RunningEditorDto, b: RunningEditorDto): number {
+  const byHealth = RUNNING_EDITOR_HEALTH_ORDER[a.health] - RUNNING_EDITOR_HEALTH_ORDER[b.health]
+  if (byHealth !== 0) return byHealth
+  if (a.lastActiveAt === b.lastActiveAt) return 0
+  if (a.lastActiveAt === null) return -1
+  if (b.lastActiveAt === null) return 1
+  return a.lastActiveAt < b.lastActiveAt ? -1 : 1
+}
+
+/**
+ * Every editor holding a running-cap slot, and how many more of them exist on
+ * the box than this install can (or should) name individually. See the
+ * design brief's own "Why": this is what a start refused at the cap points a
+ * user at, so they know which editor(s) to stop.
+ */
+export async function listRunningEditors(
+  cli: DockerCli = realDockerCli,
+): Promise<RunningEditorsDto> {
+  const fetchedAt = new Date().toISOString()
+
+  // A disabled feature has never started a container to begin with —
+  // answering zeros here is the same "not a server fault" discipline
+  // getEditorStatus's own `enabled: false` already follows (see its route's
+  // own description in routes.ts).
+  if (!editorEnabled) {
+    return {
+      enabled: false,
+      cap: env.EDITOR_MAX_RUNNING,
+      running: 0,
+      otherInstallsRunning: 0,
+      editors: [],
+      fetchedAt,
+    }
+  }
+
+  // `running` is deliberately the SAME unscoped, unexcluded count a start
+  // request compares against the cap (countRunningEditorContainers's own
+  // comment, container.ts) — so `running >= cap` here means exactly what it
+  // means there. Neither this call nor `listThisInstallRunningEditors` ever
+  // throws when the daemon (or docker itself) is unavailable; each already
+  // degrades to an empty/zero result (see their own comments), which is
+  // already this endpoint's own "docker is down" answer — nothing else to
+  // special-case here.
+  const [running, thisInstall] = await Promise.all([
+    countRunningEditorContainers(cli),
+    listThisInstallRunningEditors(cli),
+  ])
+
+  const sessionIds = thisInstall
+    .map((container) => container.sessionId)
+    .filter((id): id is string => id !== null)
+  const summaries = await sessionSummariesFor(sessionIds)
+
+  // Probed in parallel, not in a loop — see RUNNING_EDITORS_HEALTHZ_TIMEOUT_MS's
+  // own comment for why that matters here specifically.
+  const editors = (
+    await Promise.all(
+      thisInstall.map(async (container): Promise<RunningEditorDto | null> => {
+        if (!container.sessionId) return null // no session label at all -- an orphan, see below
+        const summary = summaries.get(container.sessionId)
+        // Orphaned: this container's session (or its project) no longer
+        // resolves. Left out of `editors` — there is nothing true to report
+        // as its project/session names — but already counted in `running`
+        // above; runEditorReap (reaper.ts) removes it within its own
+        // 5-minute schedule.
+        if (!summary) return null
+
+        const probe = await probeEditorHealth(
+          editorSocketPath(container.sessionId),
+          RUNNING_EDITORS_HEALTHZ_TIMEOUT_MS,
+        )
+
+        return {
+          projectId: summary.projectId,
+          projectName: summary.projectName,
+          sessionId: container.sessionId,
+          sessionTitle: summary.title,
+          branch: summary.branch,
+          containerName: container.name,
+          startedAt: container.startedAt,
+          health: editorHealthFrom(probe),
+          lastActiveAt: lastActiveAtFrom(probe),
+        }
+      }),
+    )
+  ).filter((editor): editor is RunningEditorDto => editor !== null)
+  editors.sort(compareRunningEditors)
+
+  return {
+    enabled: true,
+    cap: env.EDITOR_MAX_RUNNING,
+    running,
+    // Clamped at 0 against the two docker reads above (`running` and
+    // `thisInstall`) racing each other — each is its own `docker`
+    // invocation, run concurrently, so a container that stops (or starts)
+    // between them can otherwise make this install's own count of its own
+    // containers momentarily exceed the box-wide total. A transient render
+    // glitch, not a bug to propagate as a negative "other installs" count.
+    otherInstallsRunning: Math.max(0, running - thisInstall.length),
+    editors,
+    fetchedAt,
+  }
 }

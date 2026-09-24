@@ -14,6 +14,7 @@
 import { createHash } from 'node:crypto'
 import { chmod, chown, mkdir, readFile, realpath, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
+import { z } from 'zod'
 import { env } from '@/env'
 import {
   DOCKER_READ_TIMEOUT_MS,
@@ -23,7 +24,12 @@ import {
   realDockerCli,
 } from '@/features/docker/cli'
 import type { ContainerState } from '@/features/docker/inspect'
-import { inspectContainers, inspectImage, listContainerIds } from '@/features/docker/inspect'
+import {
+  inspectContainers,
+  inspectContainersRaw,
+  inspectImage,
+  listContainerIds,
+} from '@/features/docker/inspect'
 import {
   EDITOR_LABEL_FILTER,
   type EditorScopeRef,
@@ -417,14 +423,54 @@ export async function editorContainerLogsTail(
 }
 
 /**
- * A single `/healthz` request over the unix socket code-server listens on —
- * this is what tells `starting` (container up, not yet answering) apart from
- * `running` (see `deriveEditorState` in service.ts). Any failure — no socket
- * file, connection refused, a timeout — reports `false`, never throws: a
- * container that has not opened its socket yet is an ordinary, expected state
- * while starting, not a fault to log.
+ * code-server's own `/healthz` body — verified against the shipped 4.138
+ * image's out/node/routes/health.js and heart.js (see the design doc):
+ * `status` is `'alive'` while a heartbeat has landed in the last 60s
+ * (requests arriving, or a connection open at each tick — in practice, a
+ * connected browser tab), `'expired'` once nobody has been connected for at
+ * least that long. `lastHeartbeat` is an epoch-ms timestamp, `0` if the
+ * process has never seen one. `.passthrough()`-free on purpose: an
+ * unrecognised extra field is fine, but `status`/`lastHeartbeat` themselves
+ * must be exactly this shape or the body is treated as unparseable (see
+ * `probeEditorHealth`'s own comment on why that degrades to `alive: null`
+ * rather than guessing).
  */
-export async function probeEditorHealthz(socketPath: string, timeoutMs: number): Promise<boolean> {
+const editorHealthzBodySchema = z.object({
+  status: z.enum(['alive', 'expired']),
+  lastHeartbeat: z.number(),
+})
+
+export interface EditorHealthProbe {
+  /** Whether `/healthz` answered at all (HTTP 2xx) — the ONLY thing
+   * `probeEditorHealthz` below has ever checked, and stays `true` even when
+   * the body fails to parse: a malformed-but-200 response is still evidence
+   * code-server itself is up, which is all that call's own running-vs-
+   * unresponsive derivation (`deriveEditorState`, service.ts) cares about. */
+  answered: boolean
+  /** `true` for `'alive'`, `false` for `'expired'`, `null` when the body
+   * didn't parse (or wasn't reached at all) — the running-editors list
+   * (service.ts's `listRunningEditors`) treats `null` as `'unresponsive'`,
+   * same as no answer, rather than guessing which of the two it more likely
+   * was. */
+  alive: boolean | null
+  /** Epoch ms from the body, or `null` alongside `alive` when it didn't
+   * parse. `0` (code-server's own "never") is returned as-is, not coerced to
+   * `null` here — that conversion is the running-editors DTO's own concern
+   * (`lastActiveAt`, service.ts), not this probe's. */
+  lastHeartbeat: number | null
+}
+
+/**
+ * A single `/healthz` request over the unix socket code-server listens on.
+ * Any failure to even get a response — no socket file, connection refused, a
+ * timeout — reports `answered: false`, never throws: a container that has not
+ * opened its socket yet is an ordinary, expected state while starting, not a
+ * fault to log.
+ */
+export async function probeEditorHealth(
+  socketPath: string,
+  timeoutMs: number,
+): Promise<EditorHealthProbe> {
   try {
     const response = await fetch('http://localhost/healthz', {
       // Bun-specific `unix` fetch option (Bun >= 1.3.13; see the design doc) —
@@ -432,9 +478,89 @@ export async function probeEditorHealthz(socketPath: string, timeoutMs: number):
       unix: socketPath,
       signal: AbortSignal.timeout(timeoutMs),
     } as RequestInit & { unix: string })
-    return response.ok
+    if (!response.ok) return { answered: false, alive: null, lastHeartbeat: null }
+
+    // Parsed defensively, never trusted verbatim: this is a body a dependency
+    // (code-server) produced, at a version this install's operator chose via
+    // EDITOR_IMAGE, not something this backend controls the shape of.
+    const body = editorHealthzBodySchema.safeParse(await response.json().catch(() => undefined))
+    if (!body.success) {
+      logger.debug(`Editor healthz probe at ${socketPath} answered with an unparseable body`)
+      return { answered: true, alive: null, lastHeartbeat: null }
+    }
+    return {
+      answered: true,
+      alive: body.data.status === 'alive',
+      lastHeartbeat: body.data.lastHeartbeat,
+    }
   } catch (error) {
     logger.debug(`Editor healthz probe at ${socketPath} did not answer: ${String(error)}`)
-    return false
+    return { answered: false, alive: null, lastHeartbeat: null }
   }
+}
+
+/**
+ * Whether `/healthz` answered at all — this is what tells `starting`
+ * (container up, not yet answering) apart from `running` (see
+ * `deriveEditorState` in service.ts). Deliberately blind to `alive` vs.
+ * `expired`: an idle-but-reachable code-server is still `running`, not
+ * `unresponsive` — see `EditorHealthProbe.answered`'s own comment. A thin
+ * wrapper over `probeEditorHealth` so both callers (this one, and
+ * service.ts's `listRunningEditors`) issue exactly one `/healthz` request
+ * each, never two.
+ */
+export async function probeEditorHealthz(socketPath: string, timeoutMs: number): Promise<boolean> {
+  return (await probeEditorHealth(socketPath, timeoutMs)).answered
+}
+
+// --- running editors (GET /api/editors) --------------------------------------
+
+/** One of this install's own editor containers, `state: running`, paired with
+ * the session id it was started for — the raw material `listRunningEditors`
+ * (service.ts) joins against the database to name who is holding the slot. */
+export interface RunningEditorContainer {
+  name: string
+  /** `null` only for a container missing the `com.agentoo.editor.session`
+   * label entirely — should never happen (this feature stamps every editor
+   * it starts), but the reaper treats that same case as an orphan rather than
+   * assuming it, and this does too. */
+  sessionId: string | null
+  startedAt: string | null
+}
+
+/** Docker's own sentinel for "never started" — duplicated from
+ * docker/inspect.ts's private `DOCKER_ZERO_TIME` rather than importing it:
+ * that constant is intentionally unexported (an implementation detail of
+ * `toDockerContainer`), and this reads the SAME raw `docker inspect` field
+ * independently, via `inspectContainersRaw`, for the label this needs back
+ * (see this function's own comment on why). */
+const RAW_NEVER_STARTED_AT = '0001-01-01T00:00:00Z'
+
+/**
+ * This install's own editor containers currently `state: running` — a raw
+ * label-and-status read via `inspectContainersRaw`, not the mapped
+ * `inspectContainers`/`DockerContainer`: that mapper deliberately drops every
+ * `com.agentoo.editor.*` label (see `containerIdentity`'s own comment in
+ * docker/inspect.ts), and `listRunningEditors` (service.ts) needs the session
+ * label back to know whose editor each container is. Built on
+ * `listThisInstallEditorContainerIds` (this install only, never a sibling
+ * install sharing the same daemon — see that function's own comment), then
+ * narrowed to `running` here: `starting`/`exited`/`dead`/etc. containers hold
+ * no cap slot and have nothing to report a `health`/`lastActiveAt` for.
+ */
+export async function listThisInstallRunningEditors(
+  cli: DockerCli = realDockerCli,
+): Promise<RunningEditorContainer[]> {
+  const ids = await listThisInstallEditorContainerIds(cli)
+  const raws = await inspectContainersRaw(ids, cli)
+  return raws
+    .filter((raw) => raw.State?.Status === 'running')
+    .map((raw) => ({
+      name: (raw.Name ?? raw.Id).replace(/^\//, ''),
+      sessionId: raw.Config?.Labels?.['com.agentoo.editor.session'] ?? null,
+      startedAt:
+        raw.State?.StartedAt && raw.State.StartedAt !== RAW_NEVER_STARTED_AT
+          ? raw.State.StartedAt
+          : null,
+    }))
 }
