@@ -5,6 +5,15 @@
 // the shipped file this reads by default. lifecycle.ts calls this directly,
 // after container.ts's own `prepareEditorRuntimeDir` and before `docker run`.
 //
+// The runtime dir survives a `docker rm` (only the reaper/session-delete path
+// removes it — see lifecycle.ts's own header), so a settings.json a PREVIOUS
+// session wrote (either this module's own seed, or a user's own in-editor
+// edit) is still sitting there on the next start. When this start's own
+// defaults cannot be read, that stale file is removed rather than left in
+// place — otherwise a broken override (or a packaging bug in the shipped
+// file) would silently resurrect one user's old settings instead of the
+// "changes last only until the editor stops" promise this feature makes.
+//
 // Not a leaf like container.ts: reading and JSON-validating a defaults file
 // (shipped, or an operator's EDITOR_SETTINGS_FILE override) is unrelated to
 // container.ts's own "docker mechanics" scope (see that file's own header),
@@ -13,7 +22,7 @@
 // keeps every path here a plain, directly testable function argument rather
 // than something a test has to mock a shared module to vary.
 
-import { chmod, chown, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { chmod, chown, mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { join, relative } from 'node:path'
 import { logger } from '@/lib/logger'
 
@@ -77,7 +86,10 @@ async function readDefaults(overridePath: string | undefined): Promise<DefaultsR
  * Seed `${runtimeDir}/data/User/settings.json` with the installation's
  * default VS Code settings, overwriting whatever a previous session in this
  * SAME runtime dir left behind — the design's own "reset on start": a user's
- * in-editor changes last only until that editor stops.
+ * in-editor changes last only until that editor stops. When the defaults
+ * cannot be read at all, that previous settings.json is REMOVED instead of
+ * left in place (see this file's own header) — the editor then starts on
+ * plain VS Code defaults, never on a stale, previously-seeded file.
  *
  * `${runtimeDir}/data` (mounted into the container at
  * `/run/agentoo-editor/data`, code-server's own `--user-data-dir`) is
@@ -112,7 +124,25 @@ export async function seedEditorSettings(
 
   const defaults = await readDefaults(overridePath)
   if (!defaults.ok) {
-    const message = `Editor default settings (${defaults.label}) not applied: ${defaults.reason}`
+    // The runtime dir outlives a stop (see this file's own header), so
+    // whatever settings.json is already here is a PREVIOUS session's — this
+    // start's own broken defaults must not let it survive under a false
+    // "reset on every start" promise. `unlink`, not `rm({ force: true })`:
+    // the latter swallows ENOENT, and this needs to tell "already absent"
+    // (say nothing) apart from "actually removed" (say so) apart from "some
+    // other error, e.g. permissions" (warn, but still never fail the start).
+    let reason = defaults.reason
+    try {
+      await unlink(settingsPath)
+      reason = `${reason}; cleared the previous session's settings.json`
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT') {
+        logger.warn(`Could not clear stale editor settings at ${settingsPath}: ${String(error)}`)
+      }
+    }
+
+    const message = `Editor default settings (${defaults.label}) not applied: ${reason}`
     // A missing/broken shipped file is a bug in what this repo shipped, not
     // a bad deployment — called out as one, while still not blocking the
     // start any differently than an operator's own bad override would.
@@ -121,7 +151,7 @@ export async function seedEditorSettings(
         ? message
         : `${message} (packaging bug: the shipped file should always be valid)`,
     )
-    return { applied: false, label: defaults.label, reason: defaults.reason }
+    return { applied: false, label: defaults.label, reason }
   }
 
   const json = `${JSON.stringify(defaults.settings, null, 2)}\n`

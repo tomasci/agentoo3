@@ -413,6 +413,43 @@ test('an invalid EDITOR_SETTINGS_FILE still lets the start succeed, logs one std
   await rm(overrideDir, { recursive: true, force: true })
 })
 
+test("a previous session's stale settings.json is cleared when a restart's own override is invalid", async () => {
+  // The runtime dir survives a stop — only the reaper/session-delete path
+  // removes it (see settings.ts's own header) — so this is what a genuine
+  // "user changed a setting, editor stopped, operator's override broke,
+  // editor restarted" sequence actually leaves on disk beforehand.
+  await layoutGit()
+  const runtimeDir = join(TEST_PROJECTS_DIR, '.editor', SESSION_ID)
+  const userDir = join(runtimeDir, 'data', 'User')
+  await mkdir(userDir, { recursive: true })
+  const settingsPath = join(userDir, 'settings.json')
+  await writeFile(settingsPath, JSON.stringify({ 'workbench.startupEditor': 'welcomePage' }))
+
+  const overrideDir = await mkdtemp(join(tmpdir(), 'ed-lc-override-'))
+  const overridePath = join(overrideDir, 'broken.json')
+  await writeFile(overridePath, '{ not valid json')
+  testEnv.EDITOR_SETTINGS_FILE = overridePath
+
+  const cli = fakeCli({ imageExists: true })
+  await seedOperation()
+
+  await runEditorStart(
+    { kind: 'start', operationId: OPERATION_ID, projectId: PROJECT_ID, sessionId: SESSION_ID },
+    { cli, probeHealthz: async () => true, sleep: noSleep },
+  )
+
+  const op = await getEditorOperation(OPERATION_ID)
+  expect(op?.status).toBe('succeeded')
+  await expect(readFile(settingsPath, 'utf8')).rejects.toThrow() // the stale file is gone, not resurrected
+
+  const output = await getEditorOperationOutput(OPERATION_ID)
+  const stderrLines = output.filter((l: { stream: string }) => l.stream === 'stderr')
+  expect(stderrLines).toHaveLength(1)
+  expect(stderrLines[0]?.text).toContain("cleared the previous session's settings.json")
+
+  await rm(overrideDir, { recursive: true, force: true })
+})
+
 // --- exited-then-recreated ----------------------------------------------------
 
 test('an exited container is removed and a fresh one started', async () => {

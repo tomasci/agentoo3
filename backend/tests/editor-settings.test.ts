@@ -129,6 +129,77 @@ test('invalid JSON in the override: applied false, reason names it, no settings 
   await expect(readFile(SETTINGS_PATH(runtimeDir), 'utf8')).rejects.toThrow()
 })
 
+// --- a previous session's settings.json must never survive a bad restart ------
+//
+// The runtime dir (unlike the container) survives a stop — see settings.ts's
+// own header. A restart whose own defaults cannot be applied must not leave
+// a PREVIOUS session's settings.json (its own earlier seed, or a user's own
+// in-editor edit) sitting there: that would silently resurrect one user's
+// old settings under the "changes last only until the editor stops" promise.
+
+test("a pre-existing settings.json is cleared when an invalid override can't be applied", async () => {
+  const runtimeDir = await tempDir('ed-settings-')
+  const userDir = join(runtimeDir, 'data', 'User')
+  await mkdir(userDir, { recursive: true })
+  await writeFile(SETTINGS_PATH(runtimeDir), JSON.stringify({ 'workbench.startupEditor': 'welcomePage' }))
+  const overrideDir = await tempDir('ed-settings-override-')
+  const overridePath = join(overrideDir, 'broken.json')
+  await writeFile(overridePath, '{ this is not json')
+
+  const result = await seedEditorSettings(runtimeDir, OWNER, overridePath)
+
+  expect(result.applied).toBe(false)
+  expect(result.reason).toContain('invalid JSON')
+  expect(result.reason).toContain("cleared the previous session's settings.json")
+  await expect(readFile(SETTINGS_PATH(runtimeDir), 'utf8')).rejects.toThrow()
+})
+
+test("a pre-existing settings.json is cleared when the override file is missing", async () => {
+  const runtimeDir = await tempDir('ed-settings-')
+  const userDir = join(runtimeDir, 'data', 'User')
+  await mkdir(userDir, { recursive: true })
+  await writeFile(SETTINGS_PATH(runtimeDir), JSON.stringify({ 'workbench.startupEditor': 'welcomePage' }))
+  const overrideDir = await tempDir('ed-settings-override-')
+  const missingPath = join(overrideDir, 'does-not-exist.json')
+
+  const result = await seedEditorSettings(runtimeDir, OWNER, missingPath)
+
+  expect(result.applied).toBe(false)
+  expect(result.reason).toContain("cleared the previous session's settings.json")
+  await expect(readFile(SETTINGS_PATH(runtimeDir), 'utf8')).rejects.toThrow()
+})
+
+test('no pre-existing settings.json and an invalid override: behaviour unchanged, nothing to clear', async () => {
+  const runtimeDir = await tempDir('ed-settings-')
+  const overrideDir = await tempDir('ed-settings-override-')
+  const overridePath = join(overrideDir, 'broken.json')
+  await writeFile(overridePath, '{ this is not json')
+
+  const result = await seedEditorSettings(runtimeDir, OWNER, overridePath)
+
+  expect(result.applied).toBe(false)
+  expect(result.reason).not.toContain('cleared')
+  await expect(readFile(SETTINGS_PATH(runtimeDir), 'utf8')).rejects.toThrow()
+})
+
+test('the applied (valid defaults) path is unaffected by the clearing logic', async () => {
+  const runtimeDir = await tempDir('ed-settings-')
+  const userDir = join(runtimeDir, 'data', 'User')
+  await mkdir(userDir, { recursive: true })
+  await writeFile(SETTINGS_PATH(runtimeDir), JSON.stringify({ 'workbench.startupEditor': 'welcomePage' }))
+
+  const result = await seedEditorSettings(runtimeDir, OWNER, undefined)
+
+  expect(result.applied).toBe(true)
+  expect(result.reason).toBeUndefined()
+  const written = JSON.parse(await readFile(SETTINGS_PATH(runtimeDir), 'utf8'))
+  expect(written).toEqual({
+    'workbench.startupEditor': 'none',
+    'chat.disableAIFeatures': true,
+    'workbench.secondarySideBar.defaultVisibility': 'hidden',
+  })
+})
+
 test('a JSON array in the override: applied false, no settings file written', async () => {
   const runtimeDir = await tempDir('ed-settings-')
   const overrideDir = await tempDir('ed-settings-override-')
