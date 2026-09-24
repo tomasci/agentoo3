@@ -144,29 +144,42 @@ writable_by_me() {
   fi
 }
 
-confirm() {
-  [[ "${ASSUME_YES:-0}" == "1" ]] && return 0
-  local reply
-  printf '%s?%s %s [y/N] ' "$C_YLW" "$C_RESET" "$*" >&2
-  read -r reply </dev/tty || return 1
-  [[ "$reply" =~ ^[Yy]$ ]]
-}
-
 # ------------------------------------------------------- interactive I/O -----
 #
-# Separate from confirm() above (which is a plain y/N gate): these read actual
-# values, so several can be asked in a row, and a test can feed multiple
-# answers from one fixture file instead of a real terminal.
+# ask()/ask_secret() below read actual values, so several can be asked in a
+# row, and a test can feed multiple answers from one fixture file instead of
+# a real terminal. confirm() further down is a plain y/N gate built on the
+# same fd.
 
 PROMPT_TTY="${PROMPT_TTY:-/dev/tty}"      # test seam
 
-# True when a prompt can be shown and answered right now: not --yes, not a dry
-# run, and PROMPT_TTY actually opens. Opens it ONCE into _PROMPT_FD — reused by
-# every ask()/ask_secret() call this run, rather than reopened (and, for a
-# plain file, rewound) per question.
-can_prompt() {
-  [[ "${ASSUME_YES:-0}" == "1" ]] && return 1
-  [[ "${DRY_RUN:-0}" == "1" ]] && return 1
+# True when input actually reaches PROMPT_TTY right now — the ONE predicate
+# can_prompt() and confirm() below both build on, so the two can never
+# disagree about whether a keystroke will actually arrive. Opens PROMPT_TTY
+# ONCE into _PROMPT_FD, reused by every ask()/ask_secret()/confirm() call this
+# run rather than reopened (and, for a plain file, rewound) per question.
+#
+# "PROMPT_TTY opens" is not, on its own, enough to answer that. Piping the
+# installer into sudo — `curl ... | sudo bash` — hands sudo's OWN stdin a
+# pipe, not a terminal. Both classic sudo (with use_pty, the common default)
+# and Ubuntu 26.04's sudo-rs then run the command inside a pty *of sudo's
+# own*, separate from the operator's real terminal, and never forward the
+# operator's keystrokes into it when sudo's own stdin was itself a pipe.
+# /dev/tty there opens just fine — it IS a real pty — so a plain "did it
+# open" check is fooled: it succeeds, and a `read` on it then just blocks
+# forever with nothing ever arriving. This is exactly what left
+# 85-configure-https.sh's domain prompt hanging under `curl | sudo bash`.
+#
+# Running as plain root with no sudo in front (e.g. `curl ... | bash` as
+# root on a fresh box) hits none of this: /dev/tty there IS the operator's
+# real terminal, this process's own piped stdin notwithstanding — and there
+# is no SUDO_USER either, which is exactly the signal used below to tell the
+# two cases apart. Under sudo, whether fd 0 is a terminal is the one check
+# that holds regardless of which sudo implementation sits in front of us:
+# sudo only ever hands the command something other than a terminal on stdin
+# when it was itself given something other than a terminal.
+_prompt_reachable() {
+  [[ -t 0 || -z "${SUDO_USER:-}" ]] || return 1
   if [[ -n "${_PROMPT_FD:-}" ]]; then
     [[ "$_PROMPT_FD" != "-1" ]]
     return
@@ -181,6 +194,31 @@ can_prompt() {
   fi
   _PROMPT_FD=-1
   return 1
+}
+
+# True when a prompt can be shown and answered right now: not --yes, not a
+# dry run, and _prompt_reachable (see above).
+can_prompt() {
+  [[ "${ASSUME_YES:-0}" == "1" ]] && return 1
+  [[ "${DRY_RUN:-0}" == "1" ]] && return 1
+  _prompt_reachable
+}
+
+# A plain y/N gate. --yes answers yes outright, like every other
+# --yes-skips-a-question path in this installer. Otherwise this must NEVER
+# block: an unreachable prompt (see _prompt_reachable — the unattended-sudo
+# case above all) answers "no" immediately, the same as an operator who was
+# asked and declined, rather than hang the whole install waiting on a
+# keystroke that can never arrive. Kept on the same fd as ask()/ask_secret(),
+# not a fresh `</dev/tty` open of its own, so it is subject to the exact same
+# reachability check and never disagrees with them mid-run.
+confirm() {
+  [[ "${ASSUME_YES:-0}" == "1" ]] && return 0
+  _prompt_reachable || return 1
+  local reply
+  printf '%s?%s %s [y/N] ' "$C_YLW" "$C_RESET" "$*" >&2
+  read -r -u "$_PROMPT_FD" reply || return 1
+  [[ "$reply" =~ ^[Yy]$ ]]
 }
 
 # ask NAME "Question" [default] — printf -v's NAME with the answer. The

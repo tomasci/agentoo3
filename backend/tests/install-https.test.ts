@@ -45,6 +45,11 @@ const NGINX_SH = join(SCRIPTS, '66-install-nginx.sh')
 const HTTPS_SH = join(SCRIPTS, '85-configure-https.sh')
 const SUMMARY_SH = join(SCRIPTS, '90-summary.sh')
 const FAKES = join(import.meta.dir, 'fixtures', 'install-https', 'fakes')
+// Gives a run a REAL pseudo-terminal (stdin and/or controlling tty) — see the
+// header of that file. Resolved here, from the host PATH: inside a sandbox
+// `python3` is only the version-tool stand-in.
+const PTY_RUN = join(import.meta.dir, 'fixtures', 'install-https', 'pty-run.py')
+const PYTHON = Bun.which('python3')
 
 const TOKEN = 'tok_SECRET_abcdefghijklmnop1234'
 const DOMAIN = 'ai.example.com'
@@ -158,6 +163,30 @@ interface Run {
   headers: string
   /** -H @file arguments curl could not open (see the fake). */
   unreadableHeaders: string[]
+  /** Killed for exceeding RunOpts.timeoutMs (or the pty driver's timeout). */
+  timedOut: boolean
+}
+
+interface PtySpec {
+  /** What fd 0 is: the pty itself (default), /dev/null, or an already-closed pipe. */
+  stdin?: 'pty' | 'devnull' | 'pipe'
+  /** Make the pty the controlling terminal, so open("/dev/tty") reaches it. */
+  ctty?: boolean
+  /** Lines typed into the pty; "noecho" waits for ECHO to be off first (a `read -s`). */
+  type?: ['now' | 'noecho', string][]
+  /** Where the pty's own display (terminal echo) is written. */
+  echoLog?: string
+  timeout?: number
+}
+
+interface RunOpts {
+  /** Default 'ignore' (/dev/null). 'pipe' feeds stdinText then closes it. */
+  stdin?: 'ignore' | 'pipe'
+  stdinText?: string
+  /** Run under pty-run.py instead; `stdin` is then ignored. */
+  pty?: PtySpec
+  /** Kill the run after this long; Run.timedOut says whether that happened. */
+  timeoutMs?: number
 }
 
 async function readOr(p: string, fallback = ''): Promise<string> {
@@ -177,6 +206,7 @@ async function run(
   script: string,
   env: Record<string, string | undefined> = {},
   args: string[] = [],
+  opts: RunOpts = {},
 ): Promise<Run> {
   // Per-run call logs; fakestate (tailscale serve) persists across runs.
   await rm(sb.fake, { recursive: true, force: true })
@@ -203,18 +233,43 @@ async function run(
     if (v === undefined) delete base[k]
     else base[k] = v
   }
-  const proc = Bun.spawn([BASH, script, ...args], {
+  let argv = [BASH, script, ...args]
+  if (opts.pty) {
+    if (!PYTHON) throw new Error('python3 is needed on this host for pty scenarios')
+    const spec = { timeout: (opts.timeoutMs ?? 20_000) / 1000, ...opts.pty }
+    argv = [PYTHON, PTY_RUN, JSON.stringify(spec), '--', ...argv]
+  }
+  const usePipe = !opts.pty && opts.stdin === 'pipe'
+  const proc = Bun.spawn(argv, {
     cwd: sb.root,
     env: base,
-    stdin: 'ignore',
+    stdin: usePipe ? 'pipe' : 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
   })
-  const [stdout, stderr, code] = await Promise.all([
+  if (usePipe && proc.stdin && typeof proc.stdin !== 'number') {
+    proc.stdin.write(opts.stdinText ?? '')
+    proc.stdin.end()
+  }
+  let timedOut = false
+  // Backstop for the pty driver's own timeout, and the only one otherwise.
+  const killAfter = opts.timeoutMs === undefined ? undefined : opts.timeoutMs + (opts.pty ? 5_000 : 0)
+  const timer =
+    killAfter === undefined
+      ? undefined
+      : setTimeout(() => {
+          timedOut = true
+          proc.kill('SIGKILL')
+        }, killAfter)
+  const [stdout, stderr, rawCode] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
     proc.exited,
   ])
+  if (timer) clearTimeout(timer)
+  // pty-run.py: 124 = timed out, 125 = a "noecho" line never saw ECHO go off.
+  if (opts.pty && rawCode === 124) timedOut = true
+  const code = rawCode
 
   // Safety net, checked on every run: nothing aimed at the real /etc, and
   // nothing reached for a binary the sandbox does not provide.
@@ -238,6 +293,7 @@ async function run(
     bodies: lines(await readOr(join(sb.fake, 'curl.bodies'))),
     headers: await readOr(join(sb.fake, 'curl.headers')),
     unreadableHeaders: lines(await readOr(join(sb.fake, 'curl.unreadable-header'))),
+    timedOut,
   }
 }
 
@@ -478,7 +534,12 @@ describe('install.sh --list', () => {
 
 // ================================================================ common.sh ===
 
-async function helper(sb: Sandbox, body: string, env: Record<string, string> = {}): Promise<Run> {
+async function helper(
+  sb: Sandbox,
+  body: string,
+  env: Record<string, string> = {},
+  opts: RunOpts = {},
+): Promise<Run> {
   const path = join(sb.root, `helper-${Math.random().toString(36).slice(2)}.sh`)
   await writeFile(
     path,
@@ -490,7 +551,7 @@ async function helper(sb: Sandbox, body: string, env: Record<string, string> = {
       '',
     ].join('\n'),
   )
-  return run(sb, path, env)
+  return run(sb, path, env, [], opts)
 }
 
 describe('common.sh helpers', () => {
@@ -587,6 +648,153 @@ describe('common.sh helpers', () => {
     })
     expect(down.stdout).toBe('down\n')
   })
+})
+
+// ------------------------------------------- common.sh: the one prompt gate --
+//
+// Asking is allowed only if PROMPT_TTY opens AND (stdin is a terminal OR
+// SUDO_USER is unset) — the `curl ... | sudo bash` case is SUDO_USER set with
+// a pipe on stdin, where sudo never forwards keystrokes, so a read would hang.
+// can_prompt() and confirm() must agree on that gate, and confirm() must never
+// block or even open PROMPT_TTY when the gate is shut.
+
+const UNDER_SUDO = { SUDO_USER: 'operator' }
+
+/** A FIFO nobody ever writes to: open()ing it for reading blocks forever. */
+async function neverWrittenFifo(sb: Sandbox): Promise<string> {
+  const p = join(sb.root, `answers-fifo-${Math.random().toString(36).slice(2)}`)
+  const r = Bun.spawnSync(['mkfifo', p])
+  if (r.exitCode !== 0) throw new Error(`mkfifo failed: ${r.stderr}`)
+  return p
+}
+
+const GATE = 'can_prompt && echo can || echo cannot'
+const CONFIRM = 'confirm "Proceed" && echo yes || echo no'
+
+describe('common.sh: can_prompt and confirm share one gate', () => {
+  test('SUDO_USER set + stdin not a tty: can_prompt is false even though PROMPT_TTY opens', async () => {
+    const sb = await makeSandbox()
+    const file = await answers(sb, 'g1', 'y')
+    const devnull = await helper(sb, GATE, { ...UNDER_SUDO, PROMPT_TTY: file })
+    expect(devnull.stdout).toBe('cannot\n')
+    const piped = await helper(sb, GATE, { ...UNDER_SUDO, PROMPT_TTY: file }, { stdin: 'pipe', stdinText: 'y\n' })
+    expect(piped.stdout).toBe('cannot\n')
+  })
+
+  test('SUDO_USER unset + stdin not a tty + PROMPT_TTY opens: can_prompt is true (curl | bash as root)', async () => {
+    const sb = await makeSandbox()
+    const file = await answers(sb, 'g2', 'y')
+    expect((await helper(sb, GATE, { PROMPT_TTY: file })).stdout).toBe('can\n')
+    const piped = await helper(sb, GATE, { PROMPT_TTY: file }, { stdin: 'pipe', stdinText: 'junk\n' })
+    expect(piped.stdout).toBe('can\n')
+  })
+
+  test.skipIf(!PYTHON)('SUDO_USER set + stdin a real pty: can_prompt is true', async () => {
+    const sb = await makeSandbox()
+    const file = await answers(sb, 'g3', 'y')
+    const r = await helper(sb, `[[ -t 0 ]] && echo tty0\n${GATE}`, { ...UNDER_SUDO, PROMPT_TTY: file }, {
+      pty: { stdin: 'pty' },
+      timeoutMs: 15_000,
+    })
+    expect(r.timedOut).toBe(false)
+    expect(r.stdout).toBe('tty0\ncan\n')
+  })
+
+  test('confirm under ASSUME_YES=1 is yes at once, without asking, whatever the gate says', async () => {
+    const sb = await makeSandbox()
+    const fifo = await neverWrittenFifo(sb)
+    for (const env of [
+      { ASSUME_YES: '1', PROMPT_TTY: sb.noTty },
+      { ASSUME_YES: '1', PROMPT_TTY: fifo, ...UNDER_SUDO },
+    ]) {
+      const r = await helper(sb, CONFIRM, env, { timeoutMs: 10_000 })
+      expect(r.timedOut).toBe(false)
+      expect(r.stdout).toBe('yes\n')
+      expect(r.stderr).not.toContain('[y/N]')
+    }
+  })
+
+  test('confirm with SUDO_USER set + stdin not a tty: no at once, without asking, and the "y" waiting in PROMPT_TTY is not taken', async () => {
+    const sb = await makeSandbox()
+    const file = await answers(sb, 'c1', 'y')
+    const r = await helper(sb, CONFIRM, { ...UNDER_SUDO, PROMPT_TTY: file })
+    expect(r.stdout).toBe('no\n')
+    expect(r.stderr).not.toContain('[y/N]')
+  })
+
+  test('confirm with the gate shut never even opens PROMPT_TTY (a FIFO nobody writes would block the open)', async () => {
+    const sb = await makeSandbox()
+    const fifo = await neverWrittenFifo(sb)
+    const started = Date.now()
+    const r = await helper(sb, `${CONFIRM}\n${GATE}`, { ...UNDER_SUDO, PROMPT_TTY: fifo }, { timeoutMs: 10_000 })
+    expect(r.timedOut).toBe(false)
+    expect(r.stdout).toBe('no\ncannot\n')
+    expect(Date.now() - started).toBeLessThan(10_000)
+  })
+
+  test('confirm with an unopenable PROMPT_TTY (no terminal at all) is no, and logging still works', async () => {
+    const sb = await makeSandbox()
+    const r = await helper(sb, `${CONFIRM}\nlog_warn still-logging`, { PROMPT_TTY: sb.noTty })
+    expect(r.stdout).toBe('no\n')
+    expect(r.stderr).toContain('still-logging')
+  })
+
+  test('confirm reads the same once-opened fd as ask/ask_secret: answers are consumed in order across them', async () => {
+    const sb = await makeSandbox()
+    const file = await answers(sb, 'mix', 'y', 'first', 'n', 'secret-two', 'Y', 'maybe')
+    const r = await helper(
+      sb,
+      [
+        CONFIRM,
+        'ask a "Q1"',
+        CONFIRM,
+        'ask_secret b "Q2"',
+        'can_prompt || echo gate-disagrees',
+        CONFIRM,
+        CONFIRM, // "maybe" is not a yes
+        CONFIRM, // EOF is not a yes either
+        'printf "%s|%s\\n" "$a" "$b"',
+      ].join('\n'),
+      { PROMPT_TTY: file },
+    )
+    expect(r.stdout).toBe('yes\nno\nyes\nno\nno\nfirst|secret-two\n')
+    expect(lines(r.stderr).join('\n').match(/\[y\/N\]/g)).toHaveLength(5)
+  })
+
+  test('confirm first, before any can_prompt, opens the fd itself; ask then gets the next line, not a rewind', async () => {
+    const sb = await makeSandbox()
+    const file = await answers(sb, 'first', 'y', 'second')
+    const r = await helper(sb, `${CONFIRM}\nask a "Q"\necho "a=$a"`, { PROMPT_TTY: file })
+    expect(r.stdout).toBe('yes\na=second\n')
+  })
+
+  test.skipIf(!PYTHON)(
+    'the real bug shape: /dev/tty is a live pty but stdin is a pipe under sudo -> confirm is no, promptly',
+    async () => {
+      const sb = await makeSandbox()
+      // Nothing is ever typed into the pty: a read on /dev/tty would block for
+      // the full timeout — exactly the `curl | sudo bash` hang.
+      const r = await helper(sb, `${CONFIRM}\n${GATE}`, { ...UNDER_SUDO, PROMPT_TTY: '/dev/tty' }, {
+        pty: { stdin: 'pipe', ctty: true },
+        timeoutMs: 10_000,
+      })
+      expect(r.timedOut).toBe(false)
+      expect(r.stdout).toBe('no\ncannot\n')
+    },
+  )
+
+  test.skipIf(!PYTHON)(
+    'SUDO_USER set + stdin and /dev/tty a real pty (the `sudo bash -c "$(curl ...)"` shape): confirm reads the keyboard',
+    async () => {
+      const sb = await makeSandbox()
+      const r = await helper(sb, `${CONFIRM}\n${CONFIRM}`, { ...UNDER_SUDO, PROMPT_TTY: '/dev/tty' }, {
+        pty: { stdin: 'pty', ctty: true, type: [['now', 'y'], ['now', 'n']] },
+        timeoutMs: 15_000,
+      })
+      expect(r.timedOut).toBe(false)
+      expect(r.stdout).toBe('yes\nno\n')
+    },
+  )
 })
 
 // ============================================================ 66 (nginx) =====
@@ -788,8 +996,12 @@ describe('66-install-nginx.sh with a certified HTTPS_DOMAIN', () => {
 // the defect. It is inert once the defect is fixed (the header becomes
 // readable and is checked for real), and those scenarios never assert on the
 // header itself.
-function run85(sb: Sandbox, env: Record<string, string | undefined> = {}): Promise<Run> {
-  return run(sb, HTTPS_SH, { FAKE_CURL_TOLERATE_UNREADABLE_HEADER: '1', ...env })
+function run85(
+  sb: Sandbox,
+  env: Record<string, string | undefined> = {},
+  opts: RunOpts = {},
+): Promise<Run> {
+  return run(sb, HTTPS_SH, { FAKE_CURL_TOLERATE_UNREADABLE_HEADER: '1', ...env }, [], opts)
 }
 
 const OK_ENV = (extra: Record<string, string> = {}) => ({
@@ -899,6 +1111,8 @@ describe('85-configure-https.sh: skipping', () => {
     expect(lines(r.stderr).filter((l) => l.includes(RECIPE))).toHaveLength(1)
     expect(lines(r.stderr).filter((l) => l.startsWith('INFO') && l.includes(RECIPE))).toHaveLength(1)
     expect(r.stderr).not.toMatch(/^(WARN|ERROR)/m)
+    // No terminal at all is not the `curl | sudo bash` case: no sudo wording.
+    expect(r.stderr).not.toMatch(PIPED_WORDING)
     expect(Object.keys(await settingsOf(sb)).filter((k) => k.startsWith('HTTPS_'))).toEqual([])
     await expectNoTokenLeak(sb, r)
   })
@@ -930,6 +1144,246 @@ describe('85-configure-https.sh: skipping', () => {
     expect((await settingsOf(sb)).HTTPS_DOMAIN).toBe('none')
     expect(existsSync(sb.site)).toBe(false)
     await expectNoTokenLeak(sb, second)
+  })
+})
+
+// `curl ... | sudo bash`: SUDO_USER set, stdin a pipe. The prompt must be
+// skipped (it could never be answered), with an explanation and the commands
+// to finish later — and PROMPT_TTY must not be consumed, even when it opens.
+const PIPED_WORDING = /piped into sudo|can't read keyboard input/
+
+function expectPipedSkipBlock(r: Run): void {
+  expect(r.code).toBe(0)
+  expect(r.timedOut).toBe(false)
+  const warn = lines(r.stderr).filter((l) => l.startsWith('WARN'))
+  const text = warn.join('\n')
+  expect(text).toContain("this run can't read keyboard input")
+  expect(text).toContain('piped into sudo')
+  expect(text).toMatch(/sudo \S*install\.sh --only https,summary$/m)
+  expect(text).toMatch(/HTTPS_DOMAIN=your\.domain HTTPS_EMAIL=you@example\.com CLOUDFLARE_API_TOKEN=\.\.\. sudo \S*install\.sh --only https --yes$/m)
+  expect(text).toMatch(/HTTPS_DOMAIN=none sudo \S*install\.sh --only https$/m)
+  expect(r.stderr).not.toContain('Domain to serve')
+  expect(r.stderr).not.toContain('?')
+}
+
+async function expectNothingSaved(sb: Sandbox): Promise<void> {
+  expect(Object.keys(await settingsOf(sb)).filter((k) => k.startsWith('HTTPS_'))).toEqual([])
+  expect(existsSync(sb.creds)).toBe(false)
+}
+
+describe('85-configure-https.sh: run piped into sudo (no keyboard can reach it)', () => {
+  test('stdin /dev/null + SUDO_USER + a readable answers file -> skipped with the finish-later block, answers untouched', async () => {
+    const sb = await makeSandbox()
+    const file = await answers(sb, 'piped', DOMAIN, EMAIL, TOKEN)
+    const r = await run85(sb, { ...UNDER_SUDO, PROMPT_TTY: file }, { timeoutMs: 20_000 })
+    expectNothingAttempted(r)
+    expectPipedSkipBlock(r)
+    expect(r.calls('curl')).toEqual([])
+    await expectNothingSaved(sb)
+    await expectNoTokenLeak(sb, r)
+  })
+
+  test('stdin a pipe still carrying data (the rest of a curl stream) -> same skip; neither stdin nor PROMPT_TTY is read', async () => {
+    const sb = await makeSandbox()
+    const file = await answers(sb, 'piped2', DOMAIN, EMAIL, TOKEN)
+    const r = await run85(
+      sb,
+      { ...UNDER_SUDO, PROMPT_TTY: file },
+      { stdin: 'pipe', stdinText: `${DOMAIN}\n${EMAIL}\n${TOKEN}\n`, timeoutMs: 20_000 },
+    )
+    expectNothingAttempted(r)
+    expectPipedSkipBlock(r)
+    await expectNothingSaved(sb)
+    await expectNoTokenLeak(sb, r)
+  })
+
+  test('PROMPT_TTY is a FIFO nobody writes -> still exits promptly (it is never opened)', async () => {
+    const sb = await makeSandbox()
+    const r = await run85(sb, { ...UNDER_SUDO, PROMPT_TTY: await neverWrittenFifo(sb) }, { timeoutMs: 15_000 })
+    expectNothingAttempted(r)
+    expectPipedSkipBlock(r)
+    await expectNothingSaved(sb)
+  })
+
+  test.skipIf(!PYTHON)(
+    'the reported hang: /dev/tty is a live pty nobody types into, stdin a pipe, SUDO_USER set -> exits 0 promptly',
+    async () => {
+      const sb = await makeSandbox()
+      const r = await run85(sb, { ...UNDER_SUDO, PROMPT_TTY: '/dev/tty' }, {
+        pty: { stdin: 'pipe', ctty: true },
+        timeoutMs: 15_000,
+      })
+      expectNothingAttempted(r)
+      expectPipedSkipBlock(r)
+      await expectNothingSaved(sb)
+    },
+  )
+
+  test('ASSUME_YES=1 under sudo with a pipe on stdin -> the --yes reason, not the "piped into sudo" one', async () => {
+    const sb = await makeSandbox()
+    const file = await answers(sb, 'yes-sudo', DOMAIN, EMAIL, TOKEN)
+    const r = await run85(sb, { ...UNDER_SUDO, ASSUME_YES: '1', PROMPT_TTY: file })
+    expectNothingAttempted(r)
+    expect(r.stderr).not.toMatch(PIPED_WORDING)
+    expect(r.stderr).not.toContain('Domain to serve')
+    expect(lines(r.stderr).filter((l) => l.startsWith('INFO') && l.includes(RECIPE))).toHaveLength(1)
+    expect(r.stderr).toContain('not --yes')
+    expect(r.stderr).not.toMatch(/^(WARN|ERROR)/m)
+    await expectNothingSaved(sb)
+  })
+
+  test('DRY_RUN=1 under sudo with a pipe on stdin -> the dry-run reason, not the "piped into sudo" one', async () => {
+    const sb = await makeSandbox()
+    const file = await answers(sb, 'dry-sudo', DOMAIN, EMAIL, TOKEN)
+    const r = await run85(sb, { ...UNDER_SUDO, DRY_RUN: '1', PROMPT_TTY: file })
+    expectNothingAttempted(r)
+    expect(r.stderr).not.toMatch(PIPED_WORDING)
+    expect(r.stderr).toContain('[dry-run] No HTTPS_DOMAIN configured')
+    expect(r.stderr).not.toContain('Domain to serve')
+    await expectNothingSaved(sb)
+  })
+
+  test('SUDO_USER unset + stdin a pipe + answers (curl | bash as root) -> prompts work as before, issued', async () => {
+    const sb = await makeSandbox()
+    const file = await answers(sb, 'root-pipe', DOMAIN, EMAIL, TOKEN)
+    const r = await run85(sb, { PROMPT_TTY: file }, { stdin: 'pipe', stdinText: 'not-an-answer\n' })
+    expect(r.stderr).toContain('Domain to serve')
+    expect(r.stderr).not.toMatch(PIPED_WORDING)
+    await expectIssued(sb, r)
+    expectCreatedRecord(r)
+  })
+
+  test.skipIf(!PYTHON)('SUDO_USER set + stdin a real pty + answers file -> prompts work, issued', async () => {
+    const sb = await makeSandbox()
+    const file = await answers(sb, 'sudo-pty', DOMAIN, EMAIL, TOKEN)
+    const r = await run85(sb, { ...UNDER_SUDO, PROMPT_TTY: file }, { pty: { stdin: 'pty' }, timeoutMs: 30_000 })
+    expect(r.timedOut).toBe(false)
+    expect(r.stderr).toContain('Domain to serve')
+    expect(r.stderr).not.toMatch(PIPED_WORDING)
+    await expectIssued(sb, r)
+    expectCreatedRecord(r)
+  })
+
+  test.skipIf(!PYTHON)(
+    'sudo bash -c "$(curl ...)" shape: SUDO_USER set, stdin and /dev/tty one real pty, typed answers -> issued, token never echoed',
+    async () => {
+      const sb = await makeSandbox()
+      const echoLog = join(sb.root, 'pty-echo.log')
+      const r = await run85(sb, { ...UNDER_SUDO, PROMPT_TTY: '/dev/tty' }, {
+        pty: {
+          stdin: 'pty',
+          ctty: true,
+          // The token is typed only once `read -s` has switched echo off —
+          // what a human pasting at the hidden prompt actually does.
+          type: [['now', DOMAIN], ['now', EMAIL], ['noecho', TOKEN]],
+          echoLog,
+        },
+        timeoutMs: 30_000,
+      })
+      expect(r.timedOut).toBe(false)
+      expect(r.code).not.toBe(125) // the hidden prompt really did turn echo off
+      const echoed = await readOr(echoLog)
+      expect(echoed).toContain(DOMAIN) // positive control: the echo capture works
+      expect(echoed).not.toContain(TOKEN)
+      await expectIssued(sb, r) // includes the stdout/stderr/log/argv leak scan, echo log included
+      expectCreatedRecord(r)
+    },
+  )
+})
+
+describe('85-configure-https.sh: what the interactive prompts explain', () => {
+  async function interactive(domain: string, extraEnv: Record<string, string> = {}, tokenAnswer = TOKEN) {
+    const sb = await makeSandbox()
+    const file = await answers(sb, 'guide', domain, EMAIL, tokenAnswer)
+    return { sb, r: await run85(sb, { PROMPT_TTY: file, ...extraEnv }) }
+  }
+
+  test('before the domain prompt: the domain must be in your Cloudflare zone and will point at the Tailscale IP', async () => {
+    const { sb, r } = await interactive(DOMAIN)
+    const ask = r.stderr.indexOf('Domain to serve over HTTPS')
+    expect(ask).toBeGreaterThan(-1)
+    const zone = r.stderr.indexOf('Cloudflare zone you control')
+    const dns = r.stderr.search(/DNS A record to point at this node's Tailscale IP/)
+    expect(zone).toBeGreaterThan(-1)
+    expect(dns).toBeGreaterThan(-1)
+    expect(zone).toBeLessThan(ask)
+    expect(dns).toBeLessThan(ask)
+    await expectIssued(sb, r)
+  })
+
+  test("the email prompt says it is for Let's Encrypt expiry notices", async () => {
+    const { r } = await interactive(DOMAIN)
+    expect(r.stderr).toContain("Email for Let's Encrypt expiry notices: ")
+  })
+
+  test('before the token prompt: numbered steps, the right zone, not the Global API Key, input hidden', async () => {
+    const { sb, r } = await interactive(DOMAIN)
+    const email = r.stderr.indexOf("Email for Let's Encrypt")
+    const tokenAsk = r.stderr.indexOf('Cloudflare API token (hidden): ')
+    expect(email).toBeGreaterThan(-1)
+    expect(tokenAsk).toBeGreaterThan(email)
+    const guide = r.stderr.slice(email, tokenAsk)
+    const steps = lines(guide)
+      .map((l) => /^INFO\s+(\d)\. (.*)$/.exec(l))
+      .filter((m): m is RegExpExecArray => !!m)
+    expect(steps.map((m) => m[1])).toEqual(['1', '2', '3', '4', '5'])
+    expect(steps[0][2]).toContain('https://dash.cloudflare.com/profile/api-tokens')
+    expect(steps[1][2]).toContain('Edit zone DNS')
+    expect(steps[2][2]).toContain('"Zone / DNS / Edit"')
+    expect(steps[3][2]).toContain('"Include / Specific zone / example.com"')
+    expect(guide).toContain('Global API Key')
+    expect(guide).toMatch(/input is hidden/)
+    // Label: exactly "(hidden)" — no stored token, so no reuse offer.
+    expect(r.stderr).not.toContain('reuse the saved token')
+    await expectIssued(sb, r)
+  })
+
+  test.each([
+    ['agentoo.skyparadise.org', 'skyparadise.org'],
+    ['example.com', 'example.com'],
+    ['a.b.example.com', 'example.com'],
+  ])('zone hint for %s is %s (the last two labels)', async (domain, zone) => {
+    const { sb, r } = await interactive(domain, { FAKE_CF_ZONE: zone })
+    expect(r.stderr).toContain(`"Include / Specific zone / ${zone}"`)
+    expect(r.stderr).not.toMatch(new RegExp(`Specific zone / (?!${zone.replaceAll('.', '\\.')}")`))
+    expect(r.code).toBe(0)
+    expect((await settingsOf(sb)).HTTPS_DOMAIN).toBe(domain)
+    await expectNoTokenLeak(sb, r)
+  })
+
+  test('a stored credentials file: the label offers Enter to reuse it, and Enter does', async () => {
+    const sb = await makeSandbox()
+    await writeFile(sb.creds, `dns_cloudflare_api_token = ${TOKEN}\n`, { mode: 0o600 })
+    const r = await run85(sb, { PROMPT_TTY: await answers(sb, 'reuse', DOMAIN, EMAIL, '') })
+    expect(r.stderr).toContain('Cloudflare API token (hidden; press Enter to reuse the saved token): ')
+    expect(r.stderr).toContain('https://dash.cloudflare.com/profile/api-tokens')
+    await expectIssued(sb, r)
+  })
+
+  test('zone lookup fails (interactive) -> the warning names Zone Resources, DNS Edit, API token vs Global API Key, and the retry', async () => {
+    const { sb, r } = await interactive(DOMAIN, { FAKE_CF_ZONE: 'other.org' })
+    expect(r.code).toBe(0)
+    const warn = lines(r.stderr).filter((l) => l.startsWith('WARN')).join('\n')
+    expect(warn).toContain(`Could not find a Cloudflare zone covering ${DOMAIN}`)
+    expect(warn).toContain(`Zone Resources include the zone containing ${DOMAIN}`)
+    expect(warn).toMatch(/Zone\W+DNS\W+Edit/)
+    expect(warn).toContain('API token, not the Global API Key')
+    expect(warn).toMatch(/Retry: +sudo \S*install\.sh --only https$/m)
+    expect(r.calls('certbot')).toEqual([])
+    await expectNothingSaved(sb)
+    await expectNoTokenLeak(sb, r)
+  })
+
+  test('zone lookup fails with a certificate already present -> the same token checklist, DNS check skipped', async () => {
+    const sb = await makeSandbox()
+    await plantCert(sb, DOMAIN)
+    const r = await run85(sb, OK_ENV({ FAKE_CF_ZONE: 'other.org' }))
+    expect(r.code).toBe(0)
+    const warn = lines(r.stderr).filter((l) => l.startsWith('WARN')).join('\n')
+    expect(warn).toContain('skipping the DNS record check')
+    expect(warn).toContain(`Zone Resources include the zone containing ${DOMAIN}`)
+    expect(warn).toContain('API token, not the Global API Key')
+    await expectNoTokenLeak(sb, r)
   })
 })
 
@@ -1160,12 +1614,14 @@ describe('85-configure-https.sh: disabling and dry runs', () => {
 // =========================================================== 90 (summary) ====
 
 describe('90-summary.sh HTTPS block', () => {
+  // 'none': no HTTPS_DOMAIN key at all (never answered). 'disabled': HTTPS_DOMAIN=none.
   async function summary(
-    state: 'none' | 'certified' | 'uncertified',
+    state: 'none' | 'disabled' | 'certified' | 'uncertified',
     opts: { omitVersionTools?: string[]; probe?: 'ok' | 'fail' } = {},
   ): Promise<Run> {
     const sb = await makeSandbox({ omitVersionTools: opts.omitVersionTools })
-    if (state !== 'none') await writeSettings(sb, { HTTPS_DOMAIN: DOMAIN, HTTPS_EMAIL: EMAIL })
+    if (state === 'disabled') await writeSettings(sb, { HTTPS_DOMAIN: 'none' })
+    else if (state !== 'none') await writeSettings(sb, { HTTPS_DOMAIN: DOMAIN, HTTPS_EMAIL: EMAIL })
     if (state === 'certified') await plantCert(sb, DOMAIN)
     return run(sb, SUMMARY_SH, { FAKE_PROBE: opts.probe ?? 'ok' })
   }
@@ -1193,6 +1649,27 @@ describe('90-summary.sh HTTPS block', () => {
     expect(r.stderr).not.toContain('Custom domain')
   })
 
+  const nextStep = (r: Run) => lines(r.stderr).filter((l) => /Next step|--only https,summary/.test(l))
+
+  test('never answered -> a "Next step" line pointing at --only https,summary; exit and missing lines unchanged', async () => {
+    const never = await summary('none')
+    const disabled = await summary('disabled')
+    expect(nextStep(never)).toHaveLength(2)
+    expect(nextStep(never)[0]).toMatch(/^INFO +Next step: .*HTTPS on your own domain/)
+    expect(nextStep(never)[1]).toMatch(/^INFO +sudo \S*install\.sh --only https,summary$/)
+    expect(never.code).toBe(disabled.code)
+    expect(never.code).toBe(0)
+    expect(missingLines(never)).toEqual(missingLines(disabled))
+  })
+
+  test.each(['disabled', 'certified', 'uncertified'] as const)(
+    'HTTPS_DOMAIN %s -> no "Next step" line',
+    async (state) => {
+      const r = await summary(state)
+      expect(nextStep(r)).toEqual([])
+    },
+  )
+
   test('cert present but probe failing -> a warning, exit unchanged', async () => {
     const base = await summary('none')
     const r = await summary('certified', { probe: 'fail' })
@@ -1206,6 +1683,7 @@ describe('90-summary.sh HTTPS block', () => {
       const omit = { omitVersionTools: ['psql'] }
       const runs = [
         await summary('none', omit),
+        await summary('disabled', omit),
         await summary('certified', omit),
         await summary('uncertified', omit),
       ]

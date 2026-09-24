@@ -201,6 +201,12 @@ if [[ -n "$https_domain" && "$https_domain" != "none" ]]; then
     log_warn "HTTPS_DOMAIN=$https_domain is configured, but no certificate exists for it yet."
     log_warn "Run: sudo $INSTALL_SH --only https"
   fi
+elif [[ -z "$https_domain" ]]; then
+  # Distinct from HTTPS_DOMAIN=none (a deliberate "no thanks", nothing to say
+  # here) — this is "never answered", almost always because the install ran
+  # piped into sudo, which leaves nothing for the prompt to read.
+  log_info "Next step: set up HTTPS on your own domain any time with:"
+  log_info "    sudo $INSTALL_SH --only https,summary"
 fi
 
 if curl -fsS --max-time 3 "http://${BACKEND_HOST}:${BACKEND_PORT}/api/health" 2>/dev/null | grep -q '"status":"ok"'; then
