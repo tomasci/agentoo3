@@ -18,25 +18,6 @@
 // one of its children), so the ordinary `/sessions/$sessionId` route right
 // beside it doubles as this file's "non-bare routes are unaffected" control.
 
-import { plugin } from 'bun'
-
-// Same identity-proxy loader, same allowlist, as tests/editor-page.test.tsx,
-// tests/ui-core.test.tsx and tests/docker-page.test.tsx — copied verbatim,
-// not widened; see any of those files' own header comments for why this
-// exists at all.
-const UI_CORE_STYLES =
-  /src\/shared\/ui\/(core\/(badge|status-dot|code|layout)|patterns\/(card|page-header|empty-state|alert|definition-list|data-table))\.module\.scss$/
-plugin({
-  name: 'project-layout-test-css-module-identity',
-  setup(build) {
-    build.onLoad({ filter: UI_CORE_STYLES }, () => ({
-      contents:
-        'export default new Proxy({}, { get: (_t, p) => (typeof p === "string" ? p : undefined) })',
-      loader: 'js',
-    }))
-  },
-})
-
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
@@ -268,7 +249,13 @@ afterAll(() => {
   apiClient.setConfig({ transport: originalTransport })
 })
 
-const progressBars = () => container.querySelectorAll('[role="progressbar"]')
+// Counts loading *indicators*, not ARIA roles: one per visible spinner,
+// whether it is a bare `role="progressbar"` or shadcn's `Spinner`
+// (`data-slot="spinner"`). Not `[role="status"]` — the `Loading` composition
+// (shared/components/loading.tsx) wraps its Spinner in a `role="status"` live
+// region and the generated Spinner carries `role="status"` of its own, so one
+// on-screen spinner matched twice and "exactly one" could never hold.
+const progressBars = () => container.querySelectorAll('[role="progressbar"], [data-slot="spinner"]')
 
 // --- the bare editor path: the project lookup never gates it -----------------------
 
@@ -328,6 +315,9 @@ test('an ordinary project route still shows the layout\'s own "Loading…" while
 
   expect(container.textContent).toContain('Loading…')
   expect(container.textContent).not.toContain('ordinary session page')
+  // The control for the editor case's "exactly one": the layout's own
+  // `Loading` is counted, and counted once.
+  expect(progressBars()).toHaveLength(1)
 
   release()
   await settle()

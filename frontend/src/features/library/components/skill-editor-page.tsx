@@ -1,23 +1,16 @@
 import { Link, useNavigate } from '@tanstack/react-router'
+import { ArrowLeftIcon, CircleAlertIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import {
-  Alert,
-  Button,
-  Card,
-  Code,
-  ConfirmDialog,
-  Field,
-  Inline,
-  Input,
-  PageHeader,
-  Spinner,
-  Stack,
-  Textarea,
-} from '@/shared/ui'
+import { Code, ConfirmDialog, Loading, PageHeader } from '@/shared/components'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Button } from '@/shared/ui/button'
+import { Card, CardContent } from '@/shared/ui/card'
+import { Field, FieldDescription, FieldLabel } from '@/shared/ui/field'
+import { Input } from '@/shared/ui/input'
+import { Textarea } from '@/shared/ui/textarea'
 import { useCreateSkill, useDeleteSkill, useSkill, useUpdateSkill } from '../hooks/use-library'
-import styles from './library.module.scss'
 
 export function SkillEditorPage({ name }: { name?: string }) {
   const { t } = useTranslation()
@@ -54,63 +47,80 @@ export function SkillEditorPage({ name }: { name?: string }) {
   }
 
   const busy = create.isPending || update.isPending
-  if (!isNew && isPending) return <Spinner label={t('common.loading')} block />
+  if (!isNew && isPending) return <Loading label={t('common.loading')} block />
 
   return (
-    <Stack gap={5}>
-      <Link to="/library" className={styles.back}>
-        ← {t('library.backToLibrary')}
+    <div className="flex flex-col gap-5">
+      <Link
+        to="/library"
+        className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeftIcon className="size-4" />
+        {t('library.backToLibrary')}
       </Link>
 
       <PageHeader title={isNew ? t('library.newSkill') : draft.name || name} />
 
       <Card>
-        <Stack gap={3}>
-          <div className={styles.grid}>
-            <Field
-              label={t('library.skill.name')}
-              hint={isNew ? t('library.skill.nameHint') : t('library.skill.renameHint')}
-            >
+        <CardContent className="flex flex-col gap-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-3">
+            <Field>
+              <FieldLabel htmlFor="skill-name">{t('library.skill.name')}</FieldLabel>
               <Input
+                id="skill-name"
                 value={draft.name}
                 onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
                 placeholder="testing"
               />
+              <FieldDescription>
+                {isNew ? t('library.skill.nameHint') : t('library.skill.renameHint')}
+              </FieldDescription>
             </Field>
           </div>
 
-          <Field label={t('library.skill.description')} hint={t('library.skill.descriptionHint')}>
+          <Field>
+            <FieldLabel htmlFor="skill-description">{t('library.skill.description')}</FieldLabel>
             <Input
+              id="skill-description"
               value={draft.description}
               onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
               placeholder={t('library.skill.descriptionPlaceholder')}
             />
+            <FieldDescription>{t('library.skill.descriptionHint')}</FieldDescription>
           </Field>
 
           {skill && skill.extraFiles.length > 0 && (
-            <Stack gap={1}>
-              <span className={styles.hint}>{t('library.skill.bundled')}</span>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-muted-foreground">{t('library.skill.bundled')}</span>
               <Code block wrap>
                 {skill.extraFiles.join('\n')}
               </Code>
-            </Stack>
+            </div>
           )}
-        </Stack>
+        </CardContent>
       </Card>
 
-      <Field label={t('library.skill.body')} hint={t('library.skill.bodyHint')}>
+      <Field>
+        <FieldLabel htmlFor="skill-body">{t('library.skill.body')}</FieldLabel>
         <Textarea
-          mono
+          id="skill-body"
+          className="field-sizing-fixed font-mono"
           rows={20}
           value={draft.body}
           onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
           spellCheck={false}
         />
+        <FieldDescription>{t('library.skill.bodyHint')}</FieldDescription>
       </Field>
 
-      <Stack gap={3}>
-        {error && <Alert>{error}</Alert>}
-        <Inline gap={2}>
+      <div className="flex flex-col gap-3">
+        {error && (
+          <Alert variant="destructive">
+            <CircleAlertIcon />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
             disabled={busy || !draft.name || !draft.description || !draft.body}
@@ -119,12 +129,12 @@ export function SkillEditorPage({ name }: { name?: string }) {
             {busy ? t('common.working') : t('common.save')}
           </Button>
           {!isNew && (
-            <Button type="button" onClick={() => setConfirmDelete(true)}>
+            <Button type="button" variant="outline" onClick={() => setConfirmDelete(true)}>
               {t('common.delete')}
             </Button>
           )}
-        </Inline>
-      </Stack>
+        </div>
+      </div>
 
       <ConfirmDialog
         open={confirmDelete}
@@ -146,6 +156,6 @@ export function SkillEditorPage({ name }: { name?: string }) {
           remove.mutate({ path: { name } }, { onSuccess: () => void navigate({ to: '/library' }) })
         }
       />
-    </Stack>
+    </div>
   )
 }

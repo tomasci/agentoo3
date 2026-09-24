@@ -1,28 +1,37 @@
 import { zodResolver } from '@hookform/resolvers/zod'
+import { CircleAlertIcon } from 'lucide-react'
 import { useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { useAgents } from '@/features/library'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
+import { Loading, PageHeader } from '@/shared/components'
+import { parseNumberInput } from '@/shared/lib/number-input'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Button } from '@/shared/ui/button'
 import {
-  Alert,
-  Button,
   Dialog,
-  EmptyState,
-  Field,
-  Input,
-  NumberInput,
-  PageHeader,
-  Select,
-  type SelectOption,
-  Spinner,
-  Stack,
-} from '@/shared/ui'
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/shared/ui/dialog'
+import { Empty, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
+import { Input } from '@/shared/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { Spinner } from '@/shared/ui/spinner'
 import { useCreateIdea, useIdeas } from '../hooks/use-ideas'
 import { IDEA_STATUS_I18N_KEY, IDEA_STATUSES } from '../lib/status'
 import { type CreateIdeaFormValues, createIdeaFormSchema } from '../model/idea-form.schema'
-import styles from './idea-board.module.scss'
+import { FormField } from './form-field'
 import { IdeaCard } from './idea-card'
+
+interface SelectOption {
+  value: string
+  label: string
+  description?: string
+}
 
 const CREATE_IDEA_FORM_ID = 'create-idea-form'
 
@@ -95,44 +104,58 @@ function CreateIdeaDialog({
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title={t('ideas.form.createHeading')}
-      footer={
-        <>
-          <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
-            {t('common.cancel')}
-          </Button>
-          <Button type="submit" form={CREATE_IDEA_FORM_ID} loading={create.isPending}>
-            {t('ideas.form.submit')}
-          </Button>
-        </>
-      }
-    >
-      <form id={CREATE_IDEA_FORM_ID} onSubmit={handleSubmit(onSubmit)} noValidate>
-        <Stack gap={3}>
-          <Field label={t('ideas.form.title')} error={fieldError(errors.title?.message)}>
-            <Input placeholder={t('ideas.form.titlePlaceholder')} {...register('title')} />
-          </Field>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('ideas.form.createHeading')}</DialogTitle>
+        </DialogHeader>
 
-          <Field label={t('ideas.form.startColumn')}>
-            <Controller
-              control={control}
-              name="status"
-              render={({ field }) => (
-                <Select
-                  options={statusOptions}
-                  value={field.value}
-                  onValueChange={(value) => field.onChange(value ?? 'backlog')}
-                  name={field.name}
-                  ref={field.ref}
-                />
-              )}
-            />
-          </Field>
+        <form
+          id={CREATE_IDEA_FORM_ID}
+          onSubmit={handleSubmit(onSubmit)}
+          noValidate
+          className="flex flex-col gap-3"
+        >
+          <FormField label={t('ideas.form.title')} error={fieldError(errors.title?.message)}>
+            {(field) => (
+              <Input
+                placeholder={t('ideas.form.titlePlaceholder')}
+                {...register('title')}
+                {...field}
+              />
+            )}
+          </FormField>
 
-          <Field
+          <FormField label={t('ideas.form.startColumn')}>
+            {(field) => (
+              <Controller
+                control={control}
+                name="status"
+                render={({ field: rhf }) => (
+                  <Select
+                    items={statusOptions}
+                    value={rhf.value}
+                    onValueChange={(value) => rhf.onChange(value ?? 'backlog')}
+                    inputRef={rhf.ref}
+                    name={rhf.name}
+                  >
+                    <SelectTrigger className="w-full" {...field}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {statusOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            )}
+          </FormField>
+
+          <FormField
             label={t('ideas.form.orchestrator')}
             hint={
               orchestrators.length === 0
@@ -141,52 +164,92 @@ function CreateIdeaDialog({
             }
             error={fieldError(errors.orchestrator?.message)}
           >
-            <Controller
-              control={control}
-              name="orchestrator"
-              render={({ field }) => (
-                <Select
-                  options={orchestratorOptions}
-                  value={field.value || ''}
-                  onValueChange={(value) => field.onChange(value ?? '')}
-                  name={field.name}
-                  ref={field.ref}
-                />
-              )}
-            />
-          </Field>
+            {(field) => (
+              <Controller
+                control={control}
+                name="orchestrator"
+                render={({ field: rhf }) => (
+                  <Select
+                    items={orchestratorOptions}
+                    value={rhf.value || ''}
+                    onValueChange={(value) => rhf.onChange(value ?? '')}
+                    inputRef={rhf.ref}
+                    name={rhf.name}
+                  >
+                    <SelectTrigger className="w-full" {...field}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {orchestratorOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          <span className="flex min-w-0 flex-col">
+                            <span>{option.label}</span>
+                            {option.description && (
+                              <span className="text-xs text-muted-foreground">
+                                {option.description}
+                              </span>
+                            )}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            )}
+          </FormField>
 
-          <Field
+          <FormField
             label={t('ideas.form.baseBranch')}
             hint={t('ideas.form.baseBranchHint')}
             error={fieldError(errors.baseBranch?.message)}
           >
-            <Input mono {...register('baseBranch')} />
-          </Field>
+            {(field) => <Input className="font-mono" {...register('baseBranch')} {...field} />}
+          </FormField>
 
-          <Field
+          <FormField
             label={t('ideas.form.budget')}
             hint={t('ideas.form.budgetHint')}
             error={fieldError(errors.maxBudgetUsd?.message)}
           >
-            <Controller
-              control={control}
-              name="maxBudgetUsd"
-              render={({ field }) => (
-                <NumberInput
-                  value={field.value ?? null}
-                  onValueChange={(value) => field.onChange(value ?? undefined)}
-                  min={1}
-                  max={1000}
-                  name={field.name}
-                />
-              )}
-            />
-          </Field>
+            {(field) => (
+              <Controller
+                control={control}
+                name="maxBudgetUsd"
+                render={({ field: rhf }) => (
+                  <Input
+                    type="number"
+                    min={1}
+                    max={1000}
+                    value={rhf.value ?? ''}
+                    onChange={(e) => rhf.onChange(parseNumberInput(e) ?? undefined)}
+                    name={rhf.name}
+                    ref={rhf.ref}
+                    {...field}
+                  />
+                )}
+              />
+            )}
+          </FormField>
 
-          {serverError && <Alert tone="danger">{serverError}</Alert>}
-        </Stack>
-      </form>
+          {serverError && (
+            <Alert variant="destructive">
+              <CircleAlertIcon />
+              <AlertDescription>{serverError}</AlertDescription>
+            </Alert>
+          )}
+        </form>
+
+        <DialogFooter>
+          <DialogClose render={<Button type="button" variant="outline" />}>
+            {t('common.cancel')}
+          </DialogClose>
+          <Button type="submit" form={CREATE_IDEA_FORM_ID} disabled={create.isPending}>
+            {create.isPending && <Spinner data-icon="inline-start" />}
+            {t('ideas.form.submit')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   )
 }
@@ -210,7 +273,7 @@ export function IdeaBoardPage({ projectId }: { projectId: string }) {
   }))
 
   return (
-    <Stack gap={5}>
+    <div className="flex flex-col gap-5">
       <PageHeader
         title={t('ideas.heading')}
         actions={
@@ -221,25 +284,48 @@ export function IdeaBoardPage({ projectId }: { projectId: string }) {
       />
 
       {ideas.isError && (
-        <Alert tone="danger">{apiErrorMessage(ideas.error, t('ideas.loadFailed'))}</Alert>
+        <Alert variant="destructive">
+          <CircleAlertIcon />
+          <AlertDescription>{apiErrorMessage(ideas.error, t('ideas.loadFailed'))}</AlertDescription>
+        </Alert>
       )}
-      {ideas.isPending && <Spinner label={t('common.loading')} block />}
+      {ideas.isPending && <Loading label={t('common.loading')} block />}
 
       {!ideas.isPending && !ideas.isError && (
-        <div className={styles.board}>
+        // Six columns side by side on anything wide enough, each shrinking to
+        // a minimum before the strip itself scrolls — a real kanban board
+        // rather than six squeezed slivers. Below `md` this snaps one column
+        // at a time: the phone shape this page deliberately chose over
+        // trying to cram six columns into 360px.
+        //
+        // `p-1 -m-1`: `Card`'s edge (shared/ui/card.tsx) is a `ring-1`, a
+        // box-shadow painted outside the element, and `overflow-x-auto` clips
+        // at the padding edge — without this, the first column's cards lose
+        // their left ring, the last column's lose their right one, and any
+        // card touching the strip's own top loses that edge too. The
+        // negative margin cancels the padding's own footprint so the columns
+        // still line up with the page header above. `scroll-px-1` matches
+        // that padding as scroll-padding: without it `snap-start` snaps the
+        // first/last column flush to the scrollport edge, scrolling the
+        // padding (and the ring it protects) out of view on load.
+        <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-px-1 p-1 -m-1 pb-2 md:snap-proximity">
           {columns.map(({ status, items }) => (
             <section
               key={status}
-              className={styles.column}
+              className="flex min-w-0 shrink-0 grow-0 basis-full snap-start flex-col gap-3 md:min-w-64 md:shrink md:grow md:basis-64"
               aria-label={t(IDEA_STATUS_I18N_KEY[status])}
             >
-              <h3 className={styles.columnHeading}>
+              <h3 className="m-0 flex items-center gap-2 text-sm font-semibold text-muted-foreground">
                 {t(IDEA_STATUS_I18N_KEY[status])}
-                <span className={styles.columnCount}>{items.length}</span>
+                <span className="text-xs text-muted-foreground">{items.length}</span>
               </h3>
-              <div className={styles.columnBody}>
+              <div className="flex min-h-16 flex-col gap-3">
                 {items.length === 0 ? (
-                  <EmptyState size="sm" title={t('ideas.board.empty')} />
+                  <Empty>
+                    <EmptyHeader>
+                      <EmptyTitle>{t('ideas.board.empty')}</EmptyTitle>
+                    </EmptyHeader>
+                  </Empty>
                 ) : (
                   items.map((idea) => <IdeaCard key={idea.id} idea={idea} projectId={projectId} />)
                 )}
@@ -250,6 +336,6 @@ export function IdeaBoardPage({ projectId }: { projectId: string }) {
       )}
 
       <CreateIdeaDialog projectId={projectId} open={showCreate} onOpenChange={setShowCreate} />
-    </Stack>
+    </div>
   )
 }

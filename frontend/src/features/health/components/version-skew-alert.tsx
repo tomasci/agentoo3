@@ -1,10 +1,11 @@
+import { TriangleAlertIcon, XIcon } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { env, isProd } from '@/shared/config/env'
-import { Alert, Button } from '@/shared/ui'
+import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/shared/ui/alert'
+import { Button } from '@/shared/ui/button'
 import { useHealth } from '../hooks/use-health'
 import { isVersionSkewed } from '../lib/version-skew'
-import styles from './version-skew-alert.module.scss'
 
 /**
  * server.ts:72-74 serves index.html `no-cache` but /assets/ `immutable`, so a
@@ -19,9 +20,9 @@ import styles from './version-skew-alert.module.scss'
  * someone mid-sentence would silently destroy it. The person at the keyboard
  * picks the moment, not this poll.
  *
- * Dismissing the notice is remembered per version pair, not forever: `Alert`
- * only reports that its dismiss button was clicked, it has no notion of
- * "still the same notice", so that has to live here. Keying on
+ * Dismissing the notice is remembered per version pair, not forever: it is
+ * plain component state next to a plain `onClick`, so "still the same
+ * notice" has to live here rather than in `Alert` itself. Keying on
  * `{buildVersion}:{backendVersion}` rather than a bare boolean means a
  * dismissal survives the 15s poll re-fetching the same mismatch, but does
  * not survive the backend moving on to yet another version — which is
@@ -29,9 +30,12 @@ import styles from './version-skew-alert.module.scss'
  * page load: component state, gone on refresh, which is fine because a
  * reload is the one action that clears the condition entirely.
  *
- * Mounted once in providers.tsx, the same way <Toaster /> is — that keeps it
- * visible from every route without threading it through RootLayout's own
- * three-region grid (layout.module.scss), which has no fourth region for it.
+ * Mounted once in providers.tsx, the same way the toasters are — that keeps
+ * it visible from every route without threading it through RootLayout's own
+ * grid, which has no region set aside for it. `role="status"`/`aria-live`
+ * are set explicitly rather than left to `Alert`'s own `role="alert"`
+ * default: a stale build is not an emergency and must not talk over a screen
+ * reader the way an assertive live region would.
  */
 export function VersionSkewAlert() {
   const { t } = useTranslation()
@@ -45,12 +49,12 @@ export function VersionSkewAlert() {
   if (pair === dismissedPair) return null
 
   return (
-    <div className={styles.root}>
-      <Alert
-        tone="warning"
-        title={t('health.outdatedTitle')}
-        onDismiss={() => setDismissedPair(pair)}
-        action={
+    <div className="fixed top-[calc(env(safe-area-inset-top)+0.75rem)] left-1/2 z-50 w-full max-w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2">
+      <Alert role="status" aria-live="polite">
+        <TriangleAlertIcon aria-hidden="true" />
+        <AlertTitle>{t('health.outdatedTitle')}</AlertTitle>
+        <AlertDescription>{t('health.outdatedMessage')}</AlertDescription>
+        <AlertAction className="flex items-center gap-1.5">
           <Button
             type="button"
             variant="secondary"
@@ -59,9 +63,16 @@ export function VersionSkewAlert() {
           >
             {t('health.reload')}
           </Button>
-        }
-      >
-        {t('health.outdatedMessage')}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label={t('common.dismiss')}
+            onClick={() => setDismissedPair(pair)}
+          >
+            <XIcon aria-hidden="true" />
+          </Button>
+        </AlertAction>
       </Alert>
     </div>
   )

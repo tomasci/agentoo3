@@ -16,28 +16,6 @@
 // feature's mocks (`/api/editors`, the stop endpoint) sit next to the tests
 // that exercise them instead of growing that file's own mock list further.
 
-import { plugin } from 'bun'
-
-// Same identity-proxy loader, same allowlist, as tests/editor-page.test.tsx
-// and tests/docker-page.test.tsx — `EditorLauncher` (and, through it, this
-// panel) pulls in the `@/shared/ui` barrel, and whichever of them `bun test`
-// evaluates first decides how those ten modules are cached for the run.
-// Copied verbatim, not widened: `ConfirmDialog`'s own module (dialog.tsx) is
-// not in this list either, in tests/docker-page.test.tsx, and that already
-// exercises a real, mounted `ConfirmDialog` today.
-const UI_CORE_STYLES =
-  /src\/shared\/ui\/(core\/(badge|status-dot|code|layout)|patterns\/(card|page-header|empty-state|alert|definition-list|data-table))\.module\.scss$/
-plugin({
-  name: 'editor-running-editors-test-css-module-identity',
-  setup(build) {
-    build.onLoad({ filter: UI_CORE_STYLES }, () => ({
-      contents:
-        'export default new Proxy({}, { get: (_t, p) => (typeof p === "string" ? p : undefined) })',
-      loader: 'js',
-    }))
-  },
-})
-
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
@@ -61,7 +39,7 @@ import { client as apiClient } from '../src/shared/api/generated/.kubb/client'
 import { getApiProjectsIdSessionsSessionidEditorQueryKey } from '../src/shared/api/generated/hooks/useGetApiProjectsIdSessionsSessionidEditor'
 import type { GetApiProjectsIdSessionsSessionidEditorStatus200 as Status } from '../src/shared/api/generated/types/GetApiProjectsIdSessionsSessionidEditor'
 import en from '../src/shared/i18n/locales/en.json'
-import { Toaster, toaster } from '../src/shared/ui/overlay/toast'
+import { Toaster, toast } from '../src/shared/ui/toast'
 import { mockModule } from './mock-module'
 
 const T = '2026-09-04T10:00:00.000Z'
@@ -329,9 +307,9 @@ const unmount = async () => {
   })
   container.remove()
   client.clear()
-  // Module-level singleton (toast.tsx) — see tests/storage-page.test.tsx's
+  // Module-level singleton (ui/toast.tsx) — see tests/storage-page.test.tsx's
   // own note on why this has to be cleared between tests.
-  toaster.remove()
+  toast.close()
 }
 
 beforeEach(() => {
@@ -377,21 +355,23 @@ const settle = async () => {
   }
 }
 
-/** The one row for a given session title — `Card` (`EditorRow`'s own
- *  wrapper) renders as a `<section>`, the same idiom
- *  tests/docker-page.test.tsx's own `rowFor` uses for `ServiceRow`. */
+/** The one row for a given session title — `EditorRow` wraps each running
+ *  editor in an `Item` (item.tsx's `data-slot="item"`), the same idiom
+ *  tests/docker-page.test.tsx's own `rowFor` uses for `ServiceRow`'s
+ *  `<article>`. */
 const rowFor = (sessionTitle: string) => {
   const span = [...container.querySelectorAll('span')].find((s) => s.textContent === sessionTitle)
-  const row = span?.closest('section')
+  const row = span?.closest('[data-slot="item"]')
   if (!row) throw new Error(`no row for "${sessionTitle}"`)
   return row as HTMLElement
 }
 
-/** `ConfirmDialog` renders through a Portal onto `document.body` — see
- *  tests/docker-page.test.tsx's own note on why `data-state="open"` is
- *  load-bearing (Ark's Dialog never unmounts its Content on close). */
+/** The one `ConfirmDialog` open at a time, if any — Base UI's alert dialog
+ *  unmounts its popup entirely while closed, so a bare `[role="alertdialog"]`
+ *  only ever matches an open one; see tests/docker-page.test.tsx's own copy
+ *  of this note. */
 const dialogButtons = () => {
-  const dialog = document.body.querySelector('[role="alertdialog"][data-state="open"]')
+  const dialog = document.body.querySelector('[role="alertdialog"]')
   return dialog ? ([...dialog.querySelectorAll('button')] as HTMLElement[]) : []
 }
 const findDialogButton = (text: string) => dialogButtons().find((b) => b.textContent?.includes(text))
@@ -517,7 +497,7 @@ test('Stop on an idle row stops it immediately, refreshes the list, and retries 
 
   expect(stopCalls).toHaveLength(1)
   expect(stopCalls[0]?.path).toEqual({ id: 'p2', sessionId: 's2' })
-  expect(document.body.querySelector('[role="alertdialog"][data-state="open"]')).toBeNull()
+  expect(document.body.querySelector('[role="alertdialog"]')).toBeNull()
   expect(editorsCalls).toBeGreaterThan(editorsCallsBefore)
   expect(startCalls).toHaveLength(2)
   expect(startCalls[1]?.path).toEqual({ id: 'p1', sessionId: 's1' })
@@ -535,7 +515,7 @@ test('Stop on an in-use row asks for confirmation first, and Cancel calls no sto
   if (!stop) throw new Error('no Stop button')
   await click(stop)
 
-  expect(document.body.querySelector('[role="alertdialog"][data-state="open"]')).not.toBeNull()
+  expect(document.body.querySelector('[role="alertdialog"]')).not.toBeNull()
   expect(document.body.textContent).toContain(
     'Someone has this editor open in a tab. Stopping it closes their session',
   )
@@ -546,7 +526,7 @@ test('Stop on an in-use row asks for confirmation first, and Cancel calls no sto
   await click(cancel)
 
   expect(stopCalls).toHaveLength(0)
-  expect(document.body.querySelector('[role="alertdialog"][data-state="open"]')).toBeNull()
+  expect(document.body.querySelector('[role="alertdialog"]')).toBeNull()
 
   // Clicking Stop again and actually confirming this time does call stop.
   const stopAgain = findButton('Stop')

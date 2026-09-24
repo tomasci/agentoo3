@@ -1,4 +1,5 @@
 import { fileURLToPath, URL } from 'node:url'
+import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import versionJson from '../version.json' with { type: 'json' }
@@ -9,15 +10,9 @@ import versionJson from '../version.json' with { type: 'json' }
 const appVersion = `${versionJson.major}.${versionJson.minor}.${versionJson.build}`
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
-  },
-  css: {
-    modules: {
-      // Readable in devtools, hashed enough to stay unique.
-      generateScopedName: '[name]__[local]___[hash:base64:5]',
-    },
   },
   define: {
     // Baked into the bundle at build time, so a tab never has to ask the

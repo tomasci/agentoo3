@@ -161,8 +161,11 @@ const click = async (el: HTMLElement) => {
   })
 }
 
-/** The explorer's own rows, in render order — the row's `title` is its name. */
-const rows = () => [...container.querySelectorAll('li > button[title]')] as HTMLElement[]
+/** The explorer's own rows, in render order — the row's `title` is its name.
+ *  A descendant selector, not a child one: `Item`'s own wrapper `<div>` sits
+ *  between the `<li>` and the `<button>` now, an implementation detail of
+ *  shadcn's component this test should not have to know the exact depth of. */
+const rows = () => [...container.querySelectorAll('li button[title]')] as HTMLElement[]
 
 const canvasNodes = () =>
   [...container.querySelectorAll('[data-testid^="rf__node-"]')] as HTMLElement[]

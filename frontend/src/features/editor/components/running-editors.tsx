@@ -3,20 +3,12 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import type { GetApiEditorsStatus200 } from '@/shared/api/generated/types/GetApiEditors'
-import {
-  Badge,
-  Button,
-  Card,
-  Code,
-  ConfirmDialog,
-  Inline,
-  Stack,
-  type Tone,
-  toast,
-} from '@/shared/ui'
+import { Code, ConfirmDialog, StatusBadge, type Tone, toast } from '@/shared/components'
+import { Button, buttonVariants } from '@/shared/ui/button'
+import { Item, ItemActions, ItemContent, ItemGroup, ItemHeader } from '@/shared/ui/item'
+import { Spinner } from '@/shared/ui/spinner'
 import { useRunningEditors, useStopRunningEditor } from '../hooks/use-running-editors'
 import { formatLastActive } from './format-last-active'
-import styles from './running-editors.module.scss'
 
 type RunningEditor = GetApiEditorsStatus200['editors'][number]
 type Health = RunningEditor['health']
@@ -62,14 +54,14 @@ export function RunningEditorsPanel({ onSlotFreed }: { onSlotFreed: () => void }
   if (!data?.enabled || data.running < data.cap) return null
 
   return (
-    <Stack gap={3}>
-      <h3 className={styles.heading}>
+    <div className="flex flex-col gap-3">
+      <h3 className="text-base font-semibold">
         {t('editor.runningPanel.heading', { running: data.running, cap: data.cap })}
       </h3>
       {data.editors.length === 0 ? (
-        <p className={styles.muted}>{t('editor.runningPanel.unlisted')}</p>
+        <p className="text-sm text-muted-foreground">{t('editor.runningPanel.unlisted')}</p>
       ) : (
-        <Stack gap={2}>
+        <ItemGroup>
           {data.editors.map((editor) => (
             <EditorRow
               key={`${editor.projectId}:${editor.sessionId}`}
@@ -77,14 +69,14 @@ export function RunningEditorsPanel({ onSlotFreed }: { onSlotFreed: () => void }
               onStopped={onSlotFreed}
             />
           ))}
-        </Stack>
+        </ItemGroup>
       )}
       {data.otherInstallsRunning > 0 && (
-        <p className={styles.muted}>
+        <p className="text-sm text-muted-foreground">
           {t('editor.runningPanel.otherInstalls', { count: data.otherInstallsRunning })}
         </p>
       )}
-    </Stack>
+    </div>
   )
 }
 
@@ -103,7 +95,7 @@ function EditorRow({ editor, onStopped }: { editor: RunningEditor; onStopped: ()
         },
         onError: (error) => {
           setConfirmOpen(false)
-          toast({ title: apiErrorMessage(error, t('editor.errors.stopFailed')), tone: 'danger' })
+          toast.add({ title: apiErrorMessage(error, t('editor.errors.stopFailed')), type: 'error' })
         },
       },
     )
@@ -117,49 +109,47 @@ function EditorRow({ editor, onStopped }: { editor: RunningEditor; onStopped: ()
     editor.sessionTitle ?? t('sessions.untitled', { id: editor.sessionId.slice(0, 8) })
 
   return (
-    <Card padding="sm">
-      <Inline justify="between" align="center" gap={3} wrap>
-        <Stack gap={1}>
-          <Inline gap={2} align="center" wrap>
-            <span className={styles.projectName}>{editor.projectName}</span>
-            <span className={styles.sessionTitle}>{sessionTitle}</span>
-            {editor.branch && <Code>{editor.branch}</Code>}
-          </Inline>
-          <Inline gap={2} align="center">
-            <Badge tone={HEALTH_TONE[editor.health]}>
-              {t(`editor.runningPanel.health.${HEALTH_LABEL_KEY[editor.health]}`)}
-            </Badge>
-            {editor.lastActiveAt && (
-              <span className={styles.lastActive}>
-                {t('editor.runningPanel.lastActive', {
-                  time: formatLastActive(editor.lastActiveAt),
-                })}
-              </span>
-            )}
-          </Inline>
-        </Stack>
-        <Inline gap={2}>
-          <Button asChild variant="secondary" size="sm">
-            <Link
-              to="/projects/$projectId/sessions/$sessionId/editor"
-              params={{ projectId: editor.projectId, sessionId: editor.sessionId }}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {t('editor.runningPanel.open')}
-            </Link>
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            loading={stop.isPending}
-            onClick={requestStop}
-          >
-            {t('editor.runningPanel.stop')}
-          </Button>
-        </Inline>
-      </Inline>
+    <Item variant="outline">
+      <ItemContent>
+        <ItemHeader>
+          <span className="font-semibold">{editor.projectName}</span>
+          <span className="text-muted-foreground">{sessionTitle}</span>
+        </ItemHeader>
+        <div className="flex flex-wrap items-center gap-2">
+          {editor.branch && <Code>{editor.branch}</Code>}
+          <StatusBadge tone={HEALTH_TONE[editor.health]}>
+            {t(`editor.runningPanel.health.${HEALTH_LABEL_KEY[editor.health]}`)}
+          </StatusBadge>
+          {editor.lastActiveAt && (
+            <span className="text-xs text-muted-foreground">
+              {t('editor.runningPanel.lastActive', {
+                time: formatLastActive(editor.lastActiveAt),
+              })}
+            </span>
+          )}
+        </div>
+      </ItemContent>
+      <ItemActions>
+        <Link
+          to="/projects/$projectId/sessions/$sessionId/editor"
+          params={{ projectId: editor.projectId, sessionId: editor.sessionId }}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={buttonVariants({ variant: 'outline', size: 'sm' })}
+        >
+          {t('editor.runningPanel.open')}
+        </Link>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={stop.isPending}
+          onClick={requestStop}
+        >
+          {stop.isPending && <Spinner data-icon="inline-start" />}
+          {t('editor.runningPanel.stop')}
+        </Button>
+      </ItemActions>
       <ConfirmDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
@@ -169,6 +159,6 @@ function EditorRow({ editor, onStopped }: { editor: RunningEditor; onStopped: ()
         busy={stop.isPending}
         onConfirm={doStop}
       />
-    </Card>
+    </Item>
   )
 }

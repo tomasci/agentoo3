@@ -79,9 +79,9 @@ export function useAttachmentUploads(sessionId: string) {
    * list fetch — real data, not a guessed limit. It only ever catches a file
    * that would *obviously* bust the session's byte quota; the per-file size
    * ceiling and the allowed-type allowlist are enforced authoritatively by
-   * the server and never duplicated here (see the component-contract-adjacent
-   * rule in the brief: no client-side copy of a server rule beyond a cheap
-   * pre-check).
+   * the server and never duplicated here — no client-side copy of a server
+   * rule beyond a cheap pre-check that only ever saves a doomed upload the
+   * round trip it was going to fail anyway.
    */
   const attach = useCallback(
     (files: File[], budget?: SessionFilesUsage) => {

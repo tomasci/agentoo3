@@ -4,11 +4,11 @@
 // staying terminal rather than being treated as just another failure to
 // retry.
 //
-// `setTimeout`/`clearTimeout` are faked for delays at retry scale (>= 1s) so
+// `setTimeout`/`clearTimeout` are faked for the hook's own retry timers so
 // the ~3s-30s backoff can be asserted on without a real test actually
-// waiting that long; delays below that (this file's own microtask-flushing
-// `frames()`, the same idiom as use-session-stream-hook.test.tsx) still run
-// on the real timer, so those keep working unmodified. happy-dom supplies no
+// waiting that long; every other timer (this file's own microtask-flushing
+// `frames()`, the same idiom as use-session-stream-hook.test.tsx, and
+// anything else live in the process) still runs on the real timer. happy-dom supplies no
 // `EventSource` either (verified there too), hence the fake below.
 
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
@@ -67,11 +67,24 @@ interface ScheduledTimer {
 let scheduled: ScheduledTimer[] = []
 let nextTimerId = 1
 
+/** Whether the `setTimeout` being faked was called directly from the hook
+ *  under test. Line 0 of the stack is the `Error` header, 1 is this
+ *  function, 2 is `fakeSetTimeout`, 3 is whoever called `setTimeout`.
+ *
+ *  A delay threshold alone (">= 1s is a retry") is not enough: the fake is
+ *  process-wide, and under `bun test --randomize` a React tree left mounted by
+ *  another file (a live shell, whose QueryClient schedules a 300000ms gc
+ *  timer and `useSystem`'s 4001ms staleness timer) landed in `scheduled`
+ *  here, and three backoff assertions failed on `[4001, 300000, 24000]`. */
+const calledFromHook = () =>
+  (new Error().stack ?? '').split('\n')[3]?.includes('/features/docker/hooks/use-container-logs.') ??
+  false
+
 function fakeSetTimeout(callback: () => void, delay?: number): ReturnType<typeof setTimeout> {
-  // Only the hook's own retry ever schedules at this scale; every flush wait
-  // in this file's own `frames()` uses a delay far below it, and is left to
-  // the real timer so it keeps resolving on its own.
-  if ((delay ?? 0) >= 1000) {
+  // Only the hook's own retry is captured; every flush wait in this file's
+  // own `frames()`, and every timer anything else schedules, is left to the
+  // real timer so it keeps resolving on its own.
+  if ((delay ?? 0) >= 1000 && calledFromHook()) {
     const id = nextTimerId++
     scheduled.push({ id, delay: delay ?? 0, callback })
     return id as unknown as ReturnType<typeof setTimeout>

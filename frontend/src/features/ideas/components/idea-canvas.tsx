@@ -1,26 +1,28 @@
 import { useQueryClient } from '@tanstack/react-query'
+import { ChevronDownIcon, ChevronRightIcon, CircleAlertIcon } from 'lucide-react'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import { getApiIdeasIdBlocksQueryKey } from '@/shared/api/generated/hooks/useGetApiIdeasIdBlocks'
+import { ActionsMenu, ConfirmDialog, Loading, PageHeader } from '@/shared/components'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Badge } from '@/shared/ui/badge'
+import { Button } from '@/shared/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/shared/ui/collapsible'
 import {
-  ActionsMenu,
-  Alert,
-  Badge,
-  Button,
-  ConfirmDialog,
   Dialog,
-  EmptyState,
-  Field,
-  Inline,
-  Input,
-  PageHeader,
-  Select,
-  type SelectOption,
-  Spinner,
-  Stack,
-  Textarea,
-} from '@/shared/ui'
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/shared/ui/dialog'
+import { Empty, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
+import { Input } from '@/shared/ui/input'
+import { Item, ItemActions, ItemContent } from '@/shared/ui/item'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { Spinner } from '@/shared/ui/spinner'
+import { Textarea } from '@/shared/ui/textarea'
 import { useIdeaAssets } from '../hooks/use-idea-assets'
 import {
   type IdeaBlock,
@@ -37,7 +39,7 @@ import {
 } from '../hooks/use-idea-canvas'
 import { blockLabel } from '../lib/block-label'
 import { ideaBlockFormSchema } from '../model/idea-block.schema'
-import styles from './idea-canvas.module.scss'
+import { FormField } from './form-field'
 
 // ~60KB gzipped (the spatial canvas's own flow-graph dependency, confined to
 // features/ideas/canvas per its own adapter) that a reader who never opens
@@ -46,6 +48,12 @@ import styles from './idea-canvas.module.scss'
 const IdeaFlowCanvas = lazy(() => import('../canvas/idea-flow-canvas'))
 
 const BLOCK_KINDS: IdeaBlockKind[] = ['note', 'requirement', 'example', 'link', 'image']
+
+interface SelectOption {
+  value: string
+  label: string
+  description?: string
+}
 
 // `seq` is allocated once at insert (`ideas.nextSeq`, backend `db/schema.ts`)
 // and, since nothing left in this UI ever calls `POST /ideas/{id}/blocks/
@@ -185,78 +193,135 @@ function BlockDialog({
   }))
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title={isEdit ? t('common.edit') : t('ideas.canvas.addBlock')}
-      footer={
-        <>
-          <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{isEdit ? t('common.edit') : t('ideas.canvas.addBlock')}</DialogTitle>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-3">
+          <FormField label={t('ideas.canvas.block.kindLabel')}>
+            {(field) => (
+              <Select
+                items={kindOptions}
+                value={kind}
+                disabled={isEdit}
+                onValueChange={(value) => {
+                  const next = (value ?? 'note') as IdeaBlockKind
+                  setKind(next)
+                  setValues(blankValuesFor(next))
+                  setFieldErrors({})
+                }}
+              >
+                <SelectTrigger className="w-full" {...field}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {kindOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </FormField>
+
+          {(kind === 'note' || kind === 'requirement' || kind === 'example') && (
+            <FormField label={t('ideas.canvas.block.textLabel')} error={fieldErrors.text}>
+              {(field) => (
+                <Textarea
+                  rows={4}
+                  value={values.text ?? ''}
+                  onChange={(e) => set('text', e.target.value)}
+                  {...field}
+                />
+              )}
+            </FormField>
+          )}
+
+          {kind === 'link' && (
+            <>
+              <FormField label={t('ideas.canvas.block.urlLabel')} error={fieldErrors.url}>
+                {(field) => (
+                  <Input
+                    className="font-mono"
+                    value={values.url ?? ''}
+                    onChange={(e) => set('url', e.target.value)}
+                    {...field}
+                  />
+                )}
+              </FormField>
+              <FormField label={t('ideas.canvas.block.labelLabel')} error={fieldErrors.label}>
+                {(field) => (
+                  <Input
+                    value={values.label ?? ''}
+                    onChange={(e) => set('label', e.target.value)}
+                    {...field}
+                  />
+                )}
+              </FormField>
+            </>
+          )}
+
+          {kind === 'image' && (
+            <>
+              <FormField label={t('ideas.canvas.block.assetLabel')} error={fieldErrors.assetId}>
+                {(field) => (
+                  <Select
+                    items={assetOptions}
+                    value={values.assetId || null}
+                    onValueChange={(value) => set('assetId', value ?? '')}
+                  >
+                    <SelectTrigger className="w-full" {...field}>
+                      <SelectValue placeholder={t('ideas.canvas.block.chooseAsset')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assetOptions.length === 0 ? (
+                        <div className="px-1.5 py-1 text-sm text-muted-foreground">
+                          {t('common.noOptions')}
+                        </div>
+                      ) : (
+                        assetOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                )}
+              </FormField>
+              <FormField label={t('ideas.canvas.block.captionLabel')} error={fieldErrors.caption}>
+                {(field) => (
+                  <Input
+                    value={values.caption ?? ''}
+                    onChange={(e) => set('caption', e.target.value)}
+                    {...field}
+                  />
+                )}
+              </FormField>
+            </>
+          )}
+
+          {serverError && (
+            <Alert variant="destructive">
+              <CircleAlertIcon />
+              <AlertDescription>{serverError}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+
+        <DialogFooter>
+          <DialogClose render={<Button type="button" variant="outline" />}>
             {t('common.cancel')}
-          </Button>
-          <Button type="button" loading={busy} onClick={submit}>
+          </DialogClose>
+          <Button type="button" disabled={busy} onClick={submit}>
+            {busy && <Spinner data-icon="inline-start" />}
             {t('common.save')}
           </Button>
-        </>
-      }
-    >
-      <Stack gap={3}>
-        <Field label={t('ideas.canvas.block.kindLabel')}>
-          <Select
-            options={kindOptions}
-            value={kind}
-            disabled={isEdit}
-            onValueChange={(value) => {
-              const next = (value ?? 'note') as IdeaBlockKind
-              setKind(next)
-              setValues(blankValuesFor(next))
-              setFieldErrors({})
-            }}
-          />
-        </Field>
-
-        {(kind === 'note' || kind === 'requirement' || kind === 'example') && (
-          <Field label={t('ideas.canvas.block.textLabel')} error={fieldErrors.text}>
-            <Textarea
-              rows={4}
-              value={values.text ?? ''}
-              onChange={(e) => set('text', e.target.value)}
-            />
-          </Field>
-        )}
-
-        {kind === 'link' && (
-          <>
-            <Field label={t('ideas.canvas.block.urlLabel')} error={fieldErrors.url}>
-              <Input mono value={values.url ?? ''} onChange={(e) => set('url', e.target.value)} />
-            </Field>
-            <Field label={t('ideas.canvas.block.labelLabel')} error={fieldErrors.label}>
-              <Input value={values.label ?? ''} onChange={(e) => set('label', e.target.value)} />
-            </Field>
-          </>
-        )}
-
-        {kind === 'image' && (
-          <>
-            <Field label={t('ideas.canvas.block.assetLabel')} error={fieldErrors.assetId}>
-              <Select
-                options={assetOptions}
-                value={values.assetId || null}
-                placeholder={t('ideas.canvas.block.chooseAsset')}
-                onValueChange={(value) => set('assetId', value ?? '')}
-              />
-            </Field>
-            <Field label={t('ideas.canvas.block.captionLabel')} error={fieldErrors.caption}>
-              <Input
-                value={values.caption ?? ''}
-                onChange={(e) => set('caption', e.target.value)}
-              />
-            </Field>
-          </>
-        )}
-
-        {serverError && <Alert tone="danger">{serverError}</Alert>}
-      </Stack>
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   )
 }
@@ -307,31 +372,41 @@ function GroupDialog({
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title={t('ideas.canvas.addGroup')}
-      footer={
-        <>
-          <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t('ideas.canvas.addGroup')}</DialogTitle>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-3">
+          <FormField label={t('ideas.canvas.groupTitlePlaceholder')}>
+            {(field) => (
+              <Input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={t('ideas.canvas.groupTitlePlaceholder')}
+                {...field}
+              />
+            )}
+          </FormField>
+          {error && (
+            <Alert variant="destructive">
+              <CircleAlertIcon />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+        </div>
+
+        <DialogFooter>
+          <DialogClose render={<Button type="button" variant="outline" />}>
             {t('common.cancel')}
-          </Button>
-          <Button type="button" loading={busy} disabled={!title.trim()} onClick={submit}>
+          </DialogClose>
+          <Button type="button" disabled={busy || !title.trim()} onClick={submit}>
+            {busy && <Spinner data-icon="inline-start" />}
             {t('common.save')}
           </Button>
-        </>
-      }
-    >
-      <Stack gap={3}>
-        <Field label={t('ideas.canvas.groupTitlePlaceholder')}>
-          <Input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder={t('ideas.canvas.groupTitlePlaceholder')}
-          />
-        </Field>
-        {error && <Alert tone="danger">{error}</Alert>}
-      </Stack>
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   )
 }
@@ -339,11 +414,11 @@ function GroupDialog({
 /**
  * One block's row in the structure explorer: a kind marker, its one-line
  * name (`blockLabel`), and an actions menu — never the block's own body, and
- * never more than the one line CSS (`styles.rowName`'s own ellipsis) allows.
- * The name doubles as the row's click target (`styles.rowButton`), which
- * reveals this block on the canvas pane the way clicking a file opens it in
- * an editor's tree; a real `<button>` is legal here (unlike `block-node.tsx`'s
- * own markdown surface) because this row's content is always plain text.
+ * never more than one line (`truncate`) allows. The name doubles as the
+ * row's click target, which reveals this block on the canvas pane the way
+ * clicking a file opens it in an editor's tree — a real `<button>` holding
+ * just the badge and the name, with `ActionsMenu` as a plain sibling rather
+ * than nested inside it (a button can never legally contain another one).
  */
 function ExplorerBlockRow({
   block,
@@ -369,31 +444,31 @@ function ExplorerBlockRow({
   const name = blockLabel(block, assetFilename) || t(`ideas.canvas.kind.${block.kind}`)
 
   return (
-    <li className={styles.row}>
-      <button
-        type="button"
-        className={styles.rowButton}
-        title={name}
-        aria-label={t('ideas.canvas.explorer.reveal', { title: name })}
-        onClick={() => onReveal(block.id)}
-      >
-        <Badge tone="neutral" variant="outline">
-          {t(`ideas.canvas.kind.${block.kind}`)}
-        </Badge>
-        <span className={styles.rowName}>{name}</span>
-      </button>
-      <ActionsMenu
-        label={t('ideas.actionsFor', { title: name })}
-        actions={[
-          { id: 'edit', label: t('common.edit'), onSelect: () => onEdit(block) },
-          {
-            id: 'delete',
-            label: t('common.delete'),
-            destructive: true,
-            onSelect: () => setConfirmDelete(true),
-          },
-        ]}
-      />
+    <li>
+      <Item variant="outline" size="sm">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-sm p-0 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          title={name}
+          aria-label={t('ideas.canvas.explorer.reveal', { title: name })}
+          onClick={() => onReveal(block.id)}
+        >
+          <Badge variant="outline">{t(`ideas.canvas.kind.${block.kind}`)}</Badge>
+          <span className="min-w-0 flex-1 truncate text-sm">{name}</span>
+        </button>
+        <ActionsMenu
+          label={t('ideas.actionsFor', { title: name })}
+          actions={[
+            { id: 'edit', label: t('common.edit'), onSelect: () => onEdit(block) },
+            {
+              id: 'delete',
+              label: t('common.delete'),
+              destructive: true,
+              onSelect: () => setConfirmDelete(true),
+            },
+          ]}
+        />
+      </Item>
       <ConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
@@ -409,10 +484,14 @@ function ExplorerBlockRow({
 }
 
 /**
- * One group's row: a folder, not a section heading — a collapse toggle (▸/▾,
- * expanded by default), the title, an actions menu, and its member blocks
- * nested underneath in their own `<ul>` when expanded. Never an `<ol>`: an
- * ordinal number is exactly what this pane no longer shows anywhere.
+ * One group's row: a folder, not a section heading — a collapse toggle, the
+ * title, an actions menu, and its member blocks nested underneath in their
+ * own `<ul>` when expanded. Never an `<ol>`: an ordinal number is exactly
+ * what this pane no longer shows anywhere.
+ *
+ * `Collapsible`'s own trigger wraps only the disclosure icon, not the whole
+ * row — the row's `ActionsMenu` sits beside it as a plain sibling, since a
+ * button can never legally nest inside another one.
  */
 function ExplorerGroupRow({
   group,
@@ -437,51 +516,62 @@ function ExplorerGroupRow({
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   return (
-    <li className={styles.groupItem}>
-      <div className={styles.groupRow}>
-        <button
-          type="button"
-          className={styles.toggle}
-          aria-expanded={expanded}
-          aria-label={t(
-            expanded ? 'ideas.canvas.explorer.collapse' : 'ideas.canvas.explorer.expand',
-            { title: group.title },
-          )}
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? '▾' : '▸'}
-        </button>
-        <span className={styles.groupTitle} title={group.title}>
-          {group.title}
-        </span>
-        <ActionsMenu
-          label={t('ideas.actionsFor', { title: group.title })}
-          actions={[
-            { id: 'edit', label: t('common.edit'), onSelect: () => setRenaming(true) },
-            {
-              id: 'delete',
-              label: t('common.delete'),
-              destructive: true,
-              onSelect: () => setConfirmDelete(true),
-            },
-          ]}
-        />
-      </div>
-
-      {expanded && blocks.length > 0 && (
-        <ul className={styles.sublist}>
-          {blocks.map((block) => (
-            <ExplorerBlockRow
-              key={block.id}
-              block={block}
-              ideaId={ideaId}
-              assetsById={assetsById}
-              onEdit={onEditBlock}
-              onReveal={onReveal}
+    <li>
+      <Collapsible open={expanded} onOpenChange={setExpanded}>
+        <Item variant="outline" size="sm">
+          <CollapsibleTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t(
+                  expanded ? 'ideas.canvas.explorer.collapse' : 'ideas.canvas.explorer.expand',
+                  { title: group.title },
+                )}
+              />
+            }
+          >
+            {expanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
+          </CollapsibleTrigger>
+          <ItemContent className="min-w-0 flex-row items-center">
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold" title={group.title}>
+              {group.title}
+            </span>
+          </ItemContent>
+          <ItemActions>
+            <ActionsMenu
+              label={t('ideas.actionsFor', { title: group.title })}
+              actions={[
+                { id: 'edit', label: t('common.edit'), onSelect: () => setRenaming(true) },
+                {
+                  id: 'delete',
+                  label: t('common.delete'),
+                  destructive: true,
+                  onSelect: () => setConfirmDelete(true),
+                },
+              ]}
             />
-          ))}
-        </ul>
-      )}
+          </ItemActions>
+        </Item>
+
+        <CollapsibleContent>
+          {blocks.length > 0 && (
+            <ul className="m-0 mt-2 flex list-none flex-col gap-2 pl-5">
+              {blocks.map((block) => (
+                <ExplorerBlockRow
+                  key={block.id}
+                  block={block}
+                  ideaId={ideaId}
+                  assetsById={assetsById}
+                  onEdit={onEditBlock}
+                  onReveal={onReveal}
+                />
+              ))}
+            </ul>
+          )}
+        </CollapsibleContent>
+      </Collapsible>
 
       <GroupDialog ideaId={ideaId} open={renaming} onOpenChange={setRenaming} group={group} />
       <ConfirmDialog
@@ -517,9 +607,8 @@ function ExplorerGroupRow({
  * never a rendering of block contents — docked beside the spatial
  * drag-and-drop surface (`../canvas/idea-flow-canvas`, lazy-loaded — see the
  * report). Both read the same `blocks`/`groups` query data; only the
- * explorer is a phone's — `idea-canvas.module.scss`'s own `bp.up(sm)` hides
- * the canvas pane below that width rather than mounting a pan/zoom surface
- * on a 360px screen a finger cannot usefully drag around.
+ * explorer is a phone's — the canvas pane below `sm` is not rendered at all,
+ * since a finger cannot usefully drag an infinite plane on a 360px screen.
  *
  * Reading order — the one thing dragging on the canvas is not allowed to
  * change — follows `serializeIdea` on the backend exactly: ungrouped blocks
@@ -605,47 +694,44 @@ export function IdeaCanvas({ ideaId }: { ideaId: string }) {
   }
 
   return (
-    <Stack gap={3}>
+    <div className="flex flex-col gap-3">
       <PageHeader
         level={2}
         title={t('ideas.canvas.heading')}
         actions={
-          <Inline gap={2}>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setAddingBlock(true)}
-            >
+          <>
+            <Button type="button" variant="outline" size="sm" onClick={() => setAddingBlock(true)}>
               {t('ideas.canvas.addBlock')}
             </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setAddingGroup(true)}
-            >
+            <Button type="button" variant="outline" size="sm" onClick={() => setAddingGroup(true)}>
               {t('ideas.canvas.addGroup')}
             </Button>
-          </Inline>
+          </>
         }
       />
 
       {isError && (
-        <Alert tone="danger">
-          {apiErrorMessage(blocks.error ?? groups.error, t('ideas.canvas.loadFailed'))}
+        <Alert variant="destructive">
+          <CircleAlertIcon />
+          <AlertDescription>
+            {apiErrorMessage(blocks.error ?? groups.error, t('ideas.canvas.loadFailed'))}
+          </AlertDescription>
         </Alert>
       )}
-      {isPending && <Spinner label={t('common.loading')} block />}
+      {isPending && <Loading label={t('common.loading')} block />}
 
       {!isPending && !isError && total === 0 && (
-        <EmptyState size="sm" title={t('ideas.canvas.empty')} />
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>{t('ideas.canvas.empty')}</EmptyTitle>
+          </EmptyHeader>
+        </Empty>
       )}
 
       {!isPending && !isError && total > 0 && (
-        <div className={styles.layout}>
-          <div className={styles.listPane}>
-            <ul className={styles.tree}>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <div className="min-w-0 sm:grow sm:shrink sm:basis-80 sm:max-h-[var(--idea-canvas-height,32rem)] sm:overflow-y-auto">
+            <ul className="m-0 flex list-none flex-col gap-2 p-0">
               {ungrouped.map((block) => (
                 <ExplorerBlockRow
                   key={block.id}
@@ -670,8 +756,8 @@ export function IdeaCanvas({ ideaId }: { ideaId: string }) {
             </ul>
           </div>
 
-          <div className={styles.canvasPane}>
-            <Suspense fallback={<Spinner label={t('common.loading')} block />}>
+          <div className="hidden min-w-0 sm:block sm:grow-2 sm:shrink sm:basis-120">
+            <Suspense fallback={<Loading label={t('common.loading')} block />}>
               <IdeaFlowCanvas
                 ideaId={ideaId}
                 blocks={allBlocks}
@@ -708,6 +794,6 @@ export function IdeaCanvas({ ideaId }: { ideaId: string }) {
         }}
         group={renamingGroupViaCanvas}
       />
-    </Stack>
+    </div>
   )
 }

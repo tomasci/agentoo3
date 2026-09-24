@@ -1,8 +1,9 @@
 import { Outlet, useLocation, useParams } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useProjects } from '@/features/projects'
+import { Loading } from '@/shared/components'
 import { isBareShellPath } from '@/shared/store/tabs'
-import { Alert, Spinner } from '@/shared/ui'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
 
 /**
  * Wraps every page under /projects/$projectId.
@@ -32,8 +33,14 @@ export function ProjectLayout() {
 
   const project = projects?.find((p) => p.id === projectId)
 
-  if (isPending) return <Spinner label={t('common.loading')} block />
-  if (!project) return <Alert tone="danger">{t('projects.notFound')}</Alert>
+  if (isPending) return <Loading label={t('common.loading')} block />
+  if (!project) {
+    return (
+      <Alert variant="destructive">
+        <AlertDescription>{t('projects.notFound')}</AlertDescription>
+      </Alert>
+    )
+  }
 
   return <Outlet />
 }

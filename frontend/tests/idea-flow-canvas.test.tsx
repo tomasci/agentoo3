@@ -457,8 +457,11 @@ describe('rendering the canvas', () => {
       trigger?.click()
     })
 
+    // Base UI's menu unmounts its popup entirely while closed, so a bare
+    // `[role="menu"]` only ever matches the one just opened — no
+    // `data-state="open"` qualifier needed the way Ark/Zag's menu required.
     const items = [
-      ...document.body.querySelectorAll('[role="menu"][data-state="open"] [role="menuitem"]'),
+      ...document.body.querySelectorAll('[role="menu"] [role="menuitem"]'),
     ] as HTMLElement[]
     const removeFromGroup = items.find((el) => el.textContent === 'Remove from group')
     if (!removeFromGroup) {
@@ -467,14 +470,8 @@ describe('rendering the canvas', () => {
       )
     }
 
-    // Two events, each its own `act` — Zag's menu machine reads back the
-    // highlight it sets on pointerdown when it handles the click (see
-    // tests/storage-page.test.tsx's own note on this).
-    await act(async () => {
-      removeFromGroup.dispatchEvent(
-        new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }),
-      )
-    })
+    // A plain click both opens the menu and picks an item — no `pointerdown`
+    // priming needed the way Zag's menu did.
     await act(async () => {
       removeFromGroup.click()
     })

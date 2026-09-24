@@ -1,22 +1,24 @@
 import { expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { Markdown } from '../src/shared/ui/core/markdown'
+import { Markdown } from '@/shared/components'
 
 const html = (md: string) => renderToStaticMarkup(<Markdown>{md}</Markdown>)
 
 test('headings, emphasis and inline code render as elements', () => {
   const out = html('# agentoo\n\nA **self-hosted** platform using `curl`.')
-  expect(out).toContain('<h1>agentoo</h1>')
+  expect(out).toMatch(/<h1[^>]*>agentoo<\/h1>/)
   expect(out).toContain('<strong>self-hosted</strong>')
-  expect(out).toContain('<code>curl</code>')
+  expect(out).toMatch(/<code[^>]*>curl<\/code>/)
 })
 
-test('gfm tables render as a table', () => {
+test('gfm tables render through the shared table parts', () => {
   // The reported case: the reply opened with a table and came out as raw pipes.
   const out = html('| Layer | What |\n|---|---|\n| API | Hono |')
-  expect(out).toContain('<table>')
-  expect(out).toContain('<th>Layer</th>')
-  expect(out).toContain('<td>Hono</td>')
+  expect(out).toContain('data-slot="table"')
+  expect(out).toContain('data-slot="table-header"')
+  expect(out).toContain('data-slot="table-row"')
+  expect(out).toMatch(/<th[^>]*data-slot="table-head"[^>]*>Layer<\/th>/)
+  expect(out).toMatch(/<td[^>]*data-slot="table-cell"[^>]*>Hono<\/td>/)
 })
 
 test("react-markdown's node prop never reaches the DOM", () => {
@@ -26,16 +28,19 @@ test("react-markdown's node prop never reaches the DOM", () => {
   expect(html('[docs](https://example.com)')).not.toContain('node=')
 })
 
-test('fenced code keeps its content verbatim', () => {
+test('fenced code keeps its content verbatim, and resets the inline-code pill inside it', () => {
   const out = html('```sh\ncurl -fsSL https://x | sudo bash\n```')
-  expect(out).toContain('<pre>')
+  expect(out).toMatch(/<pre[^>]*>/)
   expect(out).toContain('curl -fsSL https://x | sudo bash')
+  // The `pre` override strips the inline pill treatment off its nested `code`
+  // (React HTML-escapes the `&` in the arbitrary-variant class name).
+  expect(out).toContain('[&amp;_code]:border-0')
 })
 
 test('lists render', () => {
   const out = html('- one\n- two\n')
-  expect(out).toContain('<ul>')
-  expect(out).toContain('<li>one</li>')
+  expect(out).toMatch(/<ul[^>]*>/)
+  expect(out).toMatch(/<li[^>]*>one<\/li>/)
 })
 
 test('raw HTML in the text is escaped, not rendered', () => {
@@ -50,6 +55,12 @@ test('raw HTML in the text is escaped, not rendered', () => {
   expect(out).toContain('&lt;script&gt;')
 })
 
+test('a genuine markdown image renders as an <img>, unlike escaped raw HTML above', () => {
+  const out = html('![agentoo logo](https://example.com/logo.png)')
+  expect(out).toMatch(/<img[^>]*src="https:\/\/example\.com\/logo\.png"/)
+  expect(out).toMatch(/<img[^>]*alt="agentoo logo"/)
+})
+
 test('links open away from the app and cannot reach back into it', () => {
   const out = html('[docs](https://example.com)')
   expect(out).toContain('target="_blank"')
@@ -60,4 +71,12 @@ test('plain prose is unchanged', () => {
   expect(html("I'll have an agent investigate the project.")).toContain(
     "I&#x27;ll have an agent investigate the project.",
   )
+})
+
+test('compact shrinks the base text size without changing the markup shape', () => {
+  const normal = html('Hello')
+  const compact = renderToStaticMarkup(<Markdown compact>Hello</Markdown>)
+  expect(normal).toContain('text-base')
+  expect(compact).toContain('text-sm')
+  expect(compact).not.toContain('text-base')
 })

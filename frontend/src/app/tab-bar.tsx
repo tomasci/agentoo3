@@ -1,7 +1,10 @@
+import { Plus, Settings, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { useProjects } from '@/features/projects'
-import type { Tab } from '@/shared/store/tabs'
-import styles from './tab-bar.module.scss'
+import type { Tab, TabKind } from '@/shared/store/tabs'
+import { Button } from '@/shared/ui/button'
+import { ButtonGroup } from '@/shared/ui/button-group'
+import { SidebarTrigger } from '@/shared/ui/sidebar'
 import { TabSwitcher } from './tab-switcher'
 import { useTabs } from './use-tabs'
 
@@ -43,38 +46,45 @@ export function useTabLabel() {
  * tab widget pattern, and a plain list of buttons is already correct with the
  * browser's normal Tab order, one stop per button.
  *
- * Below `sm`, the row and its [+] give way to `TabSwitcher` — a picker naming
+ * Below `md`, the row and its [+] give way to `TabSwitcher` — a picker naming
  * the active tab, since a row that scrolls sideways past a twentieth project
  * is worse than a menu on a screen too narrow for either to show every tab
  * at once. The two shapes live in *separate* `nav` landmarks sharing the same
  * accessible name, rather than one landmark whose children swap out: hiding
- * only the row's children with `display: none` would leave that landmark
- * empty of content whenever the switcher is the one showing, and an empty
- * landmark is worse than one of two that is never both present at once
- * (`display: none` removes a `<nav>` from the accessibility tree the same way
- * it removes anything else). Which one is visible is CSS alone, in
- * tab-bar.module.scss — both are always in the DOM, so there is no flash of
- * the wrong shape while a media query is still being evaluated in JS.
+ * only the row's children with `hidden` would leave that landmark empty of
+ * content whenever the switcher is the one showing, and an empty landmark is
+ * worse than one of two that is never both present at once (`hidden` removes
+ * a `<nav>` from the accessibility tree the same way it removes anything
+ * else). Which one is visible is CSS alone (Tailwind's `md:` variant) — both
+ * are always in the DOM, so there is no flash of the wrong shape while a media
+ * query is still being evaluated in JS.
  */
-export function TabBar() {
+export function TabBar({ mode }: { mode: TabKind }) {
   const { t } = useTranslation()
   const { tabs, activeId, addTab, selectTab, closeTab } = useTabs()
   const labelFor = useTabLabel()
 
   return (
-    <>
-      <nav className={styles.bar} aria-label={t('tabs.label')}>
-        <ul className={styles.list}>
+    <header className="flex h-12 shrink-0 items-center gap-1 px-2">
+      {/* An empty tab has no sidebar to toggle (root-layout.tsx forces it
+          closed and empty in this mode) — a trigger with nothing behind it
+          would be a control that does nothing. */}
+      {mode !== 'new' && <SidebarTrigger aria-label={t('shell.toggleSidebar')} />}
+
+      <nav
+        aria-label={t('tabs.label')}
+        className="hidden min-w-0 flex-1 items-stretch gap-1 self-stretch overflow-x-auto md:flex"
+      >
+        <ul className="flex min-w-0 items-stretch gap-1 py-1.5">
           {tabs.map((tab) => {
             const active = tab.id === activeId
+            const variant = active ? 'secondary' : 'ghost'
             return (
               // The close button is a real button, so the tab itself cannot be one:
               // a button inside a button is invalid HTML and unreachable by keyboard.
               <li
                 key={tab.id}
-                className={`${styles.tab} ${active ? styles.tabActive : ''} ${
-                  tab.kind === 'system' ? styles.tabSystem : ''
-                }`}
+                className="min-w-0"
                 // Middle-click closes, the way it does in a browser.
                 onAuxClick={(event) => {
                   if (event.button === 1 && tab.kind !== 'system') {
@@ -83,43 +93,54 @@ export function TabBar() {
                   }
                 }}
               >
-                <button
-                  type="button"
-                  aria-current={active ? 'page' : undefined}
-                  className={styles.tabButton}
-                  onClick={() => selectTab(tab.id)}
-                >
-                  {tab.kind === 'system' && (
-                    <span className={styles.tabIcon} aria-hidden="true">
-                      ⚙
-                    </span>
-                  )}
-                  <span className={styles.tabLabel}>{labelFor(tab)}</span>
-                </button>
-
-                {tab.kind !== 'system' && (
-                  <button
+                <ButtonGroup>
+                  <Button
                     type="button"
-                    className={styles.close}
-                    aria-label={t('tabs.close', { name: labelFor(tab) })}
-                    onClick={() => closeTab(tab.id)}
+                    variant={variant}
+                    aria-current={active ? 'page' : undefined}
+                    className="min-w-0 max-w-56 justify-start gap-1.5"
+                    onClick={() => selectTab(tab.id)}
                   >
-                    ✕
-                  </button>
-                )}
+                    {tab.kind === 'system' && <Settings aria-hidden="true" />}
+                    <span className="truncate">{labelFor(tab)}</span>
+                  </Button>
+
+                  {tab.kind !== 'system' && (
+                    // `icon`, not `icon-xs`: it has to match the label button's own
+                    // (default-size) height, or the pair reads as two mismatched
+                    // controls rather than one pill — same height as the system tab
+                    // and the [+] button (also `icon`) so the whole row lines up.
+                    <Button
+                      type="button"
+                      variant={variant}
+                      size="icon"
+                      aria-label={t('tabs.close', { name: labelFor(tab) })}
+                      onClick={() => closeTab(tab.id)}
+                    >
+                      <X />
+                    </Button>
+                  )}
+                </ButtonGroup>
               </li>
             )
           })}
         </ul>
 
-        <button type="button" className={styles.add} aria-label={t('tabs.add')} onClick={addTab}>
-          +
-        </button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="shrink-0 self-center"
+          aria-label={t('tabs.add')}
+          onClick={addTab}
+        >
+          <Plus />
+        </Button>
       </nav>
 
-      <nav className={styles.barPhone} aria-label={t('tabs.label')}>
+      <nav aria-label={t('tabs.label')} className="flex min-w-0 flex-1 md:hidden">
         <TabSwitcher />
       </nav>
-    </>
+    </header>
   )
 }

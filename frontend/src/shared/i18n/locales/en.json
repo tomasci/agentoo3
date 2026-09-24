@@ -282,15 +282,13 @@
     "back": "Back to the library"
   },
   "status": {
-    "keys": "{{count}} key",
-    "keys_plural": "{{count}} keys",
-    "cpu": "CPU {{percent}}%",
+    "cpuLabel": "CPU",
     "cpuTitle": "{{cores}} cores, load {{load}}",
-    "mem": "RAM {{used}} ({{percent}}%)",
-    "memPercent": "RAM {{percent}}%",
+    "memLabel": "RAM",
     "memTitle": "{{used}} of {{total}} in use",
-    "disk": "Disk {{percent}}%",
-    "diskTitle": "{{free}} free on {{path}}"
+    "diskLabel": "Disk",
+    "diskTitle": "{{free}} free on {{path}}",
+    "hostDetails": "Server load"
   },
   "library": {
     "intro": "Agents and skills live here once and are used by any project you select them for. Editing one changes it everywhere it is used — that is the point of a shared library rather than per-project copies.",
@@ -381,6 +379,9 @@
       "skillTitle": "Delete skill?",
       "skillConfirm": "\"{{name}}\" and its {{files}} bundled file(s) will be deleted, and unlinked from {{count}} project(s) using it. This cannot be undone."
     }
+  },
+  "shell": {
+    "toggleSidebar": "Toggle sidebar"
   },
   "tabs": {
     "label": "Workspace tabs",
@@ -601,7 +602,9 @@
       "id": "Container ID",
       "ports": "Ports",
       "noPorts": "No published ports",
-      "exitCode": "Exit code"
+      "exitCode": "Exit code",
+      "expand": "Show {{name}}'s logs",
+      "collapse": "Hide {{name}}'s logs"
     },
     "logs": {
       "streaming": "Streaming",

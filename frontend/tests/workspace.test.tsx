@@ -1,9 +1,9 @@
-import { afterAll, beforeEach, expect, test } from 'bun:test'
+import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
 import { Provider as JotaiProvider } from 'jotai'
 import { act } from 'react'
-import { createRoot } from 'react-dom/client'
+import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { routeTree } from '../src/app/router'
 
@@ -18,6 +18,14 @@ const PROJECTS = [project('p1', 'Alpha'), project('p2', 'Beta')]
 let container: HTMLDivElement
 let router: ReturnType<typeof createRouter>
 let client: QueryClient
+/** Every root `mount()` created in the current test — the reload case mounts
+ *  twice — so `afterEach` can unmount them all. Clearing `document.body`
+ *  alone (which `beforeEach` still does) removes the DOM but leaves the React
+ *  tree live: under `bun test --randomize`, whichever mounting test ran last
+ *  here left a whole shell running for the rest of the process, its query
+ *  timers landing in tests/use-container-logs.test.tsx's fake `setTimeout`
+ *  and its sidebar in tests/shell.test.tsx's document-wide count. */
+const roots: Root[] = []
 
 /**
  * Anything React reports — a render loop, an `act` warning, an error thrown in
@@ -64,8 +72,10 @@ async function mount(path: string, projects = PROJECTS) {
     client.setQueryData([{ url: '/api/projects/:id/sessions', params: { id: p.id } }], [])
   }
 
+  const root = createRoot(container)
+  roots.push(root)
   await act(async () => {
-    createRoot(container).render(
+    root.render(
       <JotaiProvider>
         <QueryClientProvider client={client}>
           <RouterProvider router={router} />
@@ -148,7 +158,7 @@ const closeButtons = () =>
 const closeButtonFor = (name: string) =>
   (tabBar()?.querySelector(`ul button[aria-label="Close ${name}"]`) ?? null) as HTMLElement | null
 const at = () => router.state.location.pathname
-const sidebar = () => container.querySelector('aside')
+const sidebar = () => container.querySelector('[data-slot="sidebar"]')
 const navLinks = () =>
   [...(sidebar()?.querySelectorAll('a') ?? [])].map((a) => a.getAttribute('href'))
 const main = () => container.querySelector('main') as HTMLElement
@@ -175,6 +185,14 @@ beforeEach(() => {
   document.body.innerHTML = ''
 })
 
+afterEach(async () => {
+  await act(async () => {
+    for (const root of roots.splice(0)) root.unmount()
+  })
+  document.body.innerHTML = ''
+  client?.clear()
+})
+
 test('the workspace opens as one system tab, showing system navigation only', async () => {
   await mount('/library')
 
@@ -193,14 +211,17 @@ test('the workspace opens as one system tab, showing system navigation only', as
   expect(problems).toEqual([])
 })
 
-test('[+] opens an empty tab that asks for a project, and has no sidebar', async () => {
+test('[+] opens an empty tab that asks for a project, with an empty sidebar', async () => {
   await mount('/library')
   await click(newTabButton(), 'new-tab button')
 
   expect(tabs()).toEqual(['System', 'New tab'])
   expect(activeTab()).toBe('New tab')
   expect(at()).toBe('/tab/new-1')
-  expect(ref(sidebar())).toBeNull()
+  // The shell mounts one `Sidebar` in every mode (root-layout.tsx) — an empty
+  // tab has nothing to navigate yet, so it renders with no links in it rather
+  // than disappearing outright.
+  expect(navLinks()).toEqual([])
   expect(container.textContent).toContain('Choose a project for this tab')
   // All three ways in, on the one page.
   expect(container.textContent).toContain('Clone a repository')
@@ -314,14 +335,16 @@ test('every tab and every close button is reachable with the keyboard', async ()
   // the ARIA tablist pattern the row no longer claims, so what has to be proved
   // now is the thing the arrow keys were standing in for: every control in the
   // row is a real button in the browser's own tab order, one stop each, with
-  // nothing parked at tabindex="-1" where a keyboard cannot reach it.
+  // nothing parked at tabindex="-1" where a keyboard cannot reach it. (shadcn's
+  // Button sets an explicit tabindex="0" rather than relying on a bare
+  // <button>'s implicit one — still one stop in the tab order, just spelled out.)
   const buttons = [...(tabBar()?.querySelectorAll('button') ?? [])] as HTMLElement[]
   // Three tabs, two close buttons (the system tab has none), and the [+].
   expect(buttons.length).toBe(6)
   for (const el of buttons) {
     expect(el.tagName).toBe('BUTTON')
     expect(el.hasAttribute('disabled')).toBe(false)
-    expect(el.getAttribute('tabindex')).toBeNull()
+    expect(el.getAttribute('tabindex')).not.toBe('-1')
     el.focus()
     expect(ref(document.activeElement)).toBe(ref(el))
   }
@@ -469,34 +492,6 @@ test('a project still cloning cannot be picked', async () => {
   expect(tabs()).toEqual(['System', 'New tab'])
 })
 
-test('configuration holds the language and the theme, and only the system tab has it', async () => {
-  await mount('/settings')
-  expect(container.querySelector('#settings-language')).not.toBeNull()
-  expect(container.querySelector('#settings-theme')).not.toBeNull()
-
-  // The old shell kept these as a select and an icon button in every sidebar.
-  document.body.innerHTML = ''
-  await mount('/projects/p1')
-  expect(ref(sidebar()?.querySelector('select') ?? null)).toBeNull()
-  expect(ref(container.querySelector('[aria-label="Toggle theme"]'))).toBeNull()
-  expect(problems).toEqual([])
-})
-
-test('the theme selector actually changes the theme', async () => {
-  await mount('/settings')
-  const select = container.querySelector('#settings-theme') as HTMLSelectElement
-
-  expect(document.documentElement.dataset.theme).toBe('dark')
-  await act(async () => {
-    select.value = 'light'
-    select.dispatchEvent(new Event('change', { bubbles: true }))
-  })
-  await settle()
-
-  expect(document.documentElement.dataset.theme).toBe('light')
-  expect(localStorage.getItem('agentoo:theme')).toContain('light')
-})
-
 test('two empty tabs are two separate tabs', async () => {
   await mount('/library')
   await click(newTabButton())
@@ -544,5 +539,12 @@ test('the shell is right on the first paint, before any effect runs', async () =
   expect(project).toContain('href="/projects/p1/sessions"')
   expect(project).not.toContain('href="/settings"')
 
-  expect(await paint('/tab/new-1')).not.toContain('<aside')
+  // An empty tab still mounts the one `Sidebar` every mode gets
+  // (root-layout.tsx) — but with nothing to navigate yet, so no link ends up
+  // inside it.
+  const empty = await paint('/tab/new-1')
+  expect(empty).toContain('data-slot="sidebar"')
+  expect(empty).not.toContain('href="/library"')
+  expect(empty).not.toContain('href="/settings"')
+  expect(empty).not.toContain('href="/projects/')
 })

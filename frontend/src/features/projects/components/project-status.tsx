@@ -1,13 +1,11 @@
 import { useTranslation } from 'react-i18next'
-import { Badge, StatusDot, type Tone } from '@/shared/ui'
+import { StatusBadge, type Tone } from '@/shared/components'
 import { isInFlight, type Project, type ProjectStatus } from '../hooks/use-projects'
-import styles from './project-status.module.scss'
 
-// A `Record<ProjectStatus, Tone>`, not `styles[project.status]` indexing into
-// an SCSS module: the old form typed as `string | undefined` under
-// `noUncheckedIndexedAccess` and silently rendered with no colour at all if
-// the API's status union ever grew a member this file didn't know about. This
-// fails the build instead.
+// A `Record<ProjectStatus, Tone>`, not a lookup that types as `string |
+// undefined` under `noUncheckedIndexedAccess`: this fails the build instead
+// of silently rendering with no colour if the API's status union ever grows
+// a member this file doesn't know about.
 const TONE: Record<ProjectStatus, Tone> = {
   pending: 'accent',
   cloning: 'accent',
@@ -21,13 +19,8 @@ export function ProjectStatusBadge({ project }: { project: Project }) {
   const tone = TONE[project.status]
 
   return (
-    <Badge tone={tone}>
-      {/* Badge lays out its children with no gap of its own — spacing between
-          the dot and the label is this file's job, not Badge's. */}
-      <span className={styles.content}>
-        <StatusDot tone={tone} pulse={isInFlight(project)} />
-        {t(`projects.status.${project.status}`)}
-      </span>
-    </Badge>
+    <StatusBadge tone={tone} pulse={isInFlight(project)}>
+      {t(`projects.status.${project.status}`)}
+    </StatusBadge>
   )
 }

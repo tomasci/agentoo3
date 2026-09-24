@@ -42,37 +42,39 @@
 // touch/momentum/keyboard/overscroll behaviour a real phone actually produces.
 // Those need a real browser; see the report.
 //
-// Class names prove nothing here — `bun test` resolves `.module.scss` to a
-// file path, so `className={styles.scroll}` renders as no class at all (same
-// note as tests/transcript-row.test.tsx). The scroll container is found
-// structurally, and rows via the `data-transcript-row` attribute
-// transcript.tsx tags every top-level node with — the same contract
-// session-page.tsx's own anchor selection depends on.
+// Class names prove nothing here — Tailwind utility classes are an
+// implementation detail a later restyle can change without changing
+// behaviour. The scroll container is found structurally, and rows via the
+// `data-transcript-row` attribute transcript.tsx tags every top-level node
+// with — the same contract session-page.tsx's own anchor selection depends
+// on.
 
-import { plugin } from 'bun'
 import { afterAll, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import i18next from 'i18next'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { I18nextProvider } from 'react-i18next'
 import { mockModule } from './mock-module'
 
-// Same identity-proxy loader, same allowlist, as tests/ui-core.test.tsx,
-// tests/transcript-time.test.tsx and tests/transcript-row.test.tsx: this file
-// pulls in the `@/shared/ui` barrel too, and whichever of them `bun test`
-// evaluates first decides how those ten modules are cached for the run.
-const UI_CORE_STYLES =
-  /src\/shared\/ui\/(core\/(badge|status-dot|code|layout)|patterns\/(card|page-header|empty-state|alert|definition-list|data-table))\.module\.scss$/
-
-plugin({
-  name: 'session-page-scroll-test-css-module-identity',
-  setup(build) {
-    build.onLoad({ filter: UI_CORE_STYLES }, () => ({
-      contents:
-        'export default new Proxy({}, { get: (_t, p) => (typeof p === "string" ? p : undefined) })',
-      loader: 'js',
-    }))
-  },
-})
+// Every label this file finds a control or a state by is a raw key
+// ('common.loading', 'sessions.transcript.loadOlder', 'sessions.send'…), so
+// the page is rendered under a private `cimode` instance — i18next's own
+// always-return-the-key mode — instead of whatever react-i18next's global
+// default happens to be. That default is process-wide: the first file in the
+// run to import `@/shared/i18n` (directly, or through `src/app/router`, whose
+// settings page imports it) installs the real English singleton via
+// `initReactI18next`, and from then on every provider-less render translates.
+// Before this provider, the whole file passed alone and failed after
+// tests/settings-page.test.tsx: `settle()` waited for 'common.loading' to
+// disappear, which with real copy it never showed in the first place, so it
+// returned before the first page landed.
+//
+// Never `.use(initReactI18next)` here — that would make this inert instance
+// the global default for every file that runs afterwards. See
+// tests/settings-page.test.tsx.
+const testI18n = i18next.createInstance()
+await testI18n.init({ lng: 'cimode', fallbackLng: 'cimode' })
 
 type Query = Record<string, unknown> | undefined
 type Row = { id: string; sessionId: string; seq: number; type: string; parentToolUseId: string | null
@@ -463,9 +465,11 @@ async function mount(
   root = createRoot(container)
   await act(async () => {
     root.render(
-      <QueryClientProvider client={client}>
-        <SessionPage projectId="p1" sessionId="s1" />
-      </QueryClientProvider>,
+      <I18nextProvider i18n={testI18n}>
+        <QueryClientProvider client={client}>
+          <SessionPage projectId="p1" sessionId="s1" />
+        </QueryClientProvider>
+      </I18nextProvider>,
     )
   })
   const footer = container.querySelector('footer')
@@ -491,9 +495,10 @@ const unmount = async () => {
 }
 
 /** The sentinel's own observer, if `messages.hasPreviousPage` has put one in
- *  the tree — matched by `root`, since the composer's textarea (Ark's own
- *  `@zag-js/auto-resize`) may register unrelated observers of its own kind but
- *  never one rooted at the scroll container. */
+ *  the tree — matched by `root` rather than assumed to be the only one live,
+ *  so this stays correct the day something else in the tree registers an
+ *  IntersectionObserver of its own that is not rooted at the scroll
+ *  container. */
 const olderObserver = () => RecordingIntersectionObserver.live.find((o) => o.options?.root === scroller)
 
 // --- 1. the geometry these tests stand on -------------------------------------

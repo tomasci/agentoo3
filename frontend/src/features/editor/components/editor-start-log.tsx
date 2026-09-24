@@ -1,9 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Card, Stack } from '@/shared/ui'
-import { cx } from '@/shared/ui/lib/cx'
+import { cn } from '@/shared/lib/utils'
+import { Card, CardContent } from '@/shared/ui/card'
 import type { EditorOperation } from '../hooks/use-editor'
-import styles from './editor-start-log.module.scss'
 
 /**
  * The output of the session's last start — polled, not streamed. Unlike
@@ -34,25 +33,34 @@ export function EditorStartLog({ operation }: { operation: EditorOperation | nul
 
   return (
     <Card>
-      <Stack gap={2}>
-        <h3 className={styles.heading}>{t('editor.log.heading')}</h3>
-        <div ref={paneRef} className={styles.pane}>
+      <CardContent className="flex flex-col gap-2">
+        <h3 className="text-base font-semibold">{t('editor.log.heading')}</h3>
+        <div
+          ref={paneRef}
+          className="max-h-64 overflow-y-auto rounded-md border bg-muted p-3 font-mono text-xs leading-relaxed"
+        >
           {lines.length === 0 ? (
-            <p className={styles.empty}>{t('editor.log.empty')}</p>
+            <p className="m-0 text-muted-foreground">{t('editor.log.empty')}</p>
           ) : (
             // No id of its own, and `at` is not unique enough on its own
             // (several lines can land in the same millisecond) — position is
             // stable regardless, since this is an append-only snapshot the
             // page never reorders.
             lines.map((line, i) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: see above
-              <p key={i} className={cx(styles.line, line.stream === 'stderr' && styles.stderr)}>
+              <p
+                // biome-ignore lint/suspicious/noArrayIndexKey: see above
+                key={i}
+                className={cn(
+                  'm-0 break-words whitespace-pre-wrap',
+                  line.stream === 'stderr' && 'text-destructive',
+                )}
+              >
                 {line.text}
               </p>
             ))
           )}
         </div>
-      </Stack>
+      </CardContent>
     </Card>
   )
 }

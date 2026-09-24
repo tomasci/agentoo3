@@ -1,5 +1,5 @@
 import type { GetApiProjectsIdDockerStatus200 } from '@/shared/api/generated/types/GetApiProjectsIdDocker'
-import type { Tone } from '@/shared/ui'
+import type { Tone } from '@/shared/components'
 
 export type DockerStatus = GetApiProjectsIdDockerStatus200
 export type DockerDetection = DockerStatus['detection']
@@ -26,8 +26,8 @@ export interface ServiceRow {
 }
 
 // `Record<Union, Tone>` fails the build if the backend ever adds a state this
-// has not been given a tone for — see component-contract.md's own note on
-// the same idiom in shared/ui.
+// has not been given a tone for — the same exhaustive-map idiom
+// `status-dot.tsx`'s own `TONE` record uses.
 export const SERVICE_STATE_TONE: Record<ServiceState, Tone> = {
   running: 'success',
   partial: 'warning',

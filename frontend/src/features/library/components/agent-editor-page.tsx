@@ -1,25 +1,19 @@
 import { Link, useNavigate } from '@tanstack/react-router'
+import { ArrowLeftIcon, CircleAlertIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import {
-  Alert,
-  Button,
-  Card,
-  Checkbox,
-  ConfirmDialog,
-  Field,
-  Inline,
-  Input,
-  NumberInput,
-  PageHeader,
-  Select,
-  type SelectOption,
-  Spinner,
-  Stack,
-  Switch,
-  Textarea,
-} from '@/shared/ui'
+import { ConfirmDialog, Loading, PageHeader } from '@/shared/components'
+import { parseNumberInput } from '@/shared/lib/number-input'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Button } from '@/shared/ui/button'
+import { Card, CardContent } from '@/shared/ui/card'
+import { Checkbox } from '@/shared/ui/checkbox'
+import { Field, FieldContent, FieldDescription, FieldLabel } from '@/shared/ui/field'
+import { Input } from '@/shared/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { Switch } from '@/shared/ui/switch'
+import { Textarea } from '@/shared/ui/textarea'
 import {
   useAgent,
   useCreateAgent,
@@ -28,7 +22,6 @@ import {
   useUpdateAgent,
 } from '../hooks/use-library'
 import { AVAILABLE_TOOLS, EFFORTS } from '../model/tools'
-import styles from './library.module.scss'
 
 interface Draft {
   name: string
@@ -125,9 +118,9 @@ export function AgentEditorPage({ name }: { name?: string }) {
 
   const busy = create.isPending || update.isPending
   if ((!isNew && isPending) || models.isPending)
-    return <Spinner label={t('common.loading')} block />
+    return <Loading label={t('common.loading')} block />
 
-  const roleOptions: SelectOption[] = [
+  const roleOptions = [
     {
       value: 'subagent',
       label: t('library.role.subagent'),
@@ -139,7 +132,7 @@ export function AgentEditorPage({ name }: { name?: string }) {
       description: t('library.roleHint.orchestrator'),
     },
   ]
-  const modelOptions: SelectOption[] = [
+  const modelOptions: { value: string; label: string; description?: string }[] = [
     { value: '', label: t('library.agent.default') },
     ...(models.data?.models ?? []).map((m) => ({
       value: m.value,
@@ -161,133 +154,222 @@ export function AgentEditorPage({ name }: { name?: string }) {
   if (draft.model && !modelOptions.some((o) => o.value === draft.model)) {
     modelOptions.push({ value: draft.model, label: draft.model })
   }
-  const effortOptions: SelectOption[] = EFFORTS.map((e2) => ({
+  const effortOptions = EFFORTS.map((e2) => ({
     value: e2,
     label: e2 || t('library.agent.default'),
   }))
 
   return (
-    <Stack gap={5}>
-      <Link to="/library" className={styles.back}>
-        ← {t('library.backToLibrary')}
+    <div className="flex flex-col gap-5">
+      <Link
+        to="/library"
+        className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeftIcon className="size-4" />
+        {t('library.backToLibrary')}
       </Link>
 
       <PageHeader title={isNew ? t('library.newAgent') : draft.name || name} />
 
       <Card>
-        <div className={styles.grid}>
-          <Field
-            label={t('library.agent.name')}
-            hint={isNew ? t('library.agent.nameHint') : t('library.agent.renameHint')}
-          >
-            <Input
-              value={draft.name}
-              onChange={(e) => set('name', e.target.value)}
-              placeholder="tester"
-            />
-          </Field>
+        <CardContent className="flex flex-col gap-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-3">
+            <Field>
+              <FieldLabel htmlFor="agent-name">{t('library.agent.name')}</FieldLabel>
+              <Input
+                id="agent-name"
+                value={draft.name}
+                onChange={(e) => set('name', e.target.value)}
+                placeholder="tester"
+              />
+              <FieldDescription>
+                {isNew ? t('library.agent.nameHint') : t('library.agent.renameHint')}
+              </FieldDescription>
+            </Field>
 
-          <Field label={t('library.agent.role')} hint={t(`library.roleHint.${draft.role}`)}>
-            <Select
-              options={roleOptions}
-              value={draft.role}
-              onValueChange={(v) => set('role', (v ?? 'subagent') as Draft['role'])}
-            />
-          </Field>
+            <Field>
+              <FieldLabel htmlFor="agent-role">{t('library.agent.role')}</FieldLabel>
+              <Select
+                items={roleOptions}
+                value={draft.role}
+                onValueChange={(v) => set('role', (v ?? 'subagent') as Draft['role'])}
+              >
+                <SelectTrigger id="agent-role" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {roleOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      <span className="flex min-w-0 flex-col">
+                        <span>{option.label}</span>
+                        <span className="text-xs text-muted-foreground">{option.description}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FieldDescription>{t(`library.roleHint.${draft.role}`)}</FieldDescription>
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="agent-model">{t('library.agent.model')}</FieldLabel>
+              <Select
+                items={modelOptions}
+                value={draft.model}
+                onValueChange={(v) => set('model', v ?? '')}
+              >
+                <SelectTrigger id="agent-model" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {modelOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      <span className="flex min-w-0 flex-col">
+                        <span>{option.label}</span>
+                        {option.description && (
+                          <span className="text-xs text-muted-foreground">
+                            {option.description}
+                          </span>
+                        )}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {models.data?.source === 'fallback' && (
+                <FieldDescription>{t('library.agent.modelFallbackHint')}</FieldDescription>
+              )}
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="agent-effort">{t('library.agent.effort')}</FieldLabel>
+              <Select
+                items={effortOptions}
+                value={draft.effort}
+                onValueChange={(v) => set('effort', v ?? '')}
+              >
+                <SelectTrigger id="agent-effort" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {effortOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+
+            <Field>
+              <FieldLabel htmlFor="agent-max-turns">{t('library.agent.maxTurns')}</FieldLabel>
+              <Input
+                id="agent-max-turns"
+                type="number"
+                min={1}
+                value={draft.maxTurns ?? ''}
+                onChange={(e) => set('maxTurns', parseNumberInput(e))}
+              />
+              <FieldDescription>{t('library.agent.unlimited')}</FieldDescription>
+            </Field>
+          </div>
 
           {draft.role === 'orchestrator' && (
-            <Switch
-              label={t('library.agent.team')}
-              description={t(`library.agent.teamHint.${draft.team ? 'on' : 'off'}`)}
-              checked={draft.team}
-              onCheckedChange={(checked) => set('team', checked)}
-            />
+            <Field orientation="horizontal">
+              <FieldContent>
+                <FieldLabel htmlFor="agent-team">{t('library.agent.team')}</FieldLabel>
+                <FieldDescription>
+                  {t(`library.agent.teamHint.${draft.team ? 'on' : 'off'}`)}
+                </FieldDescription>
+              </FieldContent>
+              <Switch
+                id="agent-team"
+                checked={draft.team}
+                onCheckedChange={(checked) => set('team', checked)}
+              />
+            </Field>
           )}
 
-          <Field
-            label={t('library.agent.model')}
-            hint={
-              models.data?.source === 'fallback' ? t('library.agent.modelFallbackHint') : undefined
-            }
-          >
-            <Select
-              options={modelOptions}
-              value={draft.model}
-              onValueChange={(v) => set('model', v ?? '')}
+          <Field>
+            <FieldLabel htmlFor="agent-description">{t('library.agent.description')}</FieldLabel>
+            <Input
+              id="agent-description"
+              value={draft.description}
+              onChange={(e) => set('description', e.target.value)}
+              placeholder={t('library.agent.descriptionPlaceholder')}
             />
+            <FieldDescription>{t('library.agent.descriptionHint')}</FieldDescription>
           </Field>
-
-          <Field label={t('library.agent.effort')}>
-            <Select
-              options={effortOptions}
-              value={draft.effort}
-              onValueChange={(v) => set('effort', v ?? '')}
-            />
-          </Field>
-
-          <Field label={t('library.agent.maxTurns')} hint={t('library.agent.unlimited')}>
-            <NumberInput value={draft.maxTurns} onValueChange={(v) => set('maxTurns', v)} min={1} />
-          </Field>
-        </div>
-
-        <Field label={t('library.agent.description')} hint={t('library.agent.descriptionHint')}>
-          <Input
-            value={draft.description}
-            onChange={(e) => set('description', e.target.value)}
-            placeholder={t('library.agent.descriptionPlaceholder')}
-          />
-        </Field>
+        </CardContent>
       </Card>
 
       <Card>
-        <Stack gap={3}>
-          <Checkbox
-            label={t('library.agent.restrictTools')}
-            description={t('library.agent.toolsHint')}
-            checked={draft.restrictTools}
-            onCheckedChange={(checked) => set('restrictTools', checked)}
-          />
+        <CardContent className="flex flex-col gap-3">
+          <Field orientation="horizontal">
+            <FieldContent>
+              <FieldLabel htmlFor="agent-restrict-tools">
+                {t('library.agent.restrictTools')}
+              </FieldLabel>
+              <FieldDescription>{t('library.agent.toolsHint')}</FieldDescription>
+            </FieldContent>
+            <Checkbox
+              id="agent-restrict-tools"
+              checked={draft.restrictTools}
+              onCheckedChange={(checked) => set('restrictTools', checked === true)}
+            />
+          </Field>
           {draft.restrictTools && (
-            <div className={styles.tools}>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-x-3 gap-y-2">
               {AVAILABLE_TOOLS.map((tool) => (
-                <Checkbox
-                  key={tool}
-                  label={tool}
-                  checked={draft.tools.includes(tool)}
-                  onCheckedChange={(checked) =>
-                    set(
-                      'tools',
-                      checked ? [...draft.tools, tool] : draft.tools.filter((x) => x !== tool),
-                    )
-                  }
-                />
+                <Field key={tool} orientation="horizontal">
+                  <FieldLabel htmlFor={`agent-tool-${tool}`} className="flex-1 font-normal">
+                    {tool}
+                  </FieldLabel>
+                  <Checkbox
+                    id={`agent-tool-${tool}`}
+                    checked={draft.tools.includes(tool)}
+                    onCheckedChange={(checked) =>
+                      set(
+                        'tools',
+                        checked === true
+                          ? [...draft.tools, tool]
+                          : draft.tools.filter((x) => x !== tool),
+                      )
+                    }
+                  />
+                </Field>
               ))}
             </div>
           )}
-        </Stack>
+        </CardContent>
       </Card>
 
-      <Field
-        label={t('library.agent.prompt')}
-        hint={
-          draft.role === 'orchestrator'
-            ? t('library.agent.promptHintOrchestrator')
-            : t('library.agent.promptHint')
-        }
-      >
+      <Field>
+        <FieldLabel htmlFor="agent-prompt">{t('library.agent.prompt')}</FieldLabel>
         <Textarea
-          mono
+          id="agent-prompt"
+          className="field-sizing-fixed font-mono"
           rows={20}
           value={draft.prompt}
           onChange={(e) => set('prompt', e.target.value)}
           spellCheck={false}
           placeholder={t('library.agent.promptPlaceholder')}
         />
+        <FieldDescription>
+          {draft.role === 'orchestrator'
+            ? t('library.agent.promptHintOrchestrator')
+            : t('library.agent.promptHint')}
+        </FieldDescription>
       </Field>
 
-      <Stack gap={3}>
-        {error && <Alert>{error}</Alert>}
-        <Inline gap={2}>
+      <div className="flex flex-col gap-3">
+        {error && (
+          <Alert variant="destructive">
+            <CircleAlertIcon />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
             disabled={busy || !draft.name || !draft.description || !draft.prompt}
@@ -296,12 +378,12 @@ export function AgentEditorPage({ name }: { name?: string }) {
             {busy ? t('common.working') : t('common.save')}
           </Button>
           {!isNew && (
-            <Button type="button" onClick={() => setConfirmDelete(true)}>
+            <Button type="button" variant="outline" onClick={() => setConfirmDelete(true)}>
               {t('common.delete')}
             </Button>
           )}
-        </Inline>
-      </Stack>
+        </div>
+      </div>
 
       <ConfirmDialog
         open={confirmDelete}
@@ -314,6 +396,6 @@ export function AgentEditorPage({ name }: { name?: string }) {
           remove.mutate({ path: { name } }, { onSuccess: () => void navigate({ to: '/library' }) })
         }
       />
-    </Stack>
+    </div>
   )
 }

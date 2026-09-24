@@ -3,16 +3,21 @@ import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSshKeys } from '@/features/ssh-keys'
-import { Alert, Badge, Button, Code, CopyButton, Inline, Select, Stack } from '@/shared/ui'
+import { Code, CopyButton } from '@/shared/components'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Badge } from '@/shared/ui/badge'
+import { Button } from '@/shared/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { Spinner } from '@/shared/ui/spinner'
 import { type Project, useRetryProject, useUpdateProject } from '../hooks/use-projects'
 import { apiErrorMessage } from '../lib/api-error'
 import { httpsEquivalent, isSshRemote } from '../lib/remote-url'
-import styles from './recovery-panel.module.scss'
 
 /**
  * One recovery route: a badge classifying it, a title, an explanation, and
  * whatever controls that route needs. Local to this file — the shape is
- * specific to the three routes below, not a candidate for `shared/ui`.
+ * specific to the three routes below, not a candidate for `@/shared/components`.
  */
 function RecoveryOption({
   badge,
@@ -26,16 +31,16 @@ function RecoveryOption({
   children: ReactNode
 }) {
   return (
-    <section className={styles.option}>
-      <Stack gap={2}>
-        <Inline gap={2} align="baseline">
+    <Card size="sm">
+      <CardContent className="flex flex-col gap-2">
+        <div className="flex items-baseline gap-2">
           {badge}
-          <h5 className={styles.optionTitle}>{title}</h5>
-        </Inline>
-        <p className={styles.explain}>{explain}</p>
+          <h5 className="text-base font-semibold">{title}</h5>
+        </div>
+        <p className="text-sm text-muted-foreground">{explain}</p>
         {children}
-      </Stack>
-    </section>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -99,51 +104,67 @@ export function RecoveryPanel({ project }: { project: Project }) {
   ]
 
   return (
-    <div className={styles.panel}>
-      <Stack gap={3}>
-        <h4 className={styles.heading}>{t('projects.recovery.heading')}</h4>
-
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('projects.recovery.heading')}</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
         {project.lastError && (
-          <Alert tone="danger">
-            <Code block wrap>
-              {project.lastError}
-            </Code>
+          <Alert variant="destructive">
+            <AlertDescription>
+              <Code block wrap>
+                {project.lastError}
+              </Code>
+            </AlertDescription>
           </Alert>
         )}
 
-        <Stack gap={2}>
+        <div className="flex flex-col gap-2">
           {/* 1 — SSH key */}
           {sshRemote && (
             <RecoveryOption
-              badge={
-                <Badge tone="accent" variant="soft">
-                  {t('projects.recovery.private')}
-                </Badge>
-              }
+              badge={<Badge variant="secondary">{t('projects.recovery.private')}</Badge>}
               title={t('projects.recovery.keyTitle')}
               explain={t('projects.recovery.keyExplain')}
             >
               {keys.length === 0 ? (
-                <Inline gap={2}>
+                <div className="flex flex-wrap items-center gap-2">
                   <Button type="button" onClick={() => void navigate({ to: '/ssh-keys' })}>
                     {t('projects.recovery.goToKeys')}
                   </Button>
-                  <span className={styles.explain}>{t('projects.recovery.noKeysYet')}</span>
-                </Inline>
+                  <span className="text-sm text-muted-foreground">
+                    {t('projects.recovery.noKeysYet')}
+                  </span>
+                </div>
               ) : (
-                <Inline gap={2}>
+                <div className="flex flex-wrap items-center gap-2">
                   <Select
-                    options={keyOptions}
+                    items={keyOptions}
                     value={selectedKey}
                     onValueChange={(next) => setSelectedKey(next ?? '')}
-                  />
-                  <Button
-                    type="button"
-                    loading={busy}
-                    loadingLabel={t('projects.recovery.working')}
-                    disabled={!selectedKey}
-                    onClick={useKeyAndRetry}
                   >
+                    {/* Key names (plus an optional free-text comment) can run
+                        long — a bounded, shrinkable width keeps this from
+                        crowding out the buttons beside it, with an ellipsis
+                        for whatever still overflows. */}
+                    <SelectTrigger
+                      aria-label={t('projects.form.sshKey')}
+                      className="min-w-0 max-w-56"
+                    >
+                      <SelectValue className="min-w-0 truncate" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {keyOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          <span className="min-w-0 flex-1 truncate" title={option.label}>
+                            {option.label}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button type="button" disabled={busy || !selectedKey} onClick={useKeyAndRetry}>
+                    {busy && <Spinner data-icon="inline-start" />}
                     {t('projects.recovery.useKeyAndRetry')}
                   </Button>
                   <Button
@@ -153,7 +174,7 @@ export function RecoveryPanel({ project }: { project: Project }) {
                   >
                     {t('projects.recovery.manageKeys')}
                   </Button>
-                </Inline>
+                </div>
               )}
             </RecoveryOption>
           )}
@@ -165,17 +186,13 @@ export function RecoveryPanel({ project }: { project: Project }) {
               title={t('projects.recovery.httpsTitle')}
               explain={t('projects.recovery.httpsExplain')}
             >
-              <Stack gap={2} align="start">
+              <div className="flex flex-col items-start gap-2">
                 <Code wrap>{httpsUrl}</Code>
-                <Button
-                  type="button"
-                  loading={busy}
-                  loadingLabel={t('projects.recovery.working')}
-                  onClick={switchToHttpsAndRetry}
-                >
+                <Button type="button" disabled={busy} onClick={switchToHttpsAndRetry}>
+                  {busy && <Spinner data-icon="inline-start" />}
                   {t('projects.recovery.useHttpsAndRetry')}
                 </Button>
-              </Stack>
+              </div>
             </RecoveryOption>
           )}
 
@@ -185,35 +202,38 @@ export function RecoveryPanel({ project }: { project: Project }) {
             title={t('projects.recovery.manualTitle')}
             explain={t('projects.recovery.manualExplain')}
           >
-            <Stack gap={2} align="start">
+            <div className="flex flex-col items-start gap-2">
               {commands.length > 0 && (
                 <Code block wrap>
                   {commands.join('\n')}
                 </Code>
               )}
-              <Inline gap={2}>
+              <div className="flex flex-wrap items-center gap-2">
                 {commands.length > 0 && (
                   <CopyButton value={commands.join('\n')} label={t('projects.recovery.copy')} />
                 )}
                 <Button
                   type="button"
-                  loading={retry.isPending}
-                  loadingLabel={t('projects.recovery.checking')}
                   disabled={busy}
                   onClick={() => {
                     setFailure(null)
                     retry.mutate({ path: { id: project.id } }, { onError: fail })
                   }}
                 >
+                  {retry.isPending && <Spinner data-icon="inline-start" />}
                   {t('projects.recovery.checkAgain')}
                 </Button>
-              </Inline>
-            </Stack>
+              </div>
+            </div>
           </RecoveryOption>
-        </Stack>
+        </div>
 
-        {failure && <Alert tone="danger">{failure}</Alert>}
-      </Stack>
-    </div>
+        {failure && (
+          <Alert variant="destructive">
+            <AlertDescription>{failure}</AlertDescription>
+          </Alert>
+        )}
+      </CardContent>
+    </Card>
   )
 }

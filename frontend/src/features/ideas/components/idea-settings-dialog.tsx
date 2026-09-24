@@ -1,23 +1,34 @@
 import { zodResolver } from '@hookform/resolvers/zod'
+import { CircleAlertIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { useAgents } from '@/features/library'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
+import { toast } from '@/shared/components'
+import { parseNumberInput } from '@/shared/lib/number-input'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Button } from '@/shared/ui/button'
 import {
-  Alert,
-  Button,
   Dialog,
-  Field,
-  Input,
-  NumberInput,
-  Select,
-  type SelectOption,
-  Stack,
-  toast,
-} from '@/shared/ui'
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/shared/ui/dialog'
+import { Input } from '@/shared/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { Spinner } from '@/shared/ui/spinner'
 import { type Idea, useUpdateIdea } from '../hooks/use-ideas'
 import { type UpdateIdeaFormValues, updateIdeaFormSchema } from '../model/idea-form.schema'
+import { FormField } from './form-field'
+
+interface SelectOption {
+  value: string
+  label: string
+  description?: string
+}
 
 const IDEA_SETTINGS_FORM_ID = 'idea-settings-form'
 
@@ -60,11 +71,10 @@ export function IdeaSettingsDialog({ idea, projectId }: { idea: Idea; projectId:
   // Keyed on `open` and the id, not the whole (polling) `idea` row: `useIdea`
   // (hooks/use-ideas.ts) refetches every 1.5s while the idea is busy, and
   // resetting on every one of those would overwrite whatever the reader is
-  // mid-typing here. `open` in the deps (the `[open, block]` idiom
-  // `BlockDialog` in `idea-canvas.tsx` uses) is what re-seeds from the
-  // current row on every open rather than only the first — without it, a
-  // cancel-and-reopen would still show whatever the reader abandoned last
-  // time instead of the idea's actual saved values.
+  // mid-typing here. `open` in the deps is what re-seeds from the current row
+  // on every open rather than only the first — without it, a cancel-and-
+  // reopen would still show whatever the reader abandoned last time instead
+  // of the idea's actual saved values.
   // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   useEffect(() => {
     if (!open) return
@@ -99,7 +109,7 @@ export function IdeaSettingsDialog({ idea, projectId }: { idea: Idea; projectId:
       },
       {
         onSuccess: () => {
-          toast({ title: t('ideas.detail.settingsSaved') })
+          toast.add({ title: t('ideas.detail.settingsSaved'), type: 'success' })
           setOpen(false)
         },
         onError: (e) => setServerError(apiErrorMessage(e, t('ideas.form.updateFailed'))),
@@ -109,37 +119,27 @@ export function IdeaSettingsDialog({ idea, projectId }: { idea: Idea; projectId:
 
   return (
     <>
-      <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(true)}>
+      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
         {t('ideas.detail.settingsHeading')}
       </Button>
 
-      <Dialog
-        open={open}
-        onOpenChange={setOpen}
-        title={t('ideas.detail.settingsHeading')}
-        footer={
-          <>
-            <Button type="button" variant="secondary" onClick={() => setOpen(false)}>
-              {t('common.cancel')}
-            </Button>
-            <Button
-              type="submit"
-              form={IDEA_SETTINGS_FORM_ID}
-              loading={update.isPending}
-              loadingLabel={t('ideas.form.saving')}
-            >
-              {t('ideas.form.saveChanges')}
-            </Button>
-          </>
-        }
-      >
-        <form id={IDEA_SETTINGS_FORM_ID} onSubmit={handleSubmit(onSubmit)} noValidate>
-          <Stack gap={3}>
-            <Field label={t('ideas.form.title')} error={fieldError(errors.title?.message)}>
-              <Input {...register('title')} />
-            </Field>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('ideas.detail.settingsHeading')}</DialogTitle>
+          </DialogHeader>
 
-            <Field
+          <form
+            id={IDEA_SETTINGS_FORM_ID}
+            onSubmit={handleSubmit(onSubmit)}
+            noValidate
+            className="flex flex-col gap-3"
+          >
+            <FormField label={t('ideas.form.title')} error={fieldError(errors.title?.message)}>
+              {(field) => <Input {...register('title')} {...field} />}
+            </FormField>
+
+            <FormField
               label={t('ideas.form.orchestrator')}
               hint={
                 orchestrators.length === 0
@@ -148,52 +148,92 @@ export function IdeaSettingsDialog({ idea, projectId }: { idea: Idea; projectId:
               }
               error={fieldError(errors.orchestrator?.message)}
             >
-              <Controller
-                control={control}
-                name="orchestrator"
-                render={({ field }) => (
-                  <Select
-                    options={orchestratorOptions}
-                    value={field.value ?? ''}
-                    onValueChange={(value) => field.onChange(value || null)}
-                    name={field.name}
-                    ref={field.ref}
-                  />
-                )}
-              />
-            </Field>
+              {(field) => (
+                <Controller
+                  control={control}
+                  name="orchestrator"
+                  render={({ field: rhf }) => (
+                    <Select
+                      items={orchestratorOptions}
+                      value={rhf.value ?? ''}
+                      onValueChange={(value) => rhf.onChange(value || null)}
+                      inputRef={rhf.ref}
+                      name={rhf.name}
+                    >
+                      <SelectTrigger className="w-full" {...field}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {orchestratorOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            <span className="flex min-w-0 flex-col">
+                              <span>{option.label}</span>
+                              {option.description && (
+                                <span className="text-xs text-muted-foreground">
+                                  {option.description}
+                                </span>
+                              )}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              )}
+            </FormField>
 
-            <Field
+            <FormField
               label={t('ideas.form.baseBranch')}
               hint={t('ideas.form.baseBranchHint')}
               error={fieldError(errors.baseBranch?.message)}
             >
-              <Input mono {...register('baseBranch')} />
-            </Field>
+              {(field) => <Input className="font-mono" {...register('baseBranch')} {...field} />}
+            </FormField>
 
-            <Field
+            <FormField
               label={t('ideas.form.budget')}
               hint={t('ideas.form.budgetHint')}
               error={fieldError(errors.maxBudgetUsd?.message)}
             >
-              <Controller
-                control={control}
-                name="maxBudgetUsd"
-                render={({ field }) => (
-                  <NumberInput
-                    value={field.value}
-                    onValueChange={(value) => field.onChange(value)}
-                    min={1}
-                    max={1000}
-                    name={field.name}
-                  />
-                )}
-              />
-            </Field>
+              {(field) => (
+                <Controller
+                  control={control}
+                  name="maxBudgetUsd"
+                  render={({ field: rhf }) => (
+                    <Input
+                      type="number"
+                      min={1}
+                      max={1000}
+                      value={rhf.value ?? ''}
+                      onChange={(e) => rhf.onChange(parseNumberInput(e))}
+                      name={rhf.name}
+                      ref={rhf.ref}
+                      {...field}
+                    />
+                  )}
+                />
+              )}
+            </FormField>
 
-            {serverError && <Alert tone="danger">{serverError}</Alert>}
-          </Stack>
-        </form>
+            {serverError && (
+              <Alert variant="destructive">
+                <CircleAlertIcon />
+                <AlertDescription>{serverError}</AlertDescription>
+              </Alert>
+            )}
+          </form>
+
+          <DialogFooter>
+            <DialogClose render={<Button type="button" variant="outline" />}>
+              {t('common.cancel')}
+            </DialogClose>
+            <Button type="submit" form={IDEA_SETTINGS_FORM_ID} disabled={update.isPending}>
+              {update.isPending && <Spinner data-icon="inline-start" />}
+              {t('ideas.form.saveChanges')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
     </>
   )

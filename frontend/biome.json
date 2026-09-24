@@ -6,7 +6,16 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["src/**/*", "*.ts", "*.tsx", "*.json", "!src/shared/api/generated"]
+    "includes": [
+      "src/**/*",
+      "*.ts",
+      "*.tsx",
+      "*.json",
+      "!src/shared/api/generated",
+      "!src/shared/ui/*.tsx",
+      "!src/shared/hooks/use-mobile.ts",
+      "!src/shared/lib/utils.ts"
+    ]
   },
   "formatter": {
     "enabled": true,
@@ -25,6 +34,11 @@
       "quoteStyle": "single",
       "semicolons": "asNeeded",
       "trailingCommas": "all"
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
     }
   },
   "assist": {

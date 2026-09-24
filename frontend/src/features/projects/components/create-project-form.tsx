@@ -3,24 +3,18 @@ import { useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { useSshKeys } from '@/features/ssh-keys'
-import {
-  Alert,
-  Button,
-  Card,
-  Code,
-  CopyButton,
-  Field,
-  Inline,
-  Input,
-  SegmentGroup,
-  Select,
-  Stack,
-} from '@/shared/ui'
+import { Code, CopyButton } from '@/shared/components'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Button } from '@/shared/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/shared/ui/card'
+import { Input } from '@/shared/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { ToggleGroup, ToggleGroupItem } from '@/shared/ui/toggle-group'
 import { useCreateProject } from '../hooks/use-projects'
 import { useSources } from '../hooks/use-sources'
 import { apiErrorMessage } from '../lib/api-error'
 import { type ProjectFormValues, projectFormSchema } from '../model/project-form.schema'
-import styles from './create-project-form.module.scss'
+import { FormField } from './form-field'
 
 const SOURCES = ['clone', 'existing', 'empty'] as const
 
@@ -53,9 +47,7 @@ export function CreateProjectForm({ onCreated }: { onCreated?: (projectId: strin
   const entries = sources?.entries ?? []
   const available = entries.filter((e) => !e.adopted)
 
-  // Zod's messages are translation keys, not display text; `Field` derives
-  // `invalid` from `error != null`, so this keeps the two in step without a
-  // separate `invalid={Boolean(...)}` expression to drift out of sync by hand.
+  // Zod's messages are translation keys, not display text.
   const fieldError = (message?: string) => (message ? t(message) : undefined)
 
   // '' is a real, always-present choice here ("use ssh defaults"), not an
@@ -115,117 +107,171 @@ export function CreateProjectForm({ onCreated }: { onCreated?: (projectId: strin
   }
 
   return (
-    <Card variant="dashed">
-      <Stack gap={3}>
-        <h2 className={styles.heading}>{t('projects.form.heading')}</h2>
+    <Card>
+      <CardHeader>
+        <CardTitle>{t('projects.form.heading')}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={handleSubmit(onSubmit)} noValidate className="flex flex-col gap-3">
+          <ToggleGroup
+            aria-label={t('projects.form.sourceLabel')}
+            variant="outline"
+            value={[source]}
+            onValueChange={(values) => {
+              // Base UI's toggle group reports a pressed set, not a single
+              // value; deselecting the only pressed item in this single-select
+              // group would report `[]`, which has to be ignored rather than
+              // clearing the field — there is always exactly one source.
+              const next = values[0]
+              if (next) setValue('source', next as ProjectFormValues['source'])
+            }}
+          >
+            {SOURCES.map((option) => (
+              <ToggleGroupItem key={option} value={option}>
+                {t(`projects.form.source_${option}`)}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
 
-        <form onSubmit={handleSubmit(onSubmit)} noValidate>
-          <Stack gap={3}>
-            <SegmentGroup
-              label={t('projects.form.sourceLabel')}
-              options={SOURCES.map((option) => ({
-                value: option,
-                label: t(`projects.form.source_${option}`),
-              }))}
-              value={source}
-              onValueChange={(value) => setValue('source', value as ProjectFormValues['source'])}
-            />
+          <FormField label={t('projects.form.name')} error={fieldError(errors.name?.message)}>
+            {(field) => (
+              <Input
+                placeholder={t('projects.form.namePlaceholder')}
+                {...register('name')}
+                {...field}
+              />
+            )}
+          </FormField>
 
-            <Field label={t('projects.form.name')} error={fieldError(errors.name?.message)}>
-              <Input placeholder={t('projects.form.namePlaceholder')} {...register('name')} />
-            </Field>
-
-            {source === 'clone' && (
-              <>
-                <Field
-                  label={t('projects.form.remote')}
-                  hint={t('projects.form.remoteHint')}
-                  error={fieldError(errors.remoteUrl?.message)}
-                >
+          {source === 'clone' && (
+            <>
+              <FormField
+                label={t('projects.form.remote')}
+                hint={t('projects.form.remoteHint')}
+                error={fieldError(errors.remoteUrl?.message)}
+              >
+                {(field) => (
                   <Input
                     placeholder="https://github.com/user/repo.git"
                     {...register('remoteUrl')}
+                    {...field}
                   />
-                </Field>
+                )}
+              </FormField>
 
-                <Field
-                  label={t('projects.form.sshKey')}
-                  hint={
-                    (sshKeys ?? []).length === 0
-                      ? t('projects.form.sshKeyEmptyHint')
-                      : t('projects.form.sshKeyHint')
-                  }
-                >
-                  {/* Ark renders a hidden native `<select>` for its value, but
-                      `register()`'s `onChange`/`onBlur` aren't props `Select`
-                      accepts — it's a controlled value/onValueChange API, not
-                      a native form control. `Controller` bridges the two. */}
+              <FormField
+                label={t('projects.form.sshKey')}
+                hint={
+                  (sshKeys ?? []).length === 0
+                    ? t('projects.form.sshKeyEmptyHint')
+                    : t('projects.form.sshKeyHint')
+                }
+              >
+                {(field) => (
                   <Controller
                     control={control}
                     name="sshKeyId"
-                    render={({ field }) => (
+                    render={({ field: rhf }) => (
                       <Select
-                        options={sshKeyOptions}
-                        value={field.value}
-                        onValueChange={(value) => field.onChange(value ?? '')}
-                        name={field.name}
-                        ref={field.ref}
-                      />
+                        items={sshKeyOptions}
+                        value={rhf.value}
+                        onValueChange={(value) => rhf.onChange(value ?? '')}
+                        name={rhf.name}
+                      >
+                        <SelectTrigger className="w-full" {...field} ref={rhf.ref}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {sshKeyOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     )}
                   />
-                </Field>
-              </>
-            )}
+                )}
+              </FormField>
+            </>
+          )}
 
-            {source === 'existing' && (
-              <Stack gap={2}>
-                <Field
-                  label={t('projects.form.folder')}
-                  error={fieldError(errors.sourceName?.message)}
-                >
-                  {/* A list, not a path field: adoption is restricted to this
-                      one directory, so there is nothing sensible to type. */}
+          {source === 'existing' && (
+            <div className="flex flex-col gap-2">
+              <FormField
+                label={t('projects.form.folder')}
+                error={fieldError(errors.sourceName?.message)}
+              >
+                {/* A list, not a path field: adoption is restricted to this
+                    one directory, so there is nothing sensible to type. */}
+                {(field) => (
                   <Controller
                     control={control}
                     name="sourceName"
-                    render={({ field }) => (
+                    render={({ field: rhf }) => (
                       <Select
-                        options={folderOptions}
-                        value={field.value || null}
-                        onValueChange={(value) => field.onChange(value ?? '')}
-                        placeholder={folderPlaceholder}
-                        name={field.name}
-                        ref={field.ref}
-                      />
+                        items={folderOptions}
+                        value={rhf.value || null}
+                        onValueChange={(value) => rhf.onChange(value ?? '')}
+                        name={rhf.name}
+                      >
+                        <SelectTrigger className="w-full" {...field} ref={rhf.ref}>
+                          <SelectValue placeholder={folderPlaceholder} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {folderOptions.map((option) => (
+                            <SelectItem
+                              key={option.value}
+                              value={option.value}
+                              disabled={option.disabled}
+                            >
+                              <span className="flex min-w-0 flex-col">
+                                <span>{option.label}</span>
+                                {option.description && (
+                                  <span className="text-xs text-muted-foreground">
+                                    {option.description}
+                                  </span>
+                                )}
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     )}
                   />
-                </Field>
+                )}
+              </FormField>
 
-                <div className={styles.tip}>
-                  <p className={styles.tipText}>{t('projects.form.folderTip')}</p>
-                  <Inline gap={2}>
-                    <Code>{sources?.dir ?? '…'}</Code>
-                    {sources?.dir && <CopyButton value={sources.dir} />}
-                  </Inline>
+              <div className="rounded-md border p-2">
+                <p className="mb-2 text-xs text-muted-foreground">{t('projects.form.folderTip')}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Code>{sources?.dir ?? '…'}</Code>
+                  {sources?.dir && <CopyButton value={sources.dir} />}
                 </div>
-              </Stack>
-            )}
+              </div>
+            </div>
+          )}
 
-            {source === 'empty' && <p className={styles.hint}>{t('projects.form.emptyHint')}</p>}
+          {source === 'empty' && (
+            <p className="text-xs text-muted-foreground">{t('projects.form.emptyHint')}</p>
+          )}
 
-            <Inline gap={3}>
-              <Button
-                type="submit"
-                disabled={create.isPending || (source === 'existing' && available.length === 0)}
-              >
-                {create.isPending ? t('projects.form.adding') : t('projects.form.submit')}
-              </Button>
-            </Inline>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="submit"
+              disabled={create.isPending || (source === 'existing' && available.length === 0)}
+            >
+              {create.isPending ? t('projects.form.adding') : t('projects.form.submit')}
+            </Button>
+          </div>
 
-            {serverError && <Alert>{serverError}</Alert>}
-          </Stack>
+          {serverError && (
+            <Alert variant="destructive">
+              <AlertDescription>{serverError}</AlertDescription>
+            </Alert>
+          )}
         </form>
-      </Stack>
+      </CardContent>
     </Card>
   )
 }

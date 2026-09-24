@@ -2,20 +2,13 @@ import { Link } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import {
-  Alert,
-  Badge,
-  Button,
-  Checkbox,
-  EmptyState,
-  Inline,
-  PageHeader,
-  Spinner,
-  Stack,
-  toast,
-} from '@/shared/ui'
+import { Loading, PageHeader, StatusBadge, toast } from '@/shared/components'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Button, buttonVariants } from '@/shared/ui/button'
+import { Checkbox } from '@/shared/ui/checkbox'
+import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
+import { Field, FieldContent, FieldDescription, FieldLabel } from '@/shared/ui/field'
 import { useAgents, useProjectLibrary, useSetProjectLibrary, useSkills } from '../hooks/use-library'
-import styles from './library.module.scss'
 
 /**
  * Which global agents and skills this project uses.
@@ -58,7 +51,7 @@ export function ProjectLibraryPage({ projectId }: { projectId: string }) {
       {
         // A toast survives this component unmounting (e.g. the tab closing
         // right after save), which a local timeout-driven message cannot.
-        onSuccess: () => toast({ title: t('library.assign.saved') }),
+        onSuccess: () => toast.add({ title: t('library.assign.saved'), type: 'success' }),
         onError: (e) => setError(apiErrorMessage(e, t('library.assign.failed'))),
       },
     )
@@ -71,85 +64,106 @@ export function ProjectLibraryPage({ projectId }: { projectId: string }) {
   const empty = agentsList.length === 0 && skillsList.length === 0
 
   return (
-    <Stack gap={8}>
-      <p className={styles.intro}>{t('library.assign.intro')}</p>
+    <div className="flex flex-col gap-8">
+      <p className="text-sm text-muted-foreground">{t('library.assign.intro')}</p>
 
       {isError && (
-        <Alert>{apiErrorMessage(agents.error ?? skills.error, t('library.loadFailed'))}</Alert>
+        <Alert variant="destructive">
+          <AlertDescription>
+            {apiErrorMessage(agents.error ?? skills.error, t('library.loadFailed'))}
+          </AlertDescription>
+        </Alert>
       )}
 
-      {!isError && isPending && <Spinner label={t('common.loading')} block />}
+      {!isError && isPending && <Loading label={t('common.loading')} block />}
 
       {!isError && !isPending && empty && (
-        <EmptyState
-          title={t('library.assign.emptyLibrary')}
-          action={
-            <Link to="/library">
-              <Button type="button">{t('library.assign.goToLibrary')}</Button>
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>{t('library.assign.emptyLibrary')}</EmptyTitle>
+          </EmptyHeader>
+          <EmptyContent>
+            <Link to="/library" className={buttonVariants({ variant: 'default' })}>
+              {t('library.assign.goToLibrary')}
             </Link>
-          }
-        />
+          </EmptyContent>
+        </Empty>
       )}
 
       {!isError && !isPending && !empty && (
         <>
           {agentsList.length > 0 && (
-            <Stack gap={3}>
+            <div className="flex flex-col gap-3">
               <PageHeader level={2} title={t('library.agents')} />
-              <Stack gap={2}>
+              <div className="flex flex-col gap-2">
                 {agentsList.map((agent) => (
-                  <div key={agent.name} className={styles.assignItem}>
-                    <Checkbox
-                      label={
-                        <Inline gap={2}>
+                  <Field
+                    key={agent.name}
+                    orientation="horizontal"
+                    className="rounded-md border px-3 py-2 hover:bg-muted/50"
+                  >
+                    <FieldContent>
+                      <FieldLabel htmlFor={`assign-agent-${agent.name}`}>
+                        <span className="flex flex-wrap items-center gap-2">
                           <span>{agent.name}</span>
-                          <Badge
-                            tone={agent.role === 'orchestrator' ? 'accent' : 'neutral'}
-                            variant="outline"
-                          >
+                          <StatusBadge tone={agent.role === 'orchestrator' ? 'accent' : 'neutral'}>
                             {t(`library.role.${agent.role}`)}
-                          </Badge>
-                        </Inline>
-                      }
-                      description={agent.description}
+                          </StatusBadge>
+                        </span>
+                      </FieldLabel>
+                      <FieldDescription>{agent.description}</FieldDescription>
+                    </FieldContent>
+                    <Checkbox
+                      id={`assign-agent-${agent.name}`}
                       checked={selectedAgents.includes(agent.name)}
                       onCheckedChange={() => toggle(selectedAgents, setSelectedAgents, agent.name)}
                     />
-                  </div>
+                  </Field>
                 ))}
-              </Stack>
-            </Stack>
+              </div>
+            </div>
           )}
 
           {skillsList.length > 0 && (
-            <Stack gap={3}>
+            <div className="flex flex-col gap-3">
               <PageHeader level={2} title={t('library.skills')} />
-              <Stack gap={2}>
+              <div className="flex flex-col gap-2">
                 {skillsList.map((skill) => (
-                  <div key={skill.name} className={styles.assignItem}>
+                  <Field
+                    key={skill.name}
+                    orientation="horizontal"
+                    className="rounded-md border px-3 py-2 hover:bg-muted/50"
+                  >
+                    <FieldContent>
+                      <FieldLabel htmlFor={`assign-skill-${skill.name}`}>{skill.name}</FieldLabel>
+                      <FieldDescription>{skill.description}</FieldDescription>
+                    </FieldContent>
                     <Checkbox
-                      label={skill.name}
-                      description={skill.description}
+                      id={`assign-skill-${skill.name}`}
                       checked={selectedSkills.includes(skill.name)}
                       onCheckedChange={() => toggle(selectedSkills, setSelectedSkills, skill.name)}
                     />
-                  </div>
+                  </Field>
                 ))}
-              </Stack>
-            </Stack>
+              </div>
+            </div>
           )}
 
-          <Stack gap={3}>
-            {error && <Alert>{error}</Alert>}
-            <Inline gap={3}>
+          <div className="flex flex-col gap-3">
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+            <div className="flex flex-wrap items-center gap-3">
               <Button type="button" disabled={!dirty || save.isPending} onClick={onSave}>
                 {save.isPending ? t('common.working') : t('common.save')}
               </Button>
-              <span className={styles.hint}>{t('library.assign.hint')}</span>
-            </Inline>
-          </Stack>
+              <span className="text-xs text-muted-foreground">{t('library.assign.hint')}</span>
+            </div>
+          </div>
         </>
       )}
-    </Stack>
+    </div>
   )
 }

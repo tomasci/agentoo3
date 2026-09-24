@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { Badge, Inline, StatusDot } from '@/shared/ui'
+import { StatusBadge } from '@/shared/components'
 import {
   CONTAINER_HEALTH_TONE,
   CONTAINER_STATE_TONE,
@@ -25,9 +25,9 @@ export function DockerDetectedBadge({
   const { t } = useTranslation()
   if (!hasCompose && !hasDockerfile) return null
   return (
-    <Badge tone="accent" variant="outline">
+    <StatusBadge tone="accent">
       {t(hasCompose ? 'docker.badge.compose' : 'docker.badge.dockerfile')}
-    </Badge>
+    </StatusBadge>
   )
 }
 
@@ -35,10 +35,9 @@ export function DockerDetectedBadge({
 export function ServiceStateBadge({ state }: { state: ServiceState }) {
   const { t } = useTranslation()
   return (
-    <Inline gap={2} align="center">
-      <StatusDot tone={SERVICE_STATE_TONE[state]} pulse={state === 'running'} />
-      <Badge tone={SERVICE_STATE_TONE[state]}>{t(`docker.state.service.${state}`)}</Badge>
-    </Inline>
+    <StatusBadge tone={SERVICE_STATE_TONE[state]} pulse={state === 'running'}>
+      {t(`docker.state.service.${state}`)}
+    </StatusBadge>
   )
 }
 
@@ -53,14 +52,15 @@ export function ContainerStateBadge({
 }) {
   const { t } = useTranslation()
   return (
-    <Inline gap={2} align="center">
-      <StatusDot tone={CONTAINER_STATE_TONE[state]} pulse={state === 'running'} />
-      <Badge tone={CONTAINER_STATE_TONE[state]}>{t(`docker.state.container.${state}`)}</Badge>
+    <div className="flex flex-wrap items-center gap-2">
+      <StatusBadge tone={CONTAINER_STATE_TONE[state]} pulse={state === 'running'}>
+        {t(`docker.state.container.${state}`)}
+      </StatusBadge>
       {health !== 'none' && (
-        <Badge tone={CONTAINER_HEALTH_TONE[health]} variant="outline">
+        <StatusBadge tone={CONTAINER_HEALTH_TONE[health]}>
           {t(`docker.state.health.${health}`)}
-        </Badge>
+        </StatusBadge>
       )}
-    </Inline>
+    </div>
   )
 }

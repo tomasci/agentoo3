@@ -8,38 +8,16 @@
 // the collapsible's own unmount-on-exit already provides, with `contain: paint`
 // clipping inside a row that is on screen by definition.
 //
-// Asserted through parentage rather than class names on purpose: `bun test`
-// resolves a `.module.scss` import to the file path, so every `className={
-// styles.x }` in this tree renders as no class at all. Parentage needs none of
-// that and cannot be satisfied by accident — a node root either has a wrapper
-// of its own between it and the grid, or it shares its parent with its
-// siblings.
+// Asserted through parentage rather than class names on purpose: a node root
+// either has a wrapper of its own between it and the grid, or it shares its
+// parent with its siblings — a fact classes cannot substitute for even though
+// Tailwind's own utility classes are literal strings in this DOM.
 
-import { plugin } from 'bun'
 import { expect, test } from 'bun:test'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-
-// Same identity-proxy loader, same allowlist, as tests/ui-core.test.tsx and
-// tests/transcript-time.test.tsx: whichever of the three `bun test` evaluates
-// first must leave those ten modules cached the same way. See the long note in
-// transcript-time.test.tsx.
-const UI_CORE_STYLES =
-  /src\/shared\/ui\/(core\/(badge|status-dot|code|layout)|patterns\/(card|page-header|empty-state|alert|definition-list|data-table))\.module\.scss$/
-
-plugin({
-  name: 'transcript-row-test-css-module-identity',
-  setup(build) {
-    build.onLoad({ filter: UI_CORE_STYLES }, () => ({
-      contents:
-        'export default new Proxy({}, { get: (_t, p) => (typeof p === "string" ? p : undefined) })',
-      loader: 'js',
-    }))
-  },
-})
-
-const { buildTranscript } = await import('../src/features/sessions/lib/transcript')
-const { Transcript } = await import('../src/features/sessions/components/transcript')
+import { buildTranscript } from '../src/features/sessions/lib/transcript'
+import { Transcript } from '../src/features/sessions/components/transcript'
 
 type M = Parameters<typeof Transcript>[0]['messages'][number]
 
@@ -94,8 +72,11 @@ async function render(messages: M[]) {
   return container
 }
 
+/** Every collapsible trigger: `ui/collapsible`'s own `data-slot`, set
+ *  unconditionally by the shared component regardless of what a caller wraps
+ *  it in. */
 const triggers = (el: Element) =>
-  [...el.querySelectorAll('button[data-part="trigger"]')] as HTMLElement[]
+  [...el.querySelectorAll('button[data-slot="collapsible-trigger"]')] as HTMLElement[]
 
 async function openAll(container: Element) {
   for (let pass = 0; pass < 5; pass++) {
@@ -170,12 +151,13 @@ const ownText = (el: Element) =>
  * Deliberately *not* "a direct child of the grid". Remove the wrappers and the
  * grid still has one direct child per top-level node — the node roots move up
  * into their place — so counting children proves nothing. Every node root
- * fails at least one clause here: a disclosure carries `data-scope`, the
- * prompt bubble carries its own text, the answer block holds two children.
+ * fails at least one clause here: a disclosure carries `data-slot="collapsible"`
+ * (`ui/collapsible`'s own contract), the prompt bubble carries its own text,
+ * the answer block holds two children.
  */
 const isWrapper = (el: Element) =>
   el.tagName === 'DIV' &&
-  !el.hasAttribute('data-scope') &&
+  !el.hasAttribute('data-slot') &&
   el.children.length === 1 &&
   ownText(el) === ''
 
@@ -192,7 +174,7 @@ test('the grid holds exactly one child per top-level node, and each holds one no
   expect(rows.map((row) => row.tagName)).toEqual(each(nodes, 'DIV'))
   // The wrapper carries nothing of its own: no collapsible parts, no text
   // outside the node it wraps.
-  expect(rows.map((row) => row.hasAttribute('data-scope'))).toEqual(each(nodes, false))
+  expect(rows.map((row) => row.hasAttribute('data-slot'))).toEqual(each(nodes, false))
   expect(rows.map((row) => row.children.length)).toEqual(each(nodes, 1))
   expect(rows.map(ownText)).toEqual(each(nodes, ''))
 })
@@ -210,7 +192,7 @@ test('each top-level node sits under its own wrapper, one level below the grid',
   const rootOf = (title: string) => {
     const trigger = triggers(g).find((b) => b.textContent?.includes(title))
     if (!trigger) throw new Error(`no disclosure titled ${JSON.stringify(title)}`)
-    return trigger.closest('[data-part="root"]') as HTMLElement
+    return trigger.closest('[data-slot="collapsible"]') as HTMLElement
   }
   const roots = ['design the runner', 'Turn complete'].map(rootOf)
 
@@ -232,10 +214,10 @@ test('the wrapping did not disturb which node is which, or their order', async (
   if (!prompt || !task || !answer || !result) throw new Error('expected four rows')
 
   expect(prompt.textContent).toContain('build it')
-  expect(task.getAttribute('data-scope')).toBe('collapsible')
+  expect(task.getAttribute('data-slot')).toBe('collapsible')
   expect(task.textContent).toContain('design the runner')
   expect(answer.textContent).toContain('done')
-  expect(result.getAttribute('data-scope')).toBe('collapsible')
+  expect(result.getAttribute('data-slot')).toBe('collapsible')
 })
 
 // --- and no wrapper below that -------------------------------------------------
@@ -249,11 +231,8 @@ test('nested rows are NOT wrapped: siblings inside a task group share one parent
 
   const nested = triggers(task)
     .filter((b) => /nested (one|two)/.test(b.textContent ?? ''))
-    .map((b) => b.closest('[data-part="root"]') as HTMLElement)
-  expect(nested.map((el) => el?.getAttribute('data-scope'))).toEqual([
-    'collapsible',
-    'collapsible',
-  ])
+    .map((b) => b.closest('[data-slot="collapsible"]') as HTMLElement)
+  expect(nested.map((el) => el?.getAttribute('data-slot'))).toEqual(['collapsible', 'collapsible'])
 
   const [a, b] = nested
   if (!a || !b) throw new Error('nested rows missing')
@@ -273,12 +252,13 @@ test('the whole tree contains exactly as many wrappers as there are top-level no
   expect([...g.children].filter(isWrapper).length).toBe(buildTranscript(messages).length)
 
   // And none below that. A structural sweep for wrappers over the whole tree
-  // is no use — `Collapsible`'s own body is a single-child div too, and eleven
-  // divs in this tree match on shape alone. Disclosure roots are the one thing
-  // that occurs at every depth *and* announces itself, so they can be found
-  // without knowing where they are, and each asked whether its parent wraps it
-  // alone. Document order: the task group, its two nested steps, the result.
-  const wrapping = [...container.querySelectorAll('[data-part="root"]')].map((root) => [
+  // is no use — `CollapsibleContent`'s own body is a single-child div too, and
+  // several divs in this tree match on shape alone. Disclosure roots
+  // (`[data-slot="collapsible"]`) are the one thing that occurs at every depth
+  // *and* announces itself, so they can be found without knowing where they
+  // are, and each asked whether its parent wraps it alone. Document order: the
+  // task group, its two nested steps, the result.
+  const wrapping = [...container.querySelectorAll('[data-slot="collapsible"]')].map((root) => [
     triggers(root)[0]?.textContent?.includes('nested') ? 'nested' : 'top-level',
     root.parentElement ? isWrapper(root.parentElement) : false,
   ])
@@ -305,38 +285,40 @@ test('an empty transcript renders the empty state, with no wrapper around nothin
   const container = await render([])
   // Matched against key *or* copy: whether i18n has been initialised depends on
   // which other file in the run got there first, and this test is not about
-  // that. The empty state is a Card, not the `.transcript` grid, so there is no
-  // row level here at all to leave a stray boundary behind.
+  // that. The empty state is `ui/empty`, not the `.grid` container, so there is
+  // no row level here at all to leave a stray boundary behind.
   expect(container.textContent ?? '').toMatch(/sessions\.transcript\.empty|Nothing yet/)
-  expect(container.querySelectorAll('[data-scope="collapsible"]').length).toBe(0)
+  expect(container.querySelectorAll('[data-slot="collapsible"]').length).toBe(0)
 })
 
 // --- the declarations the DOM structure exists to carry -------------------------
 
-test('the row rule declares the containment, with a self-correcting intrinsic size', async () => {
+test('every top-level row declares the content-visibility containment, with a self-correcting intrinsic size', async () => {
   // happy-dom does no layout and does not implement content-visibility, so the
-  // skipping itself cannot be observed here; what is checkable is that the two
-  // declarations the DOM boundary above exists for are actually on `.row`.
-  const scss = await Bun.file('src/features/sessions/components/transcript.module.scss').text()
-  const block = (name: string) =>
-    (scss.match(new RegExp(`\\.${name}\\s*\\{[^}]*\\}`))?.[0] ?? '').replace(/\/\/.*/g, '')
-
-  expect(block('row')).toContain('content-visibility: auto')
-  // The `auto` keyword is what makes the placeholder self-correct once a row
-  // has been rendered; a bare length would freeze every off-screen row at the
-  // guess forever, and the scroll height with it.
-  expect(block('row')).toMatch(/contain-intrinsic-size:\s*auto\s+\S+/)
+  // skipping itself cannot be observed here; what is checkable is that the
+  // two declarations the DOM boundary exists for are actually on the rendered
+  // row — Tailwind's arbitrary-property classes are literal strings in this
+  // DOM, unlike the CSS-module classes this file used to work around.
+  const container = await render(turn())
+  const rows = [...grid(container).children]
+  expect(rows.length).toBeGreaterThan(0)
+  for (const row of rows) {
+    expect(row.classList.contains('[content-visibility:auto]')).toBe(true)
+    // The `auto` keyword is what makes the placeholder self-correct once a row
+    // has been rendered; a bare length would freeze every off-screen row at the
+    // guess forever, and the scroll height with it.
+    expect(row.classList.contains('[contain-intrinsic-size:auto_6rem]')).toBe(true)
+  }
 })
 
 test('the prompt bubble aligns by a mechanism that survives no longer being a grid item', async () => {
   // `.prompt` used to be a direct child of the `.transcript` grid and aligned
-  // right with `justify-self: end`. It is now a child of `.row`, an ordinary
-  // block box — `justify-self` on a non-grid-item does nothing, so leaving it
-  // behind would have silently un-aligned every prompt in the app.
-  const scss = await Bun.file('src/features/sessions/components/transcript.module.scss').text()
-  // Declarations only: the block's own comment recounts the rule it replaced,
-  // and a substring search would find `justify-self` there and pass forever.
-  const prompt = (scss.match(/\.prompt\s*\{[\s\S]*?\n\}/)?.[0] ?? '').replace(/\/\/.*/g, '')
-  expect(prompt).toContain('margin-inline-start: auto')
-  expect(prompt).not.toContain('justify-self')
+  // right with `justify-self: end`. It is now a child of the row wrapper, an
+  // ordinary block box — `justify-self` on a non-grid-item does nothing, so an
+  // inline-margin push is what has to do the aligning instead.
+  const container = await render([msg({ type: 'prompt', payload: { text: 'hi' } })])
+  const prompt = grid(container).firstElementChild?.firstElementChild as HTMLElement
+  if (!prompt) throw new Error('no prompt row')
+  expect(prompt.classList.contains('ml-auto')).toBe(true)
+  expect(prompt.classList.contains('justify-self-end')).toBe(false)
 })

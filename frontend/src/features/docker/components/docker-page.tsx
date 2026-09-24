@@ -1,19 +1,13 @@
+import { CircleAlertIcon, TriangleAlertIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import {
-  Alert,
-  Button,
-  Card,
-  Code,
-  ConfirmDialog,
-  EmptyState,
-  Inline,
-  PageHeader,
-  Spinner,
-  Stack,
-  toast,
-} from '@/shared/ui'
+import { Code, ConfirmDialog, Loading, PageHeader, toast } from '@/shared/components'
+import { Alert, AlertDescription, AlertTitle } from '@/shared/ui/alert'
+import { Button } from '@/shared/ui/button'
+import { Card, CardContent } from '@/shared/ui/card'
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
+import { Spinner } from '@/shared/ui/spinner'
 import {
   useDockerDown,
   useDockerRestart,
@@ -23,7 +17,6 @@ import {
 } from '../hooks/use-docker'
 import { hasDockerConfig, isOperationConflict } from '../lib/state'
 import { AccessUrls } from './access-urls'
-import styles from './docker-page.module.scss'
 import { DockerScopeBar } from './docker-scope-bar'
 import { OperationConsole } from './operation-console'
 import { ServiceList, type StartOptions } from './service-list'
@@ -68,11 +61,11 @@ export function DockerPage({ projectId, sessionId }: { projectId: string; sessio
   }, [serverActiveOperationId, operationId])
 
   const fail = (fallbackKey: string) => (error: unknown) =>
-    toast({
+    toast.add({
       title: isOperationConflict(error)
         ? t('docker.errors.operationInProgress')
         : apiErrorMessage(error, t(fallbackKey)),
-      tone: 'danger',
+      type: 'error',
     })
 
   // Every mutation carries the same scope the status query above reads —
@@ -129,22 +122,26 @@ export function DockerPage({ projectId, sessionId }: { projectId: string; sessio
 
   if (status.isPending) {
     return (
-      <Stack gap={6}>
+      <div className="flex flex-col gap-6">
         <PageHeader title={t('docker.heading')} description={t('docker.lead')} />
         {scopeBar}
-        <Spinner label={t('common.loading')} block />
-      </Stack>
+        <Loading label={t('common.loading')} block />
+      </div>
     )
   }
   if (status.isError || !status.data) {
     return (
-      <Stack gap={6}>
+      <div className="flex flex-col gap-6">
         <PageHeader title={t('docker.heading')} description={t('docker.lead')} />
         {scopeBar}
-        <Alert tone="danger" title={sessionId ? t('docker.scope.errorTitle') : undefined}>
-          {apiErrorMessage(status.error, t('docker.loadFailed'))}
+        <Alert variant="destructive">
+          <CircleAlertIcon />
+          {sessionId && <AlertTitle>{t('docker.scope.errorTitle')}</AlertTitle>}
+          <AlertDescription>
+            {apiErrorMessage(status.error, t('docker.loadFailed'))}
+          </AlertDescription>
         </Alert>
-      </Stack>
+      </div>
     )
   }
 
@@ -163,107 +160,118 @@ export function DockerPage({ projectId, sessionId }: { projectId: string; sessio
   const stopDisabled = !daemonReachable || opBusy
 
   return (
-    <Stack gap={6}>
+    <div className="flex flex-col gap-6">
       <PageHeader title={t('docker.heading')} description={t('docker.lead')} />
       {scopeBar}
 
       {!configFound ? (
-        <EmptyState
-          title={t('docker.empty.title')}
-          // `scopePath`, not `projectPath`: at session scope this is the
-          // session's own worktree, and a fresh worktree holds only
-          // *tracked* files — a gitignored `.env` compose needs is not
-          // there yet, which is exactly what this path tells the reader to
-          // go create.
-          description={t('docker.empty.description', { path: data.scopePath })}
-        />
+        <Empty>
+          <EmptyHeader>
+            <EmptyTitle>{t('docker.empty.title')}</EmptyTitle>
+            {/* `scopePath`, not `projectPath`: at session scope this is the
+                session's own worktree, and a fresh worktree holds only
+                *tracked* files — a gitignored `.env` compose needs is not
+                there yet, which is exactly what this path tells the reader to
+                go create. */}
+            <EmptyDescription>
+              {t('docker.empty.description', { path: data.scopePath })}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <>
           {!daemonReachable && (
-            <Alert
-              tone="danger"
-              title={
-                data.daemon.cliInstalled
+            <Alert variant="destructive">
+              <CircleAlertIcon />
+              <AlertTitle>
+                {data.daemon.cliInstalled
                   ? t('docker.daemon.unavailableTitle')
-                  : t('docker.daemon.notInstalledTitle')
-              }
-            >
-              <Stack gap={2}>
-                <p>
-                  {data.daemon.cliInstalled
-                    ? t('docker.daemon.unavailable')
-                    : t('docker.daemon.notInstalled')}
-                </p>
-                {data.daemon.error && (
-                  <Code block wrap>
-                    {data.daemon.error}
-                  </Code>
-                )}
-              </Stack>
+                  : t('docker.daemon.notInstalledTitle')}
+              </AlertTitle>
+              <AlertDescription>
+                <div className="flex flex-col gap-2">
+                  <p>
+                    {data.daemon.cliInstalled
+                      ? t('docker.daemon.unavailable')
+                      : t('docker.daemon.notInstalled')}
+                  </p>
+                  {data.daemon.error && (
+                    <Code block wrap>
+                      {data.daemon.error}
+                    </Code>
+                  )}
+                </div>
+              </AlertDescription>
             </Alert>
           )}
 
           {data.configError && (
-            <Alert
-              tone="danger"
-              title={t('docker.configErrorTitle', {
-                file: data.detection.composeFile ?? t('docker.composeFileUnknown'),
-              })}
-            >
-              <Code block wrap>
-                {data.configError}
-              </Code>
+            <Alert variant="destructive">
+              <CircleAlertIcon />
+              <AlertTitle>
+                {t('docker.configErrorTitle', {
+                  file: data.detection.composeFile ?? t('docker.composeFileUnknown'),
+                })}
+              </AlertTitle>
+              <AlertDescription>
+                <Code block wrap>
+                  {data.configError}
+                </Code>
+              </AlertDescription>
             </Alert>
           )}
 
           {data.foreignStacks.length > 0 && (
-            <Alert tone="warning">
-              {t('docker.foreignStacks', {
-                names: data.foreignStacks.map((s) => s.name).join(', '),
-              })}
+            <Alert role="status">
+              <TriangleAlertIcon />
+              <AlertDescription>
+                {t('docker.foreignStacks', {
+                  names: data.foreignStacks.map((s) => s.name).join(', '),
+                })}
+              </AlertDescription>
             </Alert>
           )}
 
           <Card>
-            <Stack gap={3}>
-              <h3 className={styles.cardTitle}>{t('docker.stack.heading')}</h3>
-              <Inline gap={2}>
+            <CardContent className="flex flex-col gap-3">
+              <h3 className="text-base font-semibold">{t('docker.stack.heading')}</h3>
+              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
-                  loading={up.isPending}
-                  disabled={startDisabled}
+                  disabled={startDisabled || up.isPending}
                   onClick={() => triggerUp([])}
                 >
+                  {up.isPending && <Spinner data-icon="inline-start" />}
                   {t('docker.stack.startAll')}
                 </Button>
                 <Button
                   type="button"
-                  variant="secondary"
-                  loading={stop.isPending}
-                  disabled={stopDisabled}
+                  variant="outline"
+                  disabled={stopDisabled || stop.isPending}
                   onClick={() => triggerStop([])}
                 >
+                  {stop.isPending && <Spinner data-icon="inline-start" />}
                   {t('docker.stack.stopAll')}
                 </Button>
                 <Button
                   type="button"
-                  variant="secondary"
-                  loading={restart.isPending}
-                  disabled={startDisabled}
+                  variant="outline"
+                  disabled={startDisabled || restart.isPending}
                   onClick={() => triggerRestart([])}
                 >
+                  {restart.isPending && <Spinner data-icon="inline-start" />}
                   {t('docker.stack.restart')}
                 </Button>
                 <Button
                   type="button"
-                  variant="danger"
+                  variant="destructive"
                   disabled={stopDisabled}
                   onClick={() => setConfirmCleanup(true)}
                 >
                   {t('docker.stack.cleanup')}
                 </Button>
-              </Inline>
-            </Stack>
+              </div>
+            </CardContent>
           </Card>
 
           {operationId && (
@@ -298,6 +306,6 @@ export function DockerPage({ projectId, sessionId }: { projectId: string; sessio
         busy={down.isPending}
         onConfirm={triggerCleanup}
       />
-    </Stack>
+    </div>
   )
 }

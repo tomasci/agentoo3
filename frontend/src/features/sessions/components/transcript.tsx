@@ -1,17 +1,27 @@
-import { memo, useMemo, useState } from 'react'
+import {
+  ChevronRightIcon,
+  FileIcon,
+  FileXIcon,
+  OctagonXIcon,
+  TriangleAlertIcon,
+} from 'lucide-react'
+import { memo, type ReactNode, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatBytes } from '@/features/system'
+import { Code, DefinitionList, Markdown, StatusBadge, type Tone } from '@/shared/components'
+import { Alert, AlertDescription } from '@/shared/ui/alert'
 import {
-  Alert,
-  Button,
-  Card,
-  Code,
-  Collapsible,
-  DefinitionList,
-  Dialog,
-  EmptyState,
-  Markdown,
-} from '@/shared/ui'
+  Attachment,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle,
+} from '@/shared/ui/attachment'
+import { Button } from '@/shared/ui/button'
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/shared/ui/collapsible'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/dialog'
+import { Empty, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
 import type { SessionMessage } from '../hooks/use-sessions'
 import { isInlineImage, sessionFileUrl } from '../lib/attachments'
 import { formatFullTime, formatTime } from '../lib/format'
@@ -25,19 +35,16 @@ import {
   thinkingOf,
   toolCallsOf,
 } from '../lib/transcript'
-import styles from './transcript.module.scss'
 
 type TaskStatus = Extract<TranscriptNode, { kind: 'task' }>['status']
 
-// The row border used to recolour accent for every delegated task regardless
-// of status; Collapsible has no className escape hatch to carry that, so the
-// signal now lives entirely in the badge tone. A task starts 'running'
-// (accent) and stays that way until a task_updated or task_notification
-// resolves it — 'completed' gets its own 'success' tone rather than reusing
-// the untoned 'neutral' look: a badge that carries no colour at all reads as
-// "nothing observed yet", which is exactly what a task this code has simply
-// never heard the end of also looks like. A clean finish should look like one.
-const TASK_TONE: Record<TaskStatus, 'accent' | 'success' | 'danger'> = {
+// A task starts 'running' (accent) and stays that way until a task_updated or
+// task_notification resolves it — 'completed' gets its own 'success' tone
+// rather than reusing the untoned 'neutral' look: a badge that carries no
+// colour at all reads as "nothing observed yet", which is exactly what a task
+// this code has simply never heard the end of also looks like. A clean finish
+// should look like one.
+const TASK_TONE: Record<TaskStatus, Tone> = {
   running: 'accent',
   completed: 'success',
   failed: 'danger',
@@ -48,6 +55,53 @@ const TASK_TONE: Record<TaskStatus, 'accent' | 'success' | 'danger'> = {
  * can return megabytes; showing none of it was the bug this fixes, but
  * showing all of it inline would trade one unreadable row for another. */
 const RESULT_CLAMP = 4000
+
+/**
+ * A row that is a heading until you open it — every task/event node in the
+ * transcript renders through this. Composed straight from `ui/collapsible`
+ * (unstyled by design) rather than a shared pattern: the badge/note/meta
+ * trailing slots here are specific to a transcript row, not a general
+ * disclosure API.
+ */
+function TranscriptDisclosure({
+  title,
+  badge,
+  note,
+  meta,
+  children,
+}: {
+  title: ReactNode
+  badge?: { label: string; tone: Tone }
+  note?: ReactNode
+  meta?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <Collapsible className="min-w-0 overflow-hidden rounded-md border bg-background">
+      <CollapsibleTrigger className="group flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+        <ChevronRightIcon
+          aria-hidden="true"
+          className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-panel-open:rotate-90"
+        />
+        {badge && <StatusBadge tone={badge.tone}>{badge.label}</StatusBadge>}
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        {note && (
+          <span className="max-w-[40%] shrink-0 truncate text-xs text-muted-foreground">
+            {note}
+          </span>
+        )}
+        {meta && (
+          <span className="shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
+            {meta}
+          </span>
+        )}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="grid grid-cols-1 gap-3 border-t p-3">{children}</div>
+      </CollapsibleContent>
+    </Collapsible>
+  )
+}
 
 function ToolResultView({ result }: { result: ToolResult }) {
   const { t } = useTranslation()
@@ -69,14 +123,22 @@ function ToolResultView({ result }: { result: ToolResult }) {
   )
 
   // is_error is the one channel a reader cannot afford to miss, so it borrows
-  // Alert's danger tone rather than the plain, unannounced result block below.
+  // Alert's destructive variant rather than the plain, unannounced result
+  // block below.
   if (result.isError) {
-    return <Alert tone="danger">{body}</Alert>
+    return (
+      <Alert variant="destructive">
+        <OctagonXIcon />
+        <AlertDescription>{body}</AlertDescription>
+      </Alert>
+    )
   }
 
   return (
-    <div className={styles.result}>
-      <span className={styles.resultLabel}>{t('sessions.transcript.result')}</span>
+    <div className="grid grid-cols-1 gap-1">
+      <span className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide">
+        {t('sessions.transcript.result')}
+      </span>
       {body}
     </div>
   )
@@ -102,8 +164,8 @@ function MessageBody({
       : ''
   // The runner's own note about something that happened between turns —
   // background work lost when a turn closed, a continuation being sent. Same
-  // payload shape as an error but deliberately not the danger tone: it is
-  // reporting a recovery, not a failure.
+  // payload shape as an error but deliberately not the destructive variant:
+  // it is reporting a recovery, not a failure.
   const notice =
     message.type === 'notice'
       ? String((message.payload as { message?: unknown })?.message ?? '')
@@ -120,21 +182,37 @@ function MessageBody({
 
   return (
     <>
-      {error && <Alert tone="danger">{error}</Alert>}
-      {notice && <Alert tone="warning">{notice}</Alert>}
+      {error && (
+        <Alert variant="destructive">
+          <OctagonXIcon />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      {notice && (
+        <Alert role="status">
+          <TriangleAlertIcon />
+          <AlertDescription>{notice}</AlertDescription>
+        </Alert>
+      )}
       {/* Agent output is markdown, and reads as noise without it. */}
       {text && <Markdown compact>{text}</Markdown>}
       {thinking && (
-        <div className={styles.thinking}>
-          <span className={styles.thinkingLabel}>{t('sessions.transcript.thinking')}</span>
+        <div className="border-l-2 pl-3 text-muted-foreground italic">
+          <span className="mb-2 block text-[0.6875rem] font-normal not-italic uppercase tracking-wide">
+            {t('sessions.transcript.thinking')}
+          </span>
           <Markdown compact>{thinking}</Markdown>
         </div>
       )}
       {tools.map((tool) => {
         const result = results[tool.id]
         return (
-          <div key={tool.id} className={styles.tool}>
-            <span className={styles.toolName}>{tool.name}</span>
+          <div key={tool.id} className="grid grid-cols-1 gap-2">
+            {/* Not model prose, so `Markdown`'s own wrapping rule never covers
+                it — but an MCP tool name (`mcp__server__tool`) is a single
+                unbroken token up to 128 characters, so this is the one label
+                left that could still push the row wider than the viewport. */}
+            <span className="wrap-anywhere font-mono text-sm text-primary">{tool.name}</span>
             <ToolInput input={tool.input} />
             {result && <ToolResultView result={result} />}
           </div>
@@ -176,7 +254,11 @@ function ToolInput({ input }: { input: unknown }) {
     // A tool like ListAgents takes nothing: `JSON.stringify({}, null, 2)`
     // printed a bare `{}`, which reads as a broken call rather than one that
     // genuinely has no arguments.
-    return <p className={styles.noArgs}>{t('sessions.transcript.noArguments')}</p>
+    return (
+      <p className="m-0 text-xs text-muted-foreground italic">
+        {t('sessions.transcript.noArguments')}
+      </p>
+    )
   }
 
   return (
@@ -241,7 +323,9 @@ function readyAttachment(file: MessageFile): ReadyAttachment | null {
  * One file a prompt carried. An image gets a thumbnail that opens a `Dialog`
  * lightbox; anything else is a chip linking at the hand-built download route
  * (`lib/attachments.ts` — the OpenAPI router does not carry this one, see its
- * own comment for why).
+ * own comment for why). Both cases wrap the whole `Attachment` tile in the
+ * real control (a `<button>` or an `<a>`) rather than only an inner icon, so
+ * the filename and size are part of what the control announces.
  */
 function AttachmentItem({ sessionId, file }: { sessionId: string; file: ReadyAttachment }) {
   const [open, setOpen] = useState(false)
@@ -252,33 +336,49 @@ function AttachmentItem({ sessionId, file }: { sessionId: string; file: ReadyAtt
   // a broken image" acceptance criterion is explicitly about.
   const [broken, setBroken] = useState(false)
   const url = sessionFileUrl(sessionId, file.id)
+  const isImage = isInlineImage(file.mimeType) && !broken
 
-  if (isInlineImage(file.mimeType) && !broken) {
+  const tile = (
+    <Attachment state="done" size="sm">
+      <AttachmentMedia variant={isImage ? 'image' : 'icon'}>
+        {isImage ? (
+          <img src={url} alt={file.originalFilename} onError={() => setBroken(true)} />
+        ) : (
+          <FileIcon aria-hidden="true" />
+        )}
+      </AttachmentMedia>
+      <AttachmentContent>
+        <AttachmentTitle>{file.originalFilename}</AttachmentTitle>
+        <AttachmentDescription>{formatBytes(file.sizeBytes)}</AttachmentDescription>
+      </AttachmentContent>
+    </Attachment>
+  )
+
+  if (isImage) {
     return (
       <>
-        <button
-          type="button"
-          className={styles.attachmentThumbButton}
-          onClick={() => setOpen(true)}
-        >
-          <img
-            src={url}
-            alt={file.originalFilename}
-            className={styles.attachmentThumb}
-            onError={() => setBroken(true)}
-          />
+        <button type="button" className="block text-left" onClick={() => setOpen(true)}>
+          {tile}
         </button>
-        <Dialog open={open} onOpenChange={setOpen} title={file.originalFilename} size="lg">
-          <img src={url} alt={file.originalFilename} className={styles.attachmentFull} />
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{file.originalFilename}</DialogTitle>
+            </DialogHeader>
+            <img
+              src={url}
+              alt={file.originalFilename}
+              className="mx-auto block max-h-[70vh] max-w-full rounded-sm"
+            />
+          </DialogContent>
         </Dialog>
       </>
     )
   }
 
   return (
-    <a className={styles.attachmentChip} href={url} download={file.originalFilename}>
-      <span className={styles.attachmentName}>{file.originalFilename}</span>
-      <span className={styles.attachmentSize}>{formatBytes(file.sizeBytes)}</span>
+    <a href={url} download={file.originalFilename} className="block">
+      {tile}
     </a>
   )
 }
@@ -293,19 +393,26 @@ function PromptAttachments({ sessionId, files }: { sessionId: string; files: Mes
   const { t } = useTranslation()
 
   return (
-    <div className={styles.attachments}>
+    <AttachmentGroup className="mt-2">
       {files.map((file, i) => {
         const ready = readyAttachment(file)
         if (!ready) {
           return (
-            <span key={file.id ?? `removed-${i}`} className={styles.attachmentRemoved}>
-              {t('sessions.attachments.removed')}
-            </span>
+            <Attachment key={file.id ?? `removed-${i}`} state="idle" size="sm">
+              <AttachmentMedia>
+                <FileXIcon aria-hidden="true" />
+              </AttachmentMedia>
+              <AttachmentContent>
+                <AttachmentTitle className="italic">
+                  {t('sessions.attachments.removed')}
+                </AttachmentTitle>
+              </AttachmentContent>
+            </Attachment>
           )
         }
         return <AttachmentItem key={ready.id} sessionId={sessionId} file={ready} />
       })}
-    </div>
+    </AttachmentGroup>
   )
 }
 
@@ -314,10 +421,15 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
 
   if (node.kind === 'prompt') {
     return (
-      <div className={styles.prompt}>
-        <span className={styles.promptCaption}>
-          <span className={styles.promptLabel}>{t('sessions.transcript.you')}</span>
-          <Timestamp createdAt={node.createdAt} className={styles.promptTime} />
+      <div className="ml-auto max-w-[min(46rem,100%)] rounded-lg border bg-primary/5 px-3 py-2 whitespace-pre-wrap wrap-anywhere">
+        <span className="mb-1 flex items-baseline justify-between gap-2">
+          <span className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide">
+            {t('sessions.transcript.you')}
+          </span>
+          <Timestamp
+            createdAt={node.createdAt}
+            className="text-[0.6875rem] text-muted-foreground tabular-nums"
+          />
         </span>
         {node.text}
         {node.files.length > 0 && <PromptAttachments sessionId={sessionId} files={node.files} />}
@@ -328,20 +440,23 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
   // The turn's closing reply: open, full size, and the thing you came to read.
   if (node.kind === 'answer') {
     const time = formatTime(node.createdAt) && (
-      <Timestamp createdAt={node.createdAt} className={styles.answerTime} />
+      <Timestamp
+        createdAt={node.createdAt}
+        className="text-[0.6875rem] text-muted-foreground tabular-nums"
+      />
     )
-    // Same rule as the Collapsible `meta` slot below: an unparsable createdAt
-    // and an absent model must produce no wrapper at all, not an empty one —
-    // an always-rendered `.answerMeta` span would itself be a second child of
-    // `.answer`'s single-column grid even with nothing visible inside it.
+    // An unparsable createdAt and an absent model must produce no wrapper at
+    // all, not an empty one — an always-rendered meta span would itself be a
+    // second child of the answer's single-column grid even with nothing
+    // visible inside it.
     return (
-      <div className={styles.answer}>
+      <div className="grid grid-cols-1 gap-1 rounded-lg border bg-background px-3 py-2">
         {(time || node.model) && (
-          <span className={styles.answerMeta}>
+          <span className="justify-self-end">
             {time}
             {node.model && (
               <span
-                className={styles.model}
+                className="ml-2 text-[0.6875rem] text-muted-foreground"
                 title={t('sessions.transcript.model', { model: node.model })}
               >
                 {node.model}
@@ -354,7 +469,7 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
     )
   }
 
-  // Collapsible only renders its meta slot when this is truthy, so an
+  // The disclosure only renders its meta slot when this is truthy, so an
   // unparsable createdAt must produce undefined here, not an element that
   // renders empty.
   const time = formatTime(node.createdAt) && <Timestamp createdAt={node.createdAt} />
@@ -371,21 +486,21 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
       <>
         {time}
         {model && (
-          <span className={styles.model} title={t('sessions.transcript.model', { model })}>
+          <span className="ml-2" title={t('sessions.transcript.model', { model })}>
             {model}
           </span>
         )}
       </>
     )
     return (
-      <Collapsible title={node.message.title ?? ''} meta={meta}>
+      <TranscriptDisclosure title={node.message.title ?? ''} meta={meta}>
         <MessageBody message={node.message} results={node.results} />
-      </Collapsible>
+      </TranscriptDisclosure>
     )
   }
 
   return (
-    <Collapsible
+    <TranscriptDisclosure
       title={node.title}
       badge={{ label: node.agent, tone: TASK_TONE[node.status] }}
       // Live progress, but only while it means something: on a finished task the
@@ -396,8 +511,8 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
       {/* The instruction the orchestrator wrote. Shown first and in full: it is
           the only place the delegation is visible. */}
       {node.prompt && (
-        <div className={styles.delegation}>
-          <span className={styles.delegationLabel}>
+        <div className="rounded-sm border bg-muted p-3">
+          <span className="mb-2 block text-[0.6875rem] text-muted-foreground uppercase tracking-wide">
             {t('sessions.transcript.delegatedPrompt', { agent: node.agent })}
           </span>
           <Markdown compact>{node.prompt}</Markdown>
@@ -406,21 +521,23 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
       {/* A backgrounded Bash call, not a delegation: no prompt, and no child
           messages either, so this is the only thing the row has to show. */}
       {node.command && (
-        <div className={styles.command}>
-          <span className={styles.commandLabel}>{t('sessions.transcript.command')}</span>
+        <div className="rounded-sm border bg-muted p-3">
+          <span className="mb-2 block text-[0.6875rem] text-muted-foreground uppercase tracking-wide">
+            {t('sessions.transcript.command')}
+          </span>
           <Code block wrap>
             {node.command}
           </Code>
         </div>
       )}
       {node.children.length > 0 && (
-        <div className={styles.children}>
+        <div className="ml-2 grid grid-cols-1 gap-2 border-l-2 pl-3">
           {node.children.map((child) => (
             <Node key={child.id} node={child} sessionId={sessionId} />
           ))}
         </div>
       )}
-    </Collapsible>
+    </TranscriptDisclosure>
   )
 }
 
@@ -438,31 +555,38 @@ function TranscriptView({
   const nodes = useMemo(() => buildTranscript(messages), [messages])
 
   if (nodes.length === 0) {
-    // padding="none": EmptyState's own size variant already supplies it, and
-    // Card adds the dashed border round it.
     return (
-      <Card variant="dashed" padding="none">
-        <EmptyState title={t('sessions.transcript.empty')} />
-      </Card>
+      <Empty className="border">
+        <EmptyHeader>
+          <EmptyTitle>{t('sessions.transcript.empty')}</EmptyTitle>
+        </EmptyHeader>
+      </Empty>
     )
   }
 
   return (
-    <div className={styles.transcript}>
+    <div className="grid grid-cols-1 gap-2">
       {nodes.map((node) => (
-        // `.row` is the `content-visibility` containment boundary (see the
-        // stylesheet): the textarea's autoresize forces a synchronous layout
-        // on every keystroke, and without a boundary here its scope was the
-        // whole transcript rather than whatever rows are actually on screen.
-        // Only top-level nodes get one — a nested row inside an open task
-        // group is already gated by Collapsible's own unmount-on-exit, and
-        // wrapping one there anyway does not just duplicate that work: the
-        // size containment freezes it at the 6rem placeholder, clipping
-        // whatever the child actually renders. `data-transcript-row` is the
-        // contract session-page.tsx's scroll-position compensation selects
-        // on inside the scroll container: every top-level row carries it, in
-        // document order, and only a top-level row ever does.
-        <div key={node.id} className={styles.row} data-transcript-row="">
+        // The `content-visibility` containment boundary: the textarea's
+        // auto-grow forces a synchronous layout on every keystroke, and
+        // without a boundary here its scope was the whole transcript rather
+        // than whatever rows are actually on screen. Only top-level nodes get
+        // one — a nested row inside an open task group is already gated by
+        // Collapsible's own unmount-on-exit, and wrapping one there anyway
+        // does not just duplicate that work: the size containment freezes it
+        // at the 6rem placeholder, clipping whatever the child actually
+        // renders. `data-transcript-row` is the contract session-page.tsx's
+        // scroll-position compensation selects on inside the scroll
+        // container: every top-level row carries it, in document order, and
+        // only a top-level row ever does. `auto 6rem` (not `auto none`) is
+        // the stable, non-zero placeholder a skipped row must contribute —
+        // see the file's own git history (6bb68bb) for the prepend-to-the-top
+        // bug a zero-size fallback caused.
+        <div
+          key={node.id}
+          className="[contain-intrinsic-size:auto_6rem] [content-visibility:auto]"
+          data-transcript-row=""
+        >
           <Node node={node} sessionId={sessionId} />
         </div>
       ))}
