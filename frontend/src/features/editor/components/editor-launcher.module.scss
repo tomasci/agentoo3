@@ -23,3 +23,13 @@
   width: 100%;
   max-width: var(--layout-content-width);
 }
+
+// StartingPanel's own note, once the reveal timer lets it show at all —
+// centred under the spinner above it rather than left-aligned like ordinary
+// body copy, since it reads as part of that spinner's own message. The
+// log's card underneath keeps its own left-aligned monospace lines
+// (editor-start-log.module.scss never sets `text-align`, so this never
+// reaches them).
+.note {
+  text-align: center;
+}

@@ -660,7 +660,6 @@
       "unavailable": "The docker CLI is installed, but the daemon could not be reached."
     },
     "state": {
-      "startingTitle": "Starting the editor…",
       "startingNote": "The first start on this host downloads the code-server image (about 370 MB) — this can take a few minutes. Later starts are quick.",
       "unresponsiveTitle": "The editor isn't responding",
       "unresponsiveBody": "The container is running but didn't answer its health check. It may just be slow — try again, or restart it."
@@ -675,7 +674,6 @@
       "empty": "Waiting for output…"
     },
     "launcher": {
-      "title": "Editor",
       "opening": "Opening the editor…",
       "openAnyway": "Open anyway",
       "retry": "Retry"

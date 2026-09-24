@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { type ReactNode, useEffect, useRef } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import { Alert, Button, Code, EmptyState, Inline, Spinner, Stack } from '@/shared/ui'
@@ -92,15 +92,19 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
   )
 
   let body: ReactNode
-  // The tab's own title, set to match whatever `body` below is showing —
-  // "Editor" while nothing is known yet, an error-appropriate title on every
-  // error page, and copy with its own "…" only while a start is actually in
-  // flight (state 'starting', or 'stopped' still waiting on the auto-start
-  // effect above) or the tab is about to leave for code-server ('running').
+  // The tab's own title, set to match whatever `body` below is showing.
+  // Loading, starting (including 'stopped' still waiting on the auto-start
+  // effect above) and running all read as the one `editor.launcher.opening`
+  // copy — the operator's own complaint was two near-identical "starting…"
+  // labels in quick succession, so this is deliberately a single string that
+  // never changes across that whole sequence, not three ways of saying the
+  // same thing. Only a state with something to actually tell the reader
+  // (load failure, disabled, daemon down, unresponsive, a failed start) gets
+  // its own title.
   let title: string
   if (status.isPending) {
-    title = t('editor.launcher.title')
-    body = <Spinner label={t('common.loading')} block />
+    title = t('editor.launcher.opening')
+    body = <Spinner label={t('editor.launcher.opening')} block />
   } else if (status.isError || !data) {
     // Covers every shape of GET failure worth telling apart here (a shared
     // checkout with no worktree of its own, a session that no longer
@@ -181,7 +185,7 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
       <EmptyState title={title} description={t('editor.state.unresponsiveBody')} action={actions} />
     )
   } else if (data.state === 'starting') {
-    title = t('editor.state.startingTitle')
+    title = t('editor.launcher.opening')
     body = <StartingPanel operation={data.operation} />
   } else {
     // 'stopped'. Either the auto-start effect above just fired (or is about
@@ -192,7 +196,7 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
     const opError = data.operation?.status === 'failed' ? data.operation.error : null
     const failure = startError ?? opError
 
-    title = failure ? t('editor.operationFailed') : t('editor.state.startingTitle')
+    title = failure ? t('editor.operationFailed') : t('editor.launcher.opening')
     body = failure ? (
       <Alert
         tone="danger"
@@ -224,19 +228,50 @@ export function EditorLauncher({ projectId, sessionId }: { projectId: string; se
   )
 }
 
+// A cold image pull is the only reason a start ever takes long enough to
+// need the note and log below — everything else settles within a couple of
+// polling ticks (`useEditorStatus`'s own 2s interval while 'starting'). Held
+// back this long so the warm-start path (the common one) shows nothing but
+// the spinner: revealing the extras immediately was the operator's own
+// complaint, a "Starting…" label followed a beat later by a second,
+// near-identical block of copy.
+const START_DETAILS_DELAY_MS = 3000
+
 /**
  * The "something is happening, hang on" content — shared between a session
  * actually reported as `state: 'starting'` and a `'stopped'` one this page
  * just told to start (the auto-start effect above): both are the same wait,
  * just reached through different doors.
+ *
+ * Renders nothing but the spinner at first, on purpose: a quick, warm start
+ * never shows the note or the log at all, and the spinner's own row is then
+ * byte-for-byte the same markup the loading and running states render, so
+ * `.panel`'s height — and with it, the spinner's centred position within the
+ * full-viewport `.page` — never moves between those three states. Only once
+ * the timer below fires (this attempt is still running after
+ * `START_DETAILS_DELAY_MS`) does the note and log get appended beneath it;
+ * that is a single, deliberate shift, not the back-and-forth the fix here is
+ * about, and it never reverses — `showDetails` only ever goes false→true for
+ * the life of this component.
  */
 function StartingPanel({ operation }: { operation: EditorOperation | null }) {
   const { t } = useTranslation()
+  const [showDetails, setShowDetails] = useState(false)
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowDetails(true), START_DETAILS_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [])
+
   return (
     <Stack gap={4}>
-      <Spinner label={t('editor.state.startingTitle')} block />
-      <p>{t('editor.state.startingNote')}</p>
-      <EditorStartLog operation={operation} />
+      <Spinner label={t('editor.launcher.opening')} block />
+      {showDetails && (
+        <>
+          <p className={styles.note}>{t('editor.state.startingNote')}</p>
+          <EditorStartLog operation={operation} />
+        </>
+      )}
     </Stack>
   )
 }
