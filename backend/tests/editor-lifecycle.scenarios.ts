@@ -13,7 +13,7 @@
 // and `sleep` are injected via `deps` (lifecycle.ts's own seam) so the 90s
 // health-wait loop never actually waits in this file.
 
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeEach, expect, mock, test } from 'bun:test'
@@ -231,6 +231,7 @@ const noSleep = async () => {}
 beforeEach(async () => {
   stored = {}
   testEnv.EDITOR_MAX_RUNNING = 2
+  testEnv.EDITOR_SETTINGS_FILE = undefined
   await rm(join(TEST_PROJECTS_DIR, SLUG), { recursive: true, force: true })
   await rm(join(TEST_PROJECTS_DIR, '.editor'), { recursive: true, force: true })
 })
@@ -310,6 +311,143 @@ test('the oplog says "Pulling" instead of "already present" when the image is no
   const texts = output.map((l: { text: string }) => l.text)
   expect(texts.some((t: string) => t.startsWith('Pulling codercom/code-server'))).toBe(true)
   expect(texts.some((t: string) => t.includes('already present'))).toBe(false)
+})
+
+// --- default editor settings are seeded before docker run ---------------------
+//
+// features/editor/settings.ts's own unit tests (editor-settings.test.ts)
+// cover the read/validate/write logic in detail; these only check that
+// lifecycle.ts actually calls it, in the right place (before `docker run`,
+// which the argv assertion below pins), and narrates the result the way the
+// design doc's own "start-log narration" section describes.
+
+test('the shipped default settings are seeded into the runtime dir and narrated on success', async () => {
+  await layoutGit()
+  const cli = fakeCli({ imageExists: true })
+  await seedOperation()
+
+  await runEditorStart(
+    { kind: 'start', operationId: OPERATION_ID, projectId: PROJECT_ID, sessionId: SESSION_ID },
+    { cli, probeHealthz: async () => true, sleep: noSleep },
+  )
+
+  const op = await getEditorOperation(OPERATION_ID)
+  expect(op?.status).toBe('succeeded')
+
+  const settingsPath = join(TEST_PROJECTS_DIR, '.editor', SESSION_ID, 'data', 'User', 'settings.json')
+  const written = JSON.parse(await readFile(settingsPath, 'utf8'))
+  expect(written).toEqual({
+    'workbench.startupEditor': 'none',
+    'chat.disableAIFeatures': true,
+    'workbench.secondarySideBar.defaultVisibility': 'hidden',
+  })
+
+  const output = await getEditorOperationOutput(OPERATION_ID)
+  const texts = output.map((l: { text: string }) => l.text)
+  expect(texts).toContain('Applied default editor settings from config/editor-settings.json')
+  // Seeded before the container is actually started, not after.
+  const applyIndex = texts.findIndex((t: string) => t.startsWith('Applied default editor settings'))
+  const startIndex = texts.findIndex((t: string) => t.includes(`Starting container ${NAME}`))
+  expect(applyIndex).toBeGreaterThanOrEqual(0)
+  expect(applyIndex).toBeLessThan(startIndex)
+
+  // And the argv actually passed to `docker run` points --user-data-dir at
+  // this exact runtime dir's `data` subdirectory, not the old /tmp/home path.
+  const runArgs = cli.calls.run[0] ?? []
+  expect(runArgs[runArgs.indexOf('--user-data-dir') + 1]).toBe('/run/agentoo-editor/data')
+})
+
+test('EDITOR_SETTINGS_FILE overrides the shipped file for a seeded start', async () => {
+  await layoutGit()
+  const overrideDir = await mkdtemp(join(tmpdir(), 'ed-lc-override-'))
+  const overridePath = join(overrideDir, 'custom.json')
+  await writeFile(overridePath, JSON.stringify({ 'editor.tabSize': 4 }))
+  testEnv.EDITOR_SETTINGS_FILE = overridePath
+
+  const cli = fakeCli({ imageExists: true })
+  await seedOperation()
+
+  await runEditorStart(
+    { kind: 'start', operationId: OPERATION_ID, projectId: PROJECT_ID, sessionId: SESSION_ID },
+    { cli, probeHealthz: async () => true, sleep: noSleep },
+  )
+
+  const settingsPath = join(TEST_PROJECTS_DIR, '.editor', SESSION_ID, 'data', 'User', 'settings.json')
+  const written = JSON.parse(await readFile(settingsPath, 'utf8'))
+  expect(written).toEqual({ 'editor.tabSize': 4 })
+
+  const output = await getEditorOperationOutput(OPERATION_ID)
+  const texts = output.map((l: { text: string }) => l.text)
+  expect(texts).toContain(`Applied default editor settings from ${overridePath}`)
+
+  await rm(overrideDir, { recursive: true, force: true })
+})
+
+test('an invalid EDITOR_SETTINGS_FILE still lets the start succeed, logs one stderr line, and seeds nothing', async () => {
+  await layoutGit()
+  const overrideDir = await mkdtemp(join(tmpdir(), 'ed-lc-override-'))
+  const overridePath = join(overrideDir, 'broken.json')
+  await writeFile(overridePath, '{ not valid json')
+  testEnv.EDITOR_SETTINGS_FILE = overridePath
+
+  const cli = fakeCli({ imageExists: true })
+  await seedOperation()
+
+  await runEditorStart(
+    { kind: 'start', operationId: OPERATION_ID, projectId: PROJECT_ID, sessionId: SESSION_ID },
+    { cli, probeHealthz: async () => true, sleep: noSleep },
+  )
+
+  const op = await getEditorOperation(OPERATION_ID)
+  expect(op?.status).toBe('succeeded') // a bad defaults file must not block the start
+
+  const settingsPath = join(TEST_PROJECTS_DIR, '.editor', SESSION_ID, 'data', 'User', 'settings.json')
+  await expect(readFile(settingsPath, 'utf8')).rejects.toThrow()
+
+  const output = await getEditorOperationOutput(OPERATION_ID)
+  const stderrLines = output.filter((l: { stream: string }) => l.stream === 'stderr')
+  expect(stderrLines).toHaveLength(1)
+  expect(stderrLines[0]?.text).toContain(overridePath)
+  expect(stderrLines[0]?.text).toContain('invalid JSON')
+
+  await rm(overrideDir, { recursive: true, force: true })
+})
+
+test("a previous session's stale settings.json is cleared when a restart's own override is invalid", async () => {
+  // The runtime dir survives a stop — only the reaper/session-delete path
+  // removes it (see settings.ts's own header) — so this is what a genuine
+  // "user changed a setting, editor stopped, operator's override broke,
+  // editor restarted" sequence actually leaves on disk beforehand.
+  await layoutGit()
+  const runtimeDir = join(TEST_PROJECTS_DIR, '.editor', SESSION_ID)
+  const userDir = join(runtimeDir, 'data', 'User')
+  await mkdir(userDir, { recursive: true })
+  const settingsPath = join(userDir, 'settings.json')
+  await writeFile(settingsPath, JSON.stringify({ 'workbench.startupEditor': 'welcomePage' }))
+
+  const overrideDir = await mkdtemp(join(tmpdir(), 'ed-lc-override-'))
+  const overridePath = join(overrideDir, 'broken.json')
+  await writeFile(overridePath, '{ not valid json')
+  testEnv.EDITOR_SETTINGS_FILE = overridePath
+
+  const cli = fakeCli({ imageExists: true })
+  await seedOperation()
+
+  await runEditorStart(
+    { kind: 'start', operationId: OPERATION_ID, projectId: PROJECT_ID, sessionId: SESSION_ID },
+    { cli, probeHealthz: async () => true, sleep: noSleep },
+  )
+
+  const op = await getEditorOperation(OPERATION_ID)
+  expect(op?.status).toBe('succeeded')
+  await expect(readFile(settingsPath, 'utf8')).rejects.toThrow() // the stale file is gone, not resurrected
+
+  const output = await getEditorOperationOutput(OPERATION_ID)
+  const stderrLines = output.filter((l: { stream: string }) => l.stream === 'stderr')
+  expect(stderrLines).toHaveLength(1)
+  expect(stderrLines[0]?.text).toContain("cleared the previous session's settings.json")
+
+  await rm(overrideDir, { recursive: true, force: true })
 })
 
 // --- exited-then-recreated ----------------------------------------------------

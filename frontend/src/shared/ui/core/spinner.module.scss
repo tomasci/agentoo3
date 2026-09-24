@@ -14,11 +14,20 @@
 
 // No token exists for an icon-scale diameter (the scale stops at --space-*),
 // so size is derived from the control-height scale it sits beside instead of
-// a bare literal. `size` always has a value (default 'md'), so `.circle`
-// itself carries no width/height of its own.
-.sizeSm { width: calc(var(--control-height-sm) * 0.5); height: calc(var(--control-height-sm) * 0.5); }
-.sizeMd { width: calc(var(--control-height-md) * 0.5); height: calc(var(--control-height-md) * 0.5); }
-.sizeLg { width: calc(var(--control-height-lg) * 0.5); height: calc(var(--control-height-lg) * 0.5); }
+// a bare literal. Zag's progress connect puts an inline `width: var(--size);
+// height: var(--size)` on this same element (see `.circle`, below) and reads
+// `--thickness` alongside it to size the track/range circles' radius and
+// stroke, so these classes set those custom properties rather than plain
+// width/height — a bare width/height here is always beaten by the inline
+// style and never actually applies.
+.sizeSm { --size: calc(var(--control-height-sm) * 0.5); }
+.sizeMd { --size: calc(var(--control-height-md) * 0.5); }
+.sizeLg { --size: calc(var(--control-height-lg) * 0.5); }
+
+// No stroke-width token exists either, so this is a fraction of --size
+// rather than a bare literal, keeping the ring's weight proportional at
+// every size.
+.circle { --thickness: calc(var(--size) / 8); }
 
 // Rotating the whole svg, rather than the range arc zag already gives an
 // inline `transform: rotate(-90deg)`, avoids fighting that inline style with

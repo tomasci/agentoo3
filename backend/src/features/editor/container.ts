@@ -52,7 +52,10 @@ export interface EditorRunOptions {
   /** This session's own editor runtime dir (lib/paths.ts's
    * `editorRuntimeDir`) — bind-mounted whole so the container can create the
    * socket file itself; mounting the socket file directly would require it
-   * to exist first, which is backwards (code-server creates it). */
+   * to exist first, which is backwards (code-server creates it). Also where
+   * `--user-data-dir` below points (its own `data/` subdirectory) — the
+   * backend seeds `data/User/settings.json` on the host, in this exact
+   * directory, before this argv is ever run (features/editor/settings.ts). */
   runtimeDir: string
   uid: number
   gid: number
@@ -121,7 +124,19 @@ export function editorRunArgs(ref: EditorScopeRef, opts: EditorRunOptions): stri
     '--idle-timeout-seconds',
     String(env.EDITOR_IDLE_TIMEOUT_SECONDS),
     '--user-data-dir',
-    '/tmp/home/.local/share/code-server',
+    // Inside the SAME bind-mounted runtime dir the socket lives in (never a
+    // second `--mount`, and never `/tmp/home`'s writable layer — that is
+    // gone the moment the container stops): this is what lets the backend
+    // seed installation-wide default settings on the host before code-server
+    // ever starts (features/editor/settings.ts, called from lifecycle.ts),
+    // and still let VS Code itself write into the same directory afterwards.
+    '/run/agentoo-editor/data',
+    // Extensions stay in `/tmp/home`'s writable layer, unlike user-data-dir
+    // above: this feature only ships default SETTINGS, not extensions (v1
+    // has no extension marketplace at all — see backend/README.md's "No
+    // persistence" paragraph), so there is nothing here that needs to
+    // survive a restart, and no reason to grow the bind-mounted runtime dir
+    // with content nobody reads back.
     '--extensions-dir',
     '/tmp/home/.local/share/code-server/extensions',
     opts.worktreePath,

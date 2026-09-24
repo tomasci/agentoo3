@@ -45,6 +45,7 @@ import {
   markEditorOperationRunning,
   releaseEditorLock,
 } from './operations'
+import { seedEditorSettings } from './settings'
 
 export type EditorStartJob = Extract<EditorOpJob, { kind: 'start' }>
 
@@ -190,6 +191,27 @@ export async function runEditorStart(
     // Step 7.
     const runtimeDir = await prepareEditorRuntimeDir(sessionId, owner)
     const installId = await editorInstallId()
+
+    // Step 7 (folded in here): seed code-server's user settings.json with
+    // this install's own defaults BEFORE `docker run`, so code-server reads
+    // them on its very first paint — writing this after the container
+    // started would race the workbench's own load against a settings.json
+    // that may not exist yet. Never fails the start: a bad defaults file (an
+    // operator's override, or — a packaging bug — the shipped one) means an
+    // editor with no seeded settings, not a start that never happens (see
+    // the design doc's own "every editor still starts" and settings.ts).
+    const settingsResult = await seedEditorSettings(runtimeDir, owner, env.EDITOR_SETTINGS_FILE)
+    if (settingsResult.applied) {
+      await appendEditorOperationOutput(operationId, {
+        stream: 'stdout',
+        text: `Applied default editor settings from ${settingsResult.label}`,
+      })
+    } else {
+      await appendEditorOperationOutput(operationId, {
+        stream: 'stderr',
+        text: `Default editor settings (${settingsResult.label}) not applied: ${settingsResult.reason}`,
+      })
+    }
 
     // Step 8.
     await appendEditorOperationOutput(operationId, {

@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path'
 import { z } from 'zod'
 
 // Parsed once at boot: a missing DATABASE_URL should stop the process here with
@@ -178,6 +179,22 @@ const schema = z.object({
   // both because the lock exists to bound exactly this: a start job that never
   // finishes must not hold the per-session lock forever.
   EDITOR_START_TIMEOUT_MS: z.coerce.number().int().positive().default(600_000),
+  // Optional override for the installation-wide default VS Code settings
+  // every editor seeds on start (see config/editor-settings.json, the shipped
+  // file this replaces entirely when set, and backend/README.md's "Editor"
+  // section). Exists so an operator can customise the defaults without
+  // hand-editing a tracked file, which `git pull` would then conflict with.
+  // Absolute only, and left unresolved against this process's own cwd:
+  // systemd gives the worker a fixed WorkingDirectory, but a developer's
+  // shell does not, so a relative value would name a different file
+  // depending on who — or what — started this process. Blank (the default,
+  // and what a blank line in .env parses to) means "no override", the same
+  // convention SSH_KEYS_DIR already uses above.
+  EDITOR_SETTINGS_FILE: z
+    .string()
+    .default('')
+    .refine((v) => v === '' || isAbsolute(v), 'EDITOR_SETTINGS_FILE must be an absolute path')
+    .transform((v) => (v === '' ? undefined : v)),
 })
 
 const parsed = schema.safeParse(process.env)
