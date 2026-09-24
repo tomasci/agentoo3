@@ -1,0 +1,8 @@
+#!/usr/bin/bash
+. "$(dirname "$0")/_lib.sh"
+_fake_log ufw "$@"
+case "${1:-}" in
+  status) printf 'Status: active\n\nTo Action From\n-- ------ ----\n22/tcp ALLOW Anywhere\n' ;;
+  --version) echo "ufw 0.36.2" ;;
+esac
+exit 0

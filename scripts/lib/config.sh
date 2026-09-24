@@ -268,6 +268,11 @@ REDIS_MAXMEMORY_POLICY="${REDIS_MAXMEMORY_POLICY:-noeviction}"
 
 # ----------------------------------------------------------------- nginx ----
 
+# Test seam, same pattern as 80-configure-ufw.sh's SSHD_CONFIG: lets a test
+# point every nginx path (sites-available/enabled, conf.d/) at a fixture tree
+# instead of the real /etc/nginx.
+NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx}"
+
 NGINX_DOMAIN_EXPLICIT="${NGINX_DOMAIN+1}"   # set by the operator this run?
 # Empty -> auto-detected from Tailscale (MagicDNS name + tailnet IPs) at render
 # time. Set this only to override with a domain of your own.
@@ -289,12 +294,64 @@ TAILSCALE_ACCEPT_DNS="${TAILSCALE_ACCEPT_DNS:-false}"
 TAILSCALE_ACCEPT_ROUTES="${TAILSCALE_ACCEPT_ROUTES:-false}"
 TAILSCALE_UP_EXTRA_ARGS="${TAILSCALE_UP_EXTRA_ARGS:-}"
 # `tailscale serve` publishes nginx over HTTPS on the node's MagicDNS name,
-# with a certificate Tailscale provisions and renews. Replaces certbot entirely.
+# with a certificate Tailscale provisions and renews. Independent of, and
+# turned off automatically by, the optional custom-domain HTTPS below (see the
+# "https" section) once a certificate for that domain exists — tailscaled and
+# nginx cannot both hold :443, and the custom domain wins.
 TAILSCALE_SERVE="${TAILSCALE_SERVE:-1}"
 TAILSCALE_SERVE_PORT="${TAILSCALE_SERVE_PORT:-80}"   # local port to publish (nginx)
 # Tailscale publishes per-codename apt repos; a brand-new Ubuntu may not have one
 # yet, so fall back to the newest LTS. The packages are static binaries.
 TAILSCALE_CODENAME_FALLBACK="${TAILSCALE_CODENAME_FALLBACK:-noble}"
+
+# ------------------------------------------------------------------ https ---
+#
+# Optional: terminate TLS on a domain of your own via Let's Encrypt, using
+# certbot's Cloudflare DNS-01 plugin so nothing has to be exposed to the
+# public internet to prove ownership. scripts/85-configure-https.sh owns the
+# prompts, the Cloudflare calls, certbot itself, and is the ONLY writer of the
+# two sticky settings below. The host stays tailnet-only either way — this
+# just adds a second, public way to reach the same nginx over 443.
+
+HTTPS_DOMAIN_EXPLICIT="${HTTPS_DOMAIN+1}"   # set by the operator this run?
+# A lowercase FQDN to serve over HTTPS · "none" (disabled; asked once, do not
+# ask again) · empty (never answered — 85-configure-https.sh will ask, if it
+# can prompt).
+HTTPS_DOMAIN="${HTTPS_DOMAIN:-}"
+# Normalise rather than reject: a pasted "AI.Example.com." is obviously a
+# domain, and DNS treats case and a trailing dot as irrelevant, so making the
+# operator retype it exactly would be friction for nothing.
+HTTPS_DOMAIN="${HTTPS_DOMAIN,,}"
+HTTPS_DOMAIN="${HTTPS_DOMAIN%.}"
+
+HTTPS_EMAIL_EXPLICIT="${HTTPS_EMAIL+1}"     # set by the operator this run?
+HTTPS_EMAIL="${HTTPS_EMAIL:-}"              # Let's Encrypt account email
+
+# How long certbot's Cloudflare plugin waits for the DNS-01 challenge record to
+# propagate before asking Let's Encrypt to validate it.
+HTTPS_DNS_PROPAGATION_SECONDS="$(num_or HTTPS_DNS_PROPAGATION_SECONDS "${HTTPS_DNS_PROPAGATION_SECONDS:-}" 30)"
+
+# Test seam, like NGINX_CONF_DIR above. certbot itself is never told about
+# this — it always uses its own compiled-in default (/etc/letsencrypt) — so
+# this only affects our own reads of certificate files (https_cert_present in
+# lib/common.sh) and the paths we build from it just below.
+LETSENCRYPT_DIR="${LETSENCRYPT_DIR:-/etc/letsencrypt}"
+
+# CLOUDFLARE_API_TOKEN is deliberately NOT declared here, and never made
+# sticky like HTTPS_DOMAIN/HTTPS_EMAIL above: it is a secret, and
+# $SETTINGS_FILE is printed in full by 90-summary.sh. It is read once, either
+# from this environment variable or an interactive prompt, and from then on
+# lives only in $HTTPS_CF_CREDENTIALS (root, 0600) — see
+# scripts/85-configure-https.sh — because certbot's renewal timer needs it
+# again later.
+HTTPS_CF_CREDENTIALS="$LETSENCRYPT_DIR/${APP_NAME}-cloudflare.ini"
+HTTPS_DEPLOY_HOOK="$LETSENCRYPT_DIR/renewal-hooks/deploy/${APP_NAME}-reload-nginx"
+
+# python3-certbot-nginx is deliberately never in this list: it would make
+# certbot edit nginx's config directly, and scripts/66-install-nginx.sh is
+# already the one and only writer of that file — two authors of the same
+# config would fight each other on every renewal.
+PKGS_HTTPS=(certbot python3-certbot-dns-cloudflare)
 
 # ------------------------------------------------------------------ docker ---
 #

@@ -152,6 +152,62 @@ confirm() {
   [[ "$reply" =~ ^[Yy]$ ]]
 }
 
+# ------------------------------------------------------- interactive I/O -----
+#
+# Separate from confirm() above (which is a plain y/N gate): these read actual
+# values, so several can be asked in a row, and a test can feed multiple
+# answers from one fixture file instead of a real terminal.
+
+PROMPT_TTY="${PROMPT_TTY:-/dev/tty}"      # test seam
+
+# True when a prompt can be shown and answered right now: not --yes, not a dry
+# run, and PROMPT_TTY actually opens. Opens it ONCE into _PROMPT_FD — reused by
+# every ask()/ask_secret() call this run, rather than reopened (and, for a
+# plain file, rewound) per question.
+can_prompt() {
+  [[ "${ASSUME_YES:-0}" == "1" ]] && return 1
+  [[ "${DRY_RUN:-0}" == "1" ]] && return 1
+  if [[ -n "${_PROMPT_FD:-}" ]]; then
+    [[ "$_PROMPT_FD" != "-1" ]]
+    return
+  fi
+  # Braced, not a bare `exec ... 2>/dev/null`: a bare exec with no command
+  # applies every trailing redirection to the shell itself, permanently — it
+  # would silence this script's own stderr (every log_* line) for the rest of
+  # the run the moment PROMPT_TTY fails to open. Wrapping it in `{ ; }` scopes
+  # the redirect to just this group, so fd 2 is restored right after.
+  if { exec {_PROMPT_FD}<"$PROMPT_TTY"; } 2>/dev/null; then
+    return 0
+  fi
+  _PROMPT_FD=-1
+  return 1
+}
+
+# ask NAME "Question" [default] — printf -v's NAME with the answer. The
+# question goes to stderr, like every other log line, so stdout stays free for
+# a real return value; the answer itself is read from _PROMPT_FD, which
+# can_prompt must have opened first.
+ask() {
+  local name="$1" question="$2" default="${3:-}" reply prompt="$2"
+  [[ -n "$default" ]] && prompt="$prompt [$default]"
+  printf '%s?%s %s: ' "$C_YLW" "$C_RESET" "$prompt" >&2
+  read -r -u "$_PROMPT_FD" reply || reply=""
+  [[ -z "$reply" ]] && reply="$default"
+  printf -v "$name" '%s' "$reply"
+}
+
+# Like ask(), but the answer is never echoed back and never logged — for
+# secrets. `read -s` suppresses the echo only when _PROMPT_FD is a real
+# terminal; reading from a plain file (a test fixture) has nothing to echo
+# anyway, so this is safe either way.
+ask_secret() {
+  local name="$1" question="$2" reply
+  printf '%s?%s %s: ' "$C_YLW" "$C_RESET" "$question" >&2
+  read -rs -u "$_PROMPT_FD" reply || reply=""
+  printf '\n' >&2
+  printf -v "$name" '%s' "$reply"
+}
+
 # ------------------------------------------------------------------- apt -----
 
 export DEBIAN_FRONTEND=noninteractive
@@ -384,6 +440,69 @@ managed_block() {
 
   run ${SU[@]+"${SU[@]}"} install -m "$mode" "$tmp" "$file"
   rm -f "$tmp"
+}
+
+# ------------------------------------------------------------------ https ---
+#
+# Backs the optional custom-domain HTTPS in scripts/85-configure-https.sh, and
+# the TLS-or-not decision scripts/66-install-nginx.sh makes on every run.
+# LETSENCRYPT_DIR comes from lib/config.sh, sourced after this file everywhere
+# it matters — same deferred-lookup pattern managed_block() above already
+# relies on for $APP_NAME.
+
+# A domain this installer will attempt to get a Let's Encrypt certificate for:
+# a lowercase FQDN, at most 253 characters, at least two labels, each label
+# [a-z0-9-] and never starting or ending with '-'. Rejects '*.' wildcards,
+# '*.ts.net' (Tailscale's own name space has its own certificate story), bare
+# IPv4 literals, and anything non-ASCII — an internationalised name has to
+# arrive already punycoded (xn--...), not as raw UTF-8.
+https_domain_valid() {
+  local d="$1" label
+  (( ${#d} >= 1 && ${#d} <= 253 )) || return 1
+  [[ "$d" == "${d,,}" ]] || return 1
+  # No [[:ascii:]] bracket class in glibc's regex, so check byte range
+  # directly in the C locale instead: anything outside printable ASCII
+  # (space through tilde) is rejected.
+  LC_ALL=C grep -q '[^ -~]' <<<"$d" && return 1
+  case "$d" in
+    *'*'*)    return 1 ;;
+    *.ts.net) return 1 ;;
+  esac
+  [[ "$d" =~ ^[0-9]+(\.[0-9]+){3}$ ]] && return 1   # bare IPv4 literal
+  local IFS=.
+  local -a labels=($d)
+  (( ${#labels[@]} >= 2 )) || return 1
+  for label in "${labels[@]}"; do
+    [[ "$label" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || return 1
+  done
+  return 0
+}
+
+# True when a live certificate (not just a renewal placeholder) exists for
+# DOMAIN. Deliberately never through run() — this has to answer truthfully
+# even under DRY_RUN=1, which is exactly when callers most need to know
+# whether they may claim "would render TLS". `sudo -n` rather than as_root
+# when not root: certbot's certs are root-only, but this must never itself
+# prompt for a password just to decide what a dry run would print.
+https_cert_present() {
+  local d="$1"
+  local dir="${LETSENCRYPT_DIR}/live/$d"
+  if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+    [[ -s "$dir/fullchain.pem" && -s "$dir/privkey.pem" ]]
+    return
+  fi
+  have sudo || return 1
+  sudo -n test -s "$dir/fullchain.pem" 2>/dev/null && sudo -n test -s "$dir/privkey.pem" 2>/dev/null
+}
+
+# 0 on any HTTP reply at all, including an error status — this only proves
+# nginx is listening and terminating TLS for DOMAIN, not that the app behind
+# it is healthy. --resolve pins the connection to this host regardless of what
+# DNS says right now, so it works before the Cloudflare A record has
+# propagated, or when it deliberately points elsewhere.
+https_probe() {
+  local d="$1"
+  curl -sS -o /dev/null --max-time 5 --resolve "${d}:443:127.0.0.1" "https://${d}/"
 }
 
 # ------------------------------------------------------------ tailscale -----

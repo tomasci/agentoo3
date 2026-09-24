@@ -1,0 +1,5 @@
+#!/usr/bin/bash
+# Stand-in for every tool 90-summary.sh only asks for a version.
+. "$(dirname "$0")/_lib.sh"
+_fake_log "$(basename "$0")" "$@"
+echo "$(basename "$0") 1.2.3"

@@ -1,0 +1,4 @@
+#!/usr/bin/bash
+. "$(dirname "$0")/_lib.sh"
+_fake_log fuser "$@"
+exit 1

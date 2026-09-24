@@ -1,0 +1,7 @@
+#!/usr/bin/bash
+. "$(dirname "$0")/_lib.sh"
+_fake_log getent "$@"
+case "${1:-}" in
+  passwd) echo "${2:-agentoo}:x:1000:1000::/nonexistent-fake-home:/bin/bash" ;;
+  *) exit 2 ;;
+esac

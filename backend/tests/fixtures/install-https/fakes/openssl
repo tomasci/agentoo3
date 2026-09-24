@@ -1,0 +1,4 @@
+#!/usr/bin/bash
+. "$(dirname "$0")/_lib.sh"
+_fake_log openssl "$@"
+echo "notAfter=Dec 23 00:00:00 2026 GMT"

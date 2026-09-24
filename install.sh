@@ -42,6 +42,7 @@ STEPS=(
   "backend:68-setup-backend.sh:Backend API + worker (Hono, Agent SDK)"
   "frontend:70-setup-frontend.sh:Generate the API client, build, run as a service"
   "ufw:80-configure-ufw.sh:Firewall rules (runs last)"
+  "https:85-configure-https.sh:Optional HTTPS on your own domain (Let's Encrypt via Cloudflare DNS)"
   "summary:90-summary.sh:Verify and report"
 )
 
@@ -84,6 +85,9 @@ ${C_BOLD}Environment overrides${C_RESET} (see scripts/lib/config.sh):
   DOCKER_ENABLE=0         Skip installing Docker (never uninstalls it)
   NGINX_DOMAIN=x.com      Override the auto-detected MagicDNS server_name
   UFW_TAILSCALE_ONLY=1    Move SSH behind the VPN (Tailscale must be up)
+  HTTPS_DOMAIN=x.com      Serve HTTPS on your own domain (via Let's Encrypt); "none" disables it
+  HTTPS_EMAIL=you@x.com   Let's Encrypt account email
+  CLOUDFLARE_API_TOKEN=…  Zone -> DNS -> Edit token for that domain's zone (stored root-only 0600, not in settings.env)
 TXT
 }
 

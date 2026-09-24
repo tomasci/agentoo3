@@ -1,0 +1,94 @@
+#!/usr/bin/bash
+# Fake curl. Routes Cloudflare API calls to canned JSON, answers the
+# https_probe (--resolve) per FAKE_PROBE, and answers 90-summary's local
+# health checks. The -H @file header content is copied to curl.headers (the
+# one log allowed to hold the token) and checked against FAKE_CF_VALID_TOKEN.
+# No network is ever touched: anything unrouted fails like an unresolvable host.
+. "$(dirname "$0")/_lib.sh"
+_fake_log curl "$@"
+if [[ "${1:-}" == "--version" ]]; then echo "curl 8.11.0 (fake)"; exit 0; fi
+method=GET url="" data="" resolve="" hdrs="" tolerated=0
+while (( $# )); do
+  case "$1" in
+    -X|--request) method="$2"; shift 2 ;;
+    -H|--header)
+      if [[ "$2" == @* ]]; then
+        # Like real curl (8.x): an @file it cannot open is a hard error, exit 26,
+        # before any request is sent. FAKE_CURL_TOLERATE_UNREADABLE_HEADER=1
+        # instead records the event and carries on as though the header file
+        # had held the right token (unless FAKE_CF_REJECT_ALL=1) — used only to
+        # reach the logic downstream of that defect; see the test file.
+        if ! h="$(cat -- "${2#@}" 2>/dev/null)"; then
+          printf '%s\n' "$2" >>"$FAKE_DIR/curl.unreadable-header"
+          if [[ "${FAKE_CURL_TOLERATE_UNREADABLE_HEADER:-0}" != "1" ]]; then
+            echo "curl: Failed to open ${2#@}" >&2
+            echo "curl: option -H: error encountered when reading a file" >&2
+            exit 26
+          fi
+          tolerated=1
+        fi
+        hdrs+="$h"$'\n'
+      else
+        hdrs+="$2"$'\n'
+      fi
+      shift 2 ;;
+    -d|--data|--data-raw|--data-binary) data="$2"; shift 2 ;;
+    --resolve) resolve="$2"; shift 2 ;;
+    -o|--output|-m|--max-time|--connect-timeout|-w) shift 2 ;;
+    -*) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+[[ -n "$hdrs" ]] && printf '%s' "$hdrs" >>"$FAKE_DIR/curl.headers"
+
+if [[ -n "$resolve" ]]; then
+  printf 'PROBE %s %s\n' "$resolve" "$url" >>"$FAKE_DIR/curl.requests"
+  [[ "${FAKE_PROBE:-ok}" == "ok" ]] && exit 0
+  echo "curl: (7) Failed to connect (fake)" >&2
+  exit 7
+fi
+
+cf=https://api.cloudflare.com/client/v4
+if [[ "$url" == "$cf"* ]]; then
+  path="${url#"$cf"}"
+  printf '%s %s\n' "$method" "$path" >>"$FAKE_DIR/curl.requests"
+  # One line per body: jq -n pretty-prints, so compact it first.
+  [[ -n "$data" ]] && printf '%s %s %s\n' "$method" "$path" \
+    "$(jq -c . <<<"$data" 2>/dev/null || printf '%s' "$data" | tr '\n' ' ')" >>"$FAKE_DIR/curl.bodies"
+  if (( tolerated )); then
+    [[ "${FAKE_CF_REJECT_ALL:-0}" == "1" ]] && authorized=0 || authorized=1
+  elif [[ -n "${FAKE_CF_VALID_TOKEN:-}" && "$hdrs" == *"Authorization: Bearer ${FAKE_CF_VALID_TOKEN}"$'\n'* ]]; then
+    authorized=1
+  else
+    authorized=0
+  fi
+  if (( ! authorized )); then
+    echo '{"success":false,"errors":[{"code":10000,"message":"Authentication error"}],"messages":[],"result":null}'
+    exit 0
+  fi
+  zone="${FAKE_CF_ZONE:-example.com}"
+  case "$method $path" in
+    "GET /zones?name=$zone")
+      printf '{"success":true,"errors":[],"result":[{"id":"zone123","name":"%s"}]}\n' "$zone" ;;
+    "GET /zones?name="*)
+      echo '{"success":true,"errors":[],"result":[]}' ;;
+    "GET /zones/zone123/dns_records?name="*)
+      if [[ -n "${FAKE_CF_RECORDS:-}" ]]; then cat -- "$FAKE_CF_RECORDS"
+      else echo '{"success":true,"errors":[],"result":[]}'; fi ;;
+    "POST /zones/zone123/dns_records")
+      echo '{"success":true,"errors":[],"result":{"id":"newrec"}}' ;;
+    "PATCH /zones/zone123/dns_records/"*)
+      echo '{"success":true,"errors":[],"result":{"id":"patched"}}' ;;
+    *)
+      echo '{"success":false,"errors":[{"code":7003,"message":"No route (fake)"}],"result":null}' ;;
+  esac
+  exit 0
+fi
+
+case "$url" in
+  "http://127.0.0.1:8000/api/health") echo '{"status":"ok","claudeCredential":true}'; exit 0 ;;
+  "http://127.0.0.1:3000/") exit 0 ;;
+esac
+printf 'UNEXPECTED %s %s\n' "$method" "$url" >>"$FAKE_DIR/curl.requests"
+echo "curl: (6) Could not resolve host (fake, no network)" >&2
+exit 6

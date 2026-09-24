@@ -1,0 +1,39 @@
+#!/usr/bin/bash
+# Fake tailscale. `serve` state lives in $FAKE_STATE/serve.json and is changed
+# by `serve reset`, `serve --https=443 off` and `serve --bg PORT`.
+. "$(dirname "$0")/_lib.sh"
+_fake_log tailscale "$@"
+state="$FAKE_STATE/serve.json"
+ours='{"TCP":{"443":{"HTTPS":true}},"Web":{"host.tailnet.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:80"}}}}}'
+case "${1:-}" in
+  --version) echo "1.80.0"; exit 0 ;;
+  status)
+    [[ "${FAKE_TS_DOWN:-0}" == "1" ]] && { echo "Tailscale is stopped." >&2; exit 1; }
+    if [[ "${2:-}" == "--json" ]]; then
+      echo '{"BackendState":"Running","Self":{"DNSName":"host.tailnet.ts.net.","TailscaleIPs":["100.101.102.103","fd7a:115c:a1e0::1"]}}'
+    else
+      echo "100.101.102.103  host  user@  linux  -"
+    fi
+    exit 0 ;;
+  ip)
+    [[ "${FAKE_TS_DOWN:-0}" == "1" ]] && exit 1
+    echo "100.101.102.103"
+    [[ "${2:-}" == "-4" ]] || echo "fd7a:115c:a1e0::1"
+    exit 0 ;;
+  serve)
+    shift
+    case "$*" in
+      "status --json") if [[ -s "$state" ]]; then cat "$state"; else echo '{}'; fi ;;
+      "reset") echo '{}' >"$state" ;;
+      "--https=443 off")
+        if [[ "${FAKE_TS_OFF_STUCK:-0}" != "1" && -s "$state" ]]; then
+          jq -c 'del(.TCP."443") | .Web = ((.Web // {}) | with_entries(select(.key | endswith(":443") | not)))' \
+            "$state" >"$state.tmp" && mv "$state.tmp" "$state"
+        fi ;;
+      "--bg "*) echo "$ours" >"$state" ;;
+      *) echo "fake tailscale: unhandled serve $*" >&2; exit 1 ;;
+    esac
+    exit 0 ;;
+esac
+echo "fake tailscale: unhandled $*" >&2
+exit 1
