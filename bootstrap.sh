@@ -3,17 +3,33 @@
 #   bootstrap.sh — one-command install on a bare Ubuntu server.
 #
 # Host this file anywhere it can be fetched over HTTPS (raw.githubusercontent.com
-# works). It installs git, clones the repository, and hands off to install.sh.
+# works). It installs git, clones (or updates) the repository, and hands off to
+# install.sh — the same command works for a fresh install and for updating an
+# existing one.
+#
+# RECOMMENDED — runs with a real terminal on stdin, so install.sh's own
+# questions (e.g. HTTPS on a domain of your own) can actually be answered:
+#
+#   sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/tomasci/agentoo3/main/bootstrap.sh)"
+#
+# Arguments go after the downloaded script text; the first one becomes that
+# `bash -c`'s own $0, so name it anything (`bootstrap` below is as good as any):
+#
+#   sudo bash -c "$(curl -fsSL .../bootstrap.sh)" bootstrap --branch dev --skip upgrade
+#
+# Still supported, and shorter to type, but CANNOT ask questions: sudo runs a
+# piped command inside its own pty and never forwards your keystrokes into it,
+# so any prompt bootstrap.sh or install.sh would show is skipped instead —
+# both print what to run afterwards to finish it:
 #
 #   curl -fsSL https://raw.githubusercontent.com/tomasci/agentoo3/main/bootstrap.sh | sudo bash
 #
-# Passing arguments through requires `bash -s --`, because the script arrives on
-# stdin rather than as a file:
+# Passing arguments through that form requires `bash -s --`, because the script
+# arrives on stdin rather than as a file:
 #
 #   curl -fsSL .../bootstrap.sh | sudo bash -s -- --branch dev --skip upgrade
 #
-# SAFER, and what you should prefer on a machine you care about — fetch, read,
-# then run:
+# SAFEST, and worth it on a machine you care about — fetch, read, then run:
 #
 #   curl -fsSLO https://raw.githubusercontent.com/tomasci/agentoo3/main/bootstrap.sh
 #   less bootstrap.sh
@@ -29,7 +45,9 @@ DEFAULT_REPO_URL="https://github.com/tomasci/agentoo3.git"
 # `sh`, which cannot parse the rest of it.
 if [ -z "${BASH_VERSION:-}" ]; then
   echo "bootstrap.sh needs bash, not sh." >&2
-  echo "Use:  curl -fsSL <url> | sudo bash" >&2
+  echo "Use:" >&2
+  echo "  sudo bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/tomasci/agentoo3/main/bootstrap.sh)\"" >&2
+  echo "or (works, but cannot ask questions):  curl -fsSL https://raw.githubusercontent.com/tomasci/agentoo3/main/bootstrap.sh | sudo bash" >&2
   exit 1
 fi
 
@@ -57,6 +75,42 @@ _bootstrap_main() {
   ok()   { printf '%sOK   %s %s\n' "$c_grn" "$c_off" "$*" >&2; }
   warn() { printf '%sWARN %s %s\n' "$c_ylw" "$c_off" "$*" >&2; }
   die()  { printf '%sERROR%s %s\n' "$c_red" "$c_off" "$*" >&2; exit 1; }
+
+  # A `curl | sudo bash` (or any invocation with no real terminal on stdin,
+  # run under sudo) leaves nothing for install.sh's own prompts to read —
+  # sudo runs the piped command inside its own pty and never forwards
+  # keystrokes into it. Said once, up front, rather than leaving the operator
+  # to notice only when the one question at the end silently skips itself.
+  if [[ ! -t 0 && -n "${SUDO_USER:-}" ]]; then
+    # Only the default repo/branch has a known raw URL to re-fetch from; a
+    # custom --repo or --branch (not parsed yet at this point) means we
+    # cannot know what to print, so fall back to a placeholder.
+    _custom_source=0
+    for _a in "$@"; do
+      case "$_a" in
+        --repo|--branch) _custom_source=1 ;;
+      esac
+    done
+    if [[ "$REPO_URL" == "$DEFAULT_REPO_URL" && "$BRANCH" == "main" && "$_custom_source" -eq 0 ]]; then
+      _rerun_cmd='sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/tomasci/agentoo3/main/bootstrap.sh)"'
+    else
+      _rerun_cmd='sudo bash -c "$(curl -fsSL <url of bootstrap.sh>)"'
+    fi
+    # --dir isn't parsed yet either (that happens below), but the "finish
+    # later" line names $TARGET_DIR — so pre-scan for it here too, the same
+    # way, rather than print /opt/agentoo for an operator who passed --dir.
+    # The real parser below only ever takes --dir as its own next argument
+    # (never --dir=PATH), so that is the only form to look for here too.
+    _notice_target_dir="$TARGET_DIR"
+    _prev_arg=""
+    for _a in "$@"; do
+      [[ "$_prev_arg" == "--dir" ]] && _notice_target_dir="$_a"
+      _prev_arg="$_a"
+    done
+    info "No keyboard input available; questions at the end (e.g. HTTPS on your own domain) will be skipped."
+    info "To answer them, use:  $_rerun_cmd"
+    info "Or finish later:      sudo $_notice_target_dir/install.sh --only https,summary"
+  fi
 
   usage() {
     cat >&2 <<TXT

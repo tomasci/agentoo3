@@ -6,19 +6,31 @@ Targets **Ubuntu 22.04+** (developed on 26.04), `x86_64` / `aarch64`, headless.
 No desktop, and no interactive prompts required beyond one optional question at
 the very end — whether to also serve HTTPS on a domain of your own (`--yes`
 skips it, and it can always be set up later; see "Your own domain (optional)"
-below).
+below). Answering it needs a real keyboard reaching the installer — use the
+recommended `sudo bash -c "$(curl ...)"` form below, not the piped one.
 
 ## Install
 
 ### One command, from a bare server
 
-Host `bootstrap.sh` in the repo and run:
+Fresh install or update an existing one — the same command does both:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/tomasci/agentoo3/main/bootstrap.sh | sudo bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/tomasci/agentoo3/main/bootstrap.sh)"
 ```
 
-It installs git, clones the repo to `/opt/agentoo`, and runs `install.sh`.
+It installs git, clones (or updates) the repo at `/opt/agentoo`, and runs
+`install.sh`. **Prefer this form**: `sudo` runs a *piped* command inside its
+own pty and never forwards your keyboard to it, so a plain `curl | sudo bash`
+(below) cannot ask the installer's one optional question at the end. This form
+gives it a real terminal, so it can.
+
+To pass arguments, add them after the downloaded script text — the first one
+becomes that `bash -c`'s own `$0`, so name it anything (`bootstrap` below):
+
+```
+sudo bash -c "$(curl -fsSL .../bootstrap.sh)" bootstrap --branch dev --skip upgrade
+```
 
 **Your shell is not left in that directory.** Everything afterwards takes an
 absolute path — the installer prints these for you, so you can copy them
@@ -38,7 +50,17 @@ sudo agentoo --only ufw
 The repo URL is baked into `DEFAULT_REPO_URL` at the top of `bootstrap.sh`;
 override it with `--repo` or `REPO_URL` to install from a fork.
 
-To pass arguments through, the script has to arrive on stdin via `bash -s --`:
+Still supported, and shorter to type, but **cannot ask questions** — nothing
+reaches the installer's stdin this way, so it answers its own prompt with
+"skip" and prints the exact command to finish later from a terminal
+(`sudo /opt/agentoo/install.sh --only https,summary`):
+
+```
+curl -fsSL https://raw.githubusercontent.com/tomasci/agentoo3/main/bootstrap.sh | sudo bash
+```
+
+To pass arguments through that form, the script has to arrive on stdin via
+`bash -s --`:
 
 ```
 curl -fsSL .../bootstrap.sh | sudo bash -s -- --branch dev --dir /srv/agentoo --skip upgrade
@@ -57,6 +79,10 @@ sudo bash bootstrap.sh
 `bootstrap.sh` options: `--repo`, `--branch`, `--dir`, `--force` (discard local
 changes), `--no-install` (clone only). Private repos: set `GITHUB_TOKEN` — it is
 passed per-invocation so it never lands in `.git/config`.
+
+A partial re-run of just one or two steps (`--only`, `--skip`, `--from`) always
+happens from an existing checkout, not through `bootstrap.sh` — see
+`sudo /opt/agentoo/install.sh --only ufw` above.
 
 ### From an existing clone
 
@@ -315,7 +341,7 @@ box — the same policy every step here follows (see `scripts/lib/config.sh`),
 and exactly what already happens each time you run
 
 ```
-curl -fsSL .../bootstrap.sh | sudo bash
+sudo bash -c "$(curl -fsSL .../bootstrap.sh)"
 ```
 
 The native install is per-user (`~/.local/bin/claude`), so the step runs it as
@@ -473,9 +499,11 @@ get you a browser-trusted certificate. For that, see the next section.)
 
 ### Your own domain (optional)
 
-At the end of an install, if a terminal is available and you didn't pass
-`--yes`, the installer asks for a domain to serve over HTTPS. Answer with a
-domain you control that is on Cloudflare, and it will:
+At the end of an install, if a real terminal is reaching the installer (see
+the recommended `sudo bash -c "$(curl ...)"` install form above — a plain
+`curl | sudo bash` cannot get you this prompt) and you didn't pass `--yes`,
+the installer asks for a domain to serve over HTTPS. Answer with a domain you
+control that is on Cloudflare, and it will:
 
 1. Ask for the Let's Encrypt account email and a Cloudflare API token.
 2. Look up which Cloudflare zone covers the domain, to make sure the token
@@ -501,6 +529,23 @@ one zone that covers your domain — never the account-wide Global API Key. It
 is stored at `/etc/letsencrypt/<app>-cloudflare.ini` (root, mode 0600), never
 in the settings file the installer otherwise remembers choices in, because
 certbot's renewal timer needs it again later.
+
+Creating that token takes about a minute, and the installer's own prompt walks
+through the same steps right before asking for it:
+
+1. Open https://dash.cloudflare.com/profile/api-tokens
+2. Create Token -> "Edit zone DNS" template -> Use template
+3. Permissions: leave Zone · DNS · Edit as it is
+4. Zone Resources: Include · Specific zone · the zone that covers your domain
+5. Continue to summary -> Create Token -> copy the token (Cloudflare shows it
+   only once)
+
+Answered `--yes` or ran the piped `curl | sudo bash` form and skipped the
+question? Set it up any time, from a terminal:
+
+```
+sudo /opt/agentoo/install.sh --only https,summary
+```
 
 The host itself stays tailnet-only either way: this only opens port 443, and
 only for nginx to terminate TLS on the one domain you configured — nothing
@@ -529,9 +574,10 @@ HTTPS_DOMAIN=none /opt/agentoo/install.sh --only https
 HTTPS_DOMAIN= /opt/agentoo/install.sh --only https
 ```
 
-Fully idempotent: a later plain `curl .../bootstrap.sh | sudo bash` neither
-re-asks nor undoes any of this — it just confirms the certificate, the DNS
-record and nginx still agree, and quietly fixes anything that has drifted.
+Fully idempotent: a later re-run, either install form, neither re-asks about a
+domain that is already configured (or already disabled with `none`) nor undoes
+any of this — it just confirms the certificate, the DNS record and nginx still
+agree, and quietly fixes anything that has drifted.
 
 Left on disk once configured: the Cloudflare credentials file above, a certbot
 deploy hook at `/etc/letsencrypt/renewal-hooks/deploy/<app>-reload-nginx` (reloads

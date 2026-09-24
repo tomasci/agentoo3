@@ -289,6 +289,44 @@ check_dns_resolution() {
   fi
 }
 
+# Whether PROMPT_TTY can actually be opened right now — used only below, to
+# tell "no terminal exists at all" (cron, CI, no controlling tty) apart from
+# "a terminal exists but sudo isn't forwarding it". _prompt_reachable() in
+# lib/common.sh can't answer that by itself: once SUDO_USER is set and stdin
+# isn't a terminal, it returns false WITHOUT ever trying to open PROMPT_TTY,
+# precisely to never risk a read() blocking on a keystroke that can never
+# arrive — so by the time can_prompt() says no, whether a terminal exists at
+# all has often never actually been tested.
+#
+# Existence is checked first because `<>` (read-write) CREATES a plain file
+# that doesn't exist yet, which would turn "nothing there" into "openable"
+# the moment we tried; skipping the open entirely for a path that doesn't
+# exist avoids that. Real terminal devices (/dev/tty) always exist as a node
+# regardless of whether this process has a controlling terminal, so this
+# never masks the case that matters. Opened read-write rather than read-only
+# so a FIFO nobody has written to yet doesn't block the open (a read-only
+# open would) — and closed at once, with no `read`, so nothing meant for
+# ask()/confirm() is ever consumed.
+https_prompt_tty_openable() {
+  [[ -e "$PROMPT_TTY" ]] || return 1
+  local fd
+  { exec {fd}<>"$PROMPT_TTY"; } 2>/dev/null || return 1
+  exec {fd}<&-
+}
+
+# The three ways to actually finish this later — common to every reason below
+# for why the domain prompt itself was skipped, so kept in one place rather
+# than retyped (and risking drift) in each.
+https_howto_finish_later() {
+  local log="$1"
+  "$log" "To set it up now, from a terminal:"
+  "$log" "    sudo $INSTALL_SH --only https,summary"
+  "$log" "Or unattended, right now:"
+  "$log" "    HTTPS_DOMAIN=your.domain HTTPS_EMAIL=you@example.com CLOUDFLARE_API_TOKEN=... $RETRY_HINT --yes"
+  "$log" "Or skip it for good:"
+  "$log" "    HTTPS_DOMAIN=none $RETRY_HINT"
+}
+
 # --- branch: explicitly disabled ----------------------------------------------
 if [[ "$HTTPS_DOMAIN" == "none" ]]; then
   setting_remember HTTPS_DOMAIN "none"
@@ -312,13 +350,41 @@ fi
 # --- branch: never answered ---------------------------------------------------
 if [[ -z "$HTTPS_DOMAIN" ]]; then
   if ! can_prompt; then
-    log_info "Custom-domain HTTPS not configured. To set it up:"
-    log_info "    HTTPS_DOMAIN=your.domain HTTPS_EMAIL=you@example.com CLOUDFLARE_API_TOKEN=... $RETRY_HINT"
-    log_info "Or run interactively (needs a terminal, and not --yes):  $RETRY_HINT"
+    # can_prompt() says no for one of four reasons, and the operator gets a
+    # distinct explanation for each rather than one catch-all "skipped":
+    #   - ASSUME_YES=1: they said not to ask.
+    #   - DRY_RUN=1: never reaches here — the dry-run branch at the very top
+    #     of this script exits first, whatever HTTPS_DOMAIN is.
+    #   - PROMPT_TTY cannot be opened at all (cron, CI, no /dev/tty): there
+    #     is no keyboard to reach here, sudo or not.
+    #   - PROMPT_TTY opens but stdin isn't a terminal under sudo: `curl ... |
+    #     sudo bash` hands sudo's own stdin a pipe, so it never forwards the
+    #     operator's keystrokes into the pty it runs this in (see
+    #     _prompt_reachable in lib/common.sh) — the operator IS at a
+    #     keyboard, they are just not being heard.
+    # Openability is checked (https_prompt_tty_openable) before the sudo/stdin
+    # case below, so a SUDO_USER set on a box with no /dev/tty at all is never
+    # told it was "piped into sudo" — there is no terminal to have been piped
+    # past in the first place.
+    if [[ "${ASSUME_YES:-0}" == "1" ]]; then
+      log_info "Custom-domain HTTPS was not configured: --yes was given, so the prompt was skipped."
+      https_howto_finish_later log_info
+      log_info "Or run interactively (needs a terminal, and not --yes):  $RETRY_HINT"
+    elif [[ -n "${SUDO_USER:-}" && ! -t 0 ]] && https_prompt_tty_openable; then
+      log_warn "HTTPS on your own domain was not set up: this run can't read keyboard input"
+      log_warn "(the script was piped into sudo, which never forwards your terminal to it)."
+      https_howto_finish_later log_warn
+    else
+      log_info "Custom-domain HTTPS was not configured: no terminal is available to ask on."
+      https_howto_finish_later log_info
+    fi
     exit 0
   fi
 
   log_info "Custom-domain HTTPS is optional — press Enter to skip."
+  log_info "The domain must be in a Cloudflare zone you control. The installer will create"
+  log_info "or fix its DNS A record to point at this node's Tailscale IP, so it stays"
+  log_info "reachable only over the tailnet."
   domain="" attempts=0
   while (( attempts < 3 )); do
     ask answer "Domain to serve over HTTPS (empty to skip)"
@@ -351,7 +417,7 @@ if [[ -z "$HTTPS_DOMAIN" ]]; then
 
   email="" attempts=0
   while (( attempts < 3 )); do
-    ask answer "Email for Let's Encrypt" "$HTTPS_EMAIL"
+    ask answer "Email for Let's Encrypt expiry notices" "$HTTPS_EMAIL"
     if [[ "$answer" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]]; then
       email="$answer"
       break
@@ -368,9 +434,31 @@ if [[ -z "$HTTPS_DOMAIN" ]]; then
 
   have_stored=0
   cf_credentials_exist && have_stored=1
+
+  # Best-guess zone for step 4 below: the last two labels of the domain
+  # (ai.example.com -> example.com). The same "strip labels from the left"
+  # idiom find_zone() uses to actually resolve it a few lines down — this is
+  # only ever a guess to save a click, never trusted for anything real.
+  zone_guess="$domain"
+  while [[ "$zone_guess" == *.*.* ]]; do
+    zone_guess="${zone_guess#*.}"
+  done
+
+  log_info "Create a Cloudflare API token (about a minute):"
+  log_info "  1. Open https://dash.cloudflare.com/profile/api-tokens"
+  log_info "  2. Create Token -> \"Edit zone DNS\" template -> Use template"
+  log_info "  3. Permissions: leave \"Zone / DNS / Edit\" as it is"
+  log_info "  4. Zone Resources: \"Include / Specific zone / $zone_guess\"  (the zone that contains $domain)"
+  log_info "  5. Continue to summary -> Create Token -> copy the token (Cloudflare shows it only once)"
+  log_info "Not the \"Global API Key\"."
+  log_info "Paste it below and press Enter — input is hidden, so nothing appears while you paste."
+
+  token_label="Cloudflare API token (hidden)"
+  (( have_stored )) && token_label="Cloudflare API token (hidden; press Enter to reuse the saved token)"
+
   new_tok="" reuse=0 attempts=0
   while (( attempts < 3 )); do
-    ask_secret answer "Cloudflare API token (Zone -> DNS -> Edit on that zone; input hidden)"
+    ask_secret answer "$token_label"
     if [[ -z "$answer" ]] && (( have_stored )); then
       reuse=1
       break
@@ -455,10 +543,14 @@ if [[ -n "$tok" ]]; then
   if [[ -z "$zone_line" ]]; then
     if (( cert_pre_existing )); then
       log_warn "Could not find a Cloudflare zone covering $domain with this token; skipping the DNS record check."
+      log_warn "Check that its Zone Resources include the zone containing $domain, that its permission"
+      log_warn "is Zone / DNS / Edit, and that it's an API token, not the Global API Key."
       tok=""
     else
       log_warn "Could not find a Cloudflare zone covering $domain with this token."
-      log_warn "Check the token's scope (Zone -> DNS -> Edit, on the right zone) and retry:  $RETRY_HINT"
+      log_warn "Check that its Zone Resources include the zone containing $domain, that its permission"
+      log_warn "is Zone / DNS / Edit, and that it's an API token, not the Global API Key."
+      log_warn "Retry:  $RETRY_HINT"
       exit 0
     fi
   else
