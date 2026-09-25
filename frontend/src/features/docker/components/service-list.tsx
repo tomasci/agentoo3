@@ -137,12 +137,16 @@ function ServiceRow({
     <article>
       <Card>
         <CardContent className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <h4 className="text-base font-semibold">{name}</h4>
-              <ServiceStateBadge state={row.state} />
+          {/* Stack below `sm` and pin to one row above it so card layout
+              depends on the breakpoint, not on how long the service name is. */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-2">
+              <h4 className="truncate text-base font-semibold">{name}</h4>
+              <span className="shrink-0">
+                <ServiceStateBadge state={row.state} />
+              </span>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 sm:shrink-0">
               <Button type="button" size="sm" disabled={!canStart} onClick={start}>
                 {t('docker.actions.start')}
               </Button>
