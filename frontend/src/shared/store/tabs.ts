@@ -1,5 +1,5 @@
 import { atom } from 'jotai'
-import { atomWithStorage } from 'jotai/utils'
+import { atomWithLazy } from 'jotai/utils'
 
 /**
  * The workspace is a row of tabs, the way a file manager is.
@@ -219,8 +219,10 @@ export function closeTab(tabs: Tab[], id: string): { tabs: Tab[]; activeId: stri
  * adopting a project that is not in `projectIds` would fight with the pruning
  * that removed it, each undoing the other on every render. The launcher
  * (`isBareShellPath`) vouches for nothing at all: opening it in a fresh
- * browser tab must never add, change or reorder the workspace's own tabs,
- * which are persisted and shared with every other tab already open.
+ * browser tab must never add, change or reorder the workspace's own tabs.
+ * The row is saved (see `storedTabsAtom`), so whatever it held is the row the
+ * next window or reload starts from — not one this window keeps in step with
+ * while it stays open.
  */
 export function adoptTab(tabs: Tab[], id: string, pathname: string, projectIds: string[]): Tab[] {
   if (tabs.some((tab) => tab.id === id)) return tabs
@@ -257,12 +259,64 @@ export function rememberPath(tabs: Tab[], id: string, path: string): Tab[] {
   return tabs.map((candidate) => (candidate.id === id ? { ...candidate, path } : candidate))
 }
 
-// Persisted, so the workspace is still open the way you left it after a reload.
-const storedTabsAtom = atomWithStorage<Tab[]>('agentoo:tabs', [systemTab()])
+const TABS_STORAGE_KEY = 'agentoo:tabs'
+
+/**
+ * Reads the persisted row. localStorage outlives this build of the app and
+ * can be edited by hand or run out of quota, so a read that throws — bad
+ * JSON, storage unavailable — falls back to the same empty row a first-ever
+ * visit gets, rather than throwing out of an atom's initializer. A read that
+ * *doesn't* throw still goes through `normalizeTabs` below, same as every
+ * other shape storage can hand back.
+ */
+function readStoredTabs(): Tab[] {
+  try {
+    const raw = localStorage.getItem(TABS_STORAGE_KEY)
+    return raw === null ? [systemTab()] : JSON.parse(raw)
+  } catch {
+    return [systemTab()]
+  }
+}
+
+function writeStoredTabs(tabs: Tab[]): void {
+  try {
+    localStorage.setItem(TABS_STORAGE_KEY, JSON.stringify(tabs))
+  } catch {
+    // Storage unavailable or full: the row still works for this window, it
+    // just will not be there to read back after a reload.
+  }
+}
+
+/**
+ * Persisted, so the workspace is still open the way you left it after a
+ * reload — but *per window*, unlike `ui.ts`'s `themeAtom` and
+ * `sidebarOpenAtom`, which really do stay in step live across every
+ * same-origin window via `atomWithStorage`'s default `storage` subscription.
+ * Those two are only ever written by a deliberate click, so mirroring them
+ * live is harmless. This row is not: the sync effects below (`adoptTab`,
+ * `rememberPath`, `pruneProjectTabs` in `useWorkspaceSync`) write it from
+ * facts only *this* window has — its own URL, its own project list, its own
+ * dismissed ids — so two windows that disagreed about any of those would
+ * answer each other's write with one of their own, forever (reproduced: two
+ * real Chromium windows disagreeing about one tab drove ~110-140 writes/sec
+ * each, the tab visibly blinking, until whichever window wrote last decided
+ * both windows' tabs). `atomWithLazy`'s initializer runs once per jotai
+ * store — i.e. once per window — the first time that store reads the atom,
+ * and the row is never read again after that: the write side (`tabsAtom`'s
+ * setter, below) writes straight through to storage with no read-back and no
+ * subscription, so the last write standing is always this window's own, made
+ * in answer to its own facts, and reloading (or a fresh window) simply
+ * starts from whatever the previous window last wrote.
+ */
+const storedTabsAtom = atomWithLazy<Tab[]>(readStoredTabs)
 
 export const tabsAtom = atom(
   (get) => normalizeTabs(get(storedTabsAtom)),
-  (_get, set, next: Tab[]) => set(storedTabsAtom, normalizeTabs(next)),
+  (_get, set, next: Tab[]) => {
+    const normalized = normalizeTabs(next)
+    set(storedTabsAtom, normalized)
+    writeStoredTabs(normalized)
+  },
 )
 
 /**

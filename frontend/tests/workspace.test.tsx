@@ -6,6 +6,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { routeTree } from '../src/app/router'
+import { projectTab, systemTab } from '../src/shared/store/tabs'
 
 const project = (id: string, name: string, status = 'ready') => ({
   id, name, slug: name.toLowerCase(), source: 'clone', remoteUrl: null, sourceName: null,
@@ -547,4 +548,118 @@ test('the shell is right on the first paint, before any effect runs', async () =
   expect(empty).not.toContain('href="/library"')
   expect(empty).not.toContain('href="/settings"')
   expect(empty).not.toContain('href="/projects/')
+})
+
+// ── another window's row must never answer this one's writes ────────────────
+//
+// jotai's default `atomWithStorage` subscribes to the browser's `storage`
+// event, so every same-origin window used to live-mirror the row — but the
+// sync effects in `useWorkspaceSync` compute from facts only *this* window
+// has (its own URL, its own project list, its own dismissed ids), so a second
+// window that disagrees about any of those answered this window's write with
+// one of its own, forever. See shared/store/tabs.ts's comment on
+// `storedTabsAtom` for the fix: the row is read once per window and never
+// live-synced, so `storage` events from elsewhere are simulated here and must
+// provoke nothing at all.
+
+/**
+ * What a second same-origin window does when it writes the row: it changes
+ * `localStorage` directly (jotai's own write already does that before this
+ * fires) and raises the `storage` event that only *other* windows receive —
+ * happy-dom, like every real browser, never raises one for a window's own
+ * write, so this window can only ever learn of it by dispatching one by hand.
+ */
+async function otherWindowWrites(otherTabs: unknown) {
+  const oldValue = localStorage.getItem('agentoo:tabs')
+  const newValue = JSON.stringify(otherTabs)
+  localStorage.setItem('agentoo:tabs', newValue)
+  await act(async () => {
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: 'agentoo:tabs',
+        oldValue,
+        newValue,
+        storageArea: localStorage,
+      }),
+    )
+  })
+  await settle()
+  return newValue
+}
+
+test('a project opened here survives another window disagreeing about the row', async () => {
+  await mount('/library')
+  await click(newTabButton())
+  await click(byText('button', 'Alpha'))
+  expect(at()).toBe('/projects/p1')
+
+  const written = await otherWindowWrites([systemTab()])
+
+  // This window wrote nothing back in answer.
+  expect(localStorage.getItem('agentoo:tabs')).toBe(written)
+  expect(tabs()).toEqual(['System', 'Alpha'])
+  expect(activeTab()).toBe('Alpha')
+  expect(problems).toEqual([])
+})
+
+test("another window's stale project list cannot prune a tab this window still has", async () => {
+  await mount('/library')
+
+  const written = await otherWindowWrites([systemTab(), projectTab('p9')])
+
+  expect(localStorage.getItem('agentoo:tabs')).toBe(written)
+  expect(tabs()).toEqual(['System'])
+  expect(at()).toBe('/library')
+  expect(problems).toEqual([])
+})
+
+test("another window's remembered path cannot overwrite this one's", async () => {
+  await mount('/library')
+  await click(navTo('Configuration'), 'Configuration link')
+  expect(at()).toBe('/settings')
+
+  const written = await otherWindowWrites([systemTab()])
+  expect(localStorage.getItem('agentoo:tabs')).toBe(written)
+
+  // This window's own idea of the system tab's page is untouched by the
+  // other window's write: leaving and coming back still lands on /settings.
+  await click(newTabButton())
+  await clickTab('System')
+  expect(at()).toBe('/settings')
+  expect(problems).toEqual([])
+})
+
+test('a tab closed here is not brought back by another window that still has it', async () => {
+  await mount('/library')
+  await click(newTabButton())
+  await click(byText('button', 'Alpha'))
+  await click(closeButtonFor('Alpha'), 'close button')
+  expect(tabs()).toEqual(['System'])
+
+  const written = await otherWindowWrites([systemTab(), projectTab('p1')])
+
+  expect(localStorage.getItem('agentoo:tabs')).toBe(written)
+  expect(tabs()).toEqual(['System'])
+  expect(problems).toEqual([])
+})
+
+// ── the saved row must not be clobbered before it is even read ──────────────
+
+test('a reload at a system page other than /library keeps the saved project tabs', async () => {
+  await mount('/library')
+  await click(newTabButton())
+  await click(byText('button', 'Alpha'))
+  await clickTab('System')
+  await click(navTo('Configuration'), 'Configuration link')
+  expect(at()).toBe('/settings')
+  expect(localStorage.getItem('agentoo:tabs')).toContain('project-p1')
+
+  // Remount without clearing storage, the way a refresh does — landing on a
+  // system page that is not the default `/library`.
+  document.body.innerHTML = ''
+  await mount('/settings')
+
+  expect(tabs()).toEqual(['System', 'Alpha'])
+  expect(activeTab()).toBe('System')
+  expect(problems).toEqual([])
 })
