@@ -306,25 +306,22 @@ export function AgentEditorPage({ name }: { name?: string }) {
       <Card>
         <CardContent className="flex flex-col gap-3">
           <Field orientation="horizontal">
+            <Checkbox
+              id="agent-restrict-tools"
+              checked={draft.restrictTools}
+              onCheckedChange={(checked) => set('restrictTools', checked === true)}
+            />
             <FieldContent>
               <FieldLabel htmlFor="agent-restrict-tools">
                 {t('library.agent.restrictTools')}
               </FieldLabel>
               <FieldDescription>{t('library.agent.toolsHint')}</FieldDescription>
             </FieldContent>
-            <Checkbox
-              id="agent-restrict-tools"
-              checked={draft.restrictTools}
-              onCheckedChange={(checked) => set('restrictTools', checked === true)}
-            />
           </Field>
           {draft.restrictTools && (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] gap-x-3 gap-y-2">
               {AVAILABLE_TOOLS.map((tool) => (
                 <Field key={tool} orientation="horizontal">
-                  <FieldLabel htmlFor={`agent-tool-${tool}`} className="flex-1 font-normal">
-                    {tool}
-                  </FieldLabel>
                   <Checkbox
                     id={`agent-tool-${tool}`}
                     checked={draft.tools.includes(tool)}
@@ -337,6 +334,9 @@ export function AgentEditorPage({ name }: { name?: string }) {
                       )
                     }
                   />
+                  <FieldLabel htmlFor={`agent-tool-${tool}`} className="flex-1 font-normal">
+                    {tool}
+                  </FieldLabel>
                 </Field>
               ))}
             </div>

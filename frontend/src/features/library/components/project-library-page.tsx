@@ -102,6 +102,11 @@ export function ProjectLibraryPage({ projectId }: { projectId: string }) {
                     orientation="horizontal"
                     className="rounded-md border px-3 py-2 hover:bg-muted/50"
                   >
+                    <Checkbox
+                      id={`assign-agent-${agent.name}`}
+                      checked={selectedAgents.includes(agent.name)}
+                      onCheckedChange={() => toggle(selectedAgents, setSelectedAgents, agent.name)}
+                    />
                     <FieldContent>
                       <FieldLabel htmlFor={`assign-agent-${agent.name}`}>
                         <span className="flex flex-wrap items-center gap-2">
@@ -113,11 +118,6 @@ export function ProjectLibraryPage({ projectId }: { projectId: string }) {
                       </FieldLabel>
                       <FieldDescription>{agent.description}</FieldDescription>
                     </FieldContent>
-                    <Checkbox
-                      id={`assign-agent-${agent.name}`}
-                      checked={selectedAgents.includes(agent.name)}
-                      onCheckedChange={() => toggle(selectedAgents, setSelectedAgents, agent.name)}
-                    />
                   </Field>
                 ))}
               </div>
@@ -134,15 +134,15 @@ export function ProjectLibraryPage({ projectId }: { projectId: string }) {
                     orientation="horizontal"
                     className="rounded-md border px-3 py-2 hover:bg-muted/50"
                   >
-                    <FieldContent>
-                      <FieldLabel htmlFor={`assign-skill-${skill.name}`}>{skill.name}</FieldLabel>
-                      <FieldDescription>{skill.description}</FieldDescription>
-                    </FieldContent>
                     <Checkbox
                       id={`assign-skill-${skill.name}`}
                       checked={selectedSkills.includes(skill.name)}
                       onCheckedChange={() => toggle(selectedSkills, setSelectedSkills, skill.name)}
                     />
+                    <FieldContent>
+                      <FieldLabel htmlFor={`assign-skill-${skill.name}`}>{skill.name}</FieldLabel>
+                      <FieldDescription>{skill.description}</FieldDescription>
+                    </FieldContent>
                   </Field>
                 ))}
               </div>
