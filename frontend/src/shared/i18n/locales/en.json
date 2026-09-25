@@ -267,6 +267,7 @@
       "delegatedPrompt": "Prompt given to {{agent}}",
       "thinking": "Thinking",
       "command": "Command",
+      "pendingTask": "Earlier task",
       "noArguments": "No arguments",
       "result": "Result",
       "showMore": "Show more",

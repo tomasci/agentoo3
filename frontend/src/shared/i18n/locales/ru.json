@@ -269,6 +269,7 @@
       "delegatedPrompt": "Промпт для {{agent}}",
       "thinking": "Размышления",
       "command": "Команда",
+      "pendingTask": "Более ранняя задача",
       "noArguments": "Без аргументов",
       "result": "Результат",
       "showMore": "Показать полностью",

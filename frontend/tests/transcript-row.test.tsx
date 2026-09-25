@@ -1,12 +1,17 @@
-// The `content-visibility` containment boundary added around each top-level
-// transcript node.
+// The wrapper `TranscriptView` puts around each top-level transcript node.
+//
+// It used to carry a `content-visibility` containment boundary too (dropped —
+// see transcript.tsx's own comment on the row wrapper for why); what it still
+// has to carry is `data-transcript-row`, the selector session-page.tsx's
+// scroll-position compensation (`pickAnchor`) walks inside the scroll
+// container.
 //
 // The claim being pinned is structural and exact: *one* wrapper per top-level
-// node, and *none* around a nested one. Both halves matter — no wrapper and the
-// composer's forced layout scopes the whole transcript again (the bug); a
-// wrapper per nested row and every open task group grows a containment boundary
-// the collapsible's own unmount-on-exit already provides, with `contain: paint`
-// clipping inside a row that is on screen by definition.
+// node, and *none* around a nested one. Both halves matter — no wrapper and
+// `pickAnchor` has nothing to select at all; a wrapper per nested row and it
+// would anchor a prepend on a row that is not actually top-level, inside an
+// open task group that already gets its own containment for free from
+// Collapsible's own unmount-on-exit.
 //
 // Asserted through parentage rather than class names on purpose: a node root
 // either has a wrapper of its own between it and the grid, or it shares its
@@ -293,21 +298,22 @@ test('an empty transcript renders the empty state, with no wrapper around nothin
 
 // --- the declarations the DOM structure exists to carry -------------------------
 
-test('every top-level row declares the content-visibility containment, with a self-correcting intrinsic size', async () => {
-  // happy-dom does no layout and does not implement content-visibility, so the
-  // skipping itself cannot be observed here; what is checkable is that the
-  // two declarations the DOM boundary exists for are actually on the rendered
-  // row — Tailwind's arbitrary-property classes are literal strings in this
-  // DOM, unlike the CSS-module classes this file used to work around.
+test('every top-level row is still a wrapper carrying the data-transcript-row contract, with no content-visibility left on it', async () => {
+  // The containment classes were dropped (see transcript.tsx's own comment):
+  // a placeholder height for a row scrolled out of view moved content under a
+  // reader scrolling back through history on engines with no scroll
+  // anchoring. What has to survive that removal is the wrapper itself and its
+  // attribute — session-page.tsx's scroll-position compensation selects rows
+  // by `[data-transcript-row]`, and losing that silently would break the
+  // anchor it depends on without touching a single assertion about anchoring
+  // itself.
   const container = await render(turn())
   const rows = [...grid(container).children]
   expect(rows.length).toBeGreaterThan(0)
   for (const row of rows) {
-    expect(row.classList.contains('[content-visibility:auto]')).toBe(true)
-    // The `auto` keyword is what makes the placeholder self-correct once a row
-    // has been rendered; a bare length would freeze every off-screen row at the
-    // guess forever, and the scroll height with it.
-    expect(row.classList.contains('[contain-intrinsic-size:auto_6rem]')).toBe(true)
+    expect(row.hasAttribute('data-transcript-row')).toBe(true)
+    expect(row.classList.contains('[content-visibility:auto]')).toBe(false)
+    expect(row.classList.contains('[contain-intrinsic-size:auto_6rem]')).toBe(false)
   }
 })
 
