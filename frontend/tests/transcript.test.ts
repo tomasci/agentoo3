@@ -107,9 +107,18 @@ test('out-of-order arrival is sorted by seq, not by arrival', () => {
 
 test('an orphaned child does not vanish', () => {
   n = 0
-  // The task_started was compacted away or lost; the work still has to show up.
+  // The task_started was compacted away, lost, or simply not loaded into this
+  // window yet — the work still has to show up. It now does so nested inside
+  // a partial group named for the tool_use_id nothing else claimed, rather
+  // than flattened at the top level: see transcript-partial-window.test.ts
+  // for the row-count bug that shape used to cause.
   const nodes = buildTranscript([msg({ type: 'assistant', parentToolUseId: 'gone', title: 'x: work' })])
   expect(nodes.length).toBe(1)
+  const [group] = nodes
+  if (group?.kind !== 'task') throw new Error('expected a partial task group')
+  expect(group.partial).toBe(true)
+  expect(group.id).toBe('task:gone')
+  expect(group.children.map((c) => (c.kind === 'event' ? c.message.title : c.kind))).toEqual(['x: work'])
 })
 
 test('text and tool calls are read out of the payload', () => {

@@ -1,4 +1,3 @@
-import { useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { OctagonXIcon } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -22,7 +21,6 @@ import {
   useSession,
   useSessionMessages,
 } from '../hooks/use-sessions'
-import { type MessagesData, sessionMessagesKey } from '../lib/message-cache'
 import { Composer } from './composer'
 import { Transcript } from './transcript'
 
@@ -42,9 +40,9 @@ const STATUS_TONE = {
 /**
  * A row's position relative to the *viewport*, not its `offsetTop` in the
  * document: where the engine's own scroll anchoring has already compensated
- * for a prepend (Chrome, Firefox), this delta comes out zero and the caller's
- * write is a no-op. That is what makes reapplying it safe everywhere —
- * `hold`'s later passes, and `onScroll` re-recording it while a fetch is
+ * for a prepend (Chrome, Firefox), this delta comes out zero and the
+ * caller's write is a no-op. That is what makes it safe to reapply — the
+ * correction below, and `onScroll`'s own re-recording of it while a fetch is
  * still in flight — on both the browsers that anchor and the one that (as of
  * this writing) does not.
  */
@@ -80,11 +78,26 @@ function pickAnchor(el: HTMLElement): { el: HTMLElement; offset: number } | null
   return null
 }
 
+/**
+ * Whether the sentinel is still inside the zone the IntersectionObserver
+ * below watches — one viewport height above the container's own visible top
+ * edge, mirroring its `rootMargin` (the two are kept in sync by hand; see
+ * that effect's own comment). A page that lands while this is still true
+ * would otherwise never be asked about again: an IntersectionObserver only
+ * fires on a *transition* into intersection, and a normal-speed scroll
+ * reaching the top before a fetch lands, or a page that adds a lot of
+ * history but only a little rendered height (a long page collapsing into one
+ * grouped, collapsed task row), both leave the sentinel exactly where it
+ * already was.
+ */
+function inLoadZone(sentinel: HTMLElement, scroller: HTMLElement): boolean {
+  return offsetOf(sentinel, scroller) >= -scroller.clientHeight
+}
+
 // `projectId` stays in the prop type — the route still supplies it — but is no
 // longer destructured: the only thing that read it was the back-to-list button.
 export function SessionPage({ sessionId }: { projectId: string; sessionId: string }) {
   const { t } = useTranslation()
-  const queryClient = useQueryClient()
   const session = useSession(sessionId)
   const messages = useSessionMessages(sessionId)
   const send = useSendMessage(sessionId)
@@ -111,10 +124,19 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   const [error, setError] = useState<string | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
-  // Guards `requestOlder` against re-entry: a fetch already in flight does not
-  // flip `messages.isLoadingOlder` (react-query state, seen only on the next
-  // render) until after this synchronous call returns, and momentum-scrolling
-  // near the top can fire many `scroll` events before that render happens.
+  // Guards `requestOlder` against re-entry — not only while the fetch itself
+  // is in flight, but through the gap after it resolves and before React
+  // commits the page it produced. `.then()` below only opens this back up for
+  // a settle nothing is coming to commit (an error, or a page that made no
+  // progress); a settle that DID make progress leaves it closed until the
+  // `oldestSeq` layout effect actually processes that commit. Without that,
+  // a fresh IntersectionObserver entry — or anything else automatic —
+  // landing in that gap could issue a second request before the first one's
+  // own `anchor`/`lastRequestedBefore` have even been read, overwriting both
+  // out from under a correction that has not happened yet. `messages.
+  // isLoadingOlder` (react-query's own flag) is no substitute: it flips at
+  // the same "promise resolved" instant this ref used to, one render before
+  // the commit this one now waits for.
   const loadingOlder = useRef(false)
   // The row `requestOlder` picked to anchor a prepend on, and the viewport
   // offset it had at that moment (see `pickAnchor`/`offsetOf` above). `null`
@@ -122,6 +144,50 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // that is not that one. Kept live by `onScroll` below while a fetch is in
   // flight, so scrolling during the fetch is preserved rather than fought.
   const anchor = useRef<{ el: HTMLElement; offset: number } | null>(null)
+  // The `before` cursor of the most recent request-older fetch this
+  // component has issued and not yet fully accounted for — `undefined`
+  // whenever there is none. Closes two different bugs at once:
+  //
+  // Structural progress (a fetch chain has to end on its own, no matter what
+  // the backend does): an *automatic* continuation below may only fire with
+  // a candidate cursor strictly older than this one, so a chain is bounded
+  // by how far `seq` can still fall rather than by trusting any one fetch to
+  // eventually admit "no more" honestly.
+  //
+  // Whose settle this is: the `oldestSeq`-keyed layout effect below fires for
+  // *any* reason `oldestSeq` changes identity — the initial page landing, a
+  // session switch (see the layout effect further down that clears this on
+  // `sessionId`), or a genuine older-page fetch settling — and only the last
+  // of those has anything here to correct or recheck. Left `undefined`
+  // except while such a fetch is outstanding or has just landed, this is
+  // also what that effect reads to tell the three apart.
+  const lastRequestedBefore = useRef<number | undefined>(undefined)
+  // Bumped every time `requestOlder` actually dispatches a fetch (captured
+  // by that call's own closure), and once more by the session-switch effect
+  // below on every `sessionId` change. Its `.then()` compares its own
+  // capture against the live value before touching `loadingOlder`/`anchor`/
+  // `lastRequestedBefore` — a fetch a *later* call has already superseded
+  // (the geometric re-check firing again before this one's callback runs, or
+  // a session switch abandoning it outright) has nothing current left to say
+  // about any of them, and touching them anyway is exactly how one race would
+  // clobber a request nothing here is waiting on any more. An unmount needs
+  // no entry here of its own: nothing left running after one can still read
+  // these refs, and any future remount starts every one of them, this
+  // counter included, fresh at its own initial value.
+  const olderRequestId = useRef(0)
+  // The `before` cursor of the most recent settle that made *no* progress —
+  // `undefined` once the chain has moved past it. An automatic trigger
+  // (the sentinel's own observer, or the continuation the `oldestSeq` effect
+  // below issues on itself) may never repeat this exact cursor: nothing about
+  // *why* it would work this time has changed, and a plain rescroll back
+  // into the zone is not a reason to believe otherwise. A manual click is
+  // read as a person deciding to try again anyway, and is not gated on this.
+  const noProgressCursor = useRef<number | undefined>(undefined)
+  // The observer the effect below builds, kept live so a settle that made
+  // progress can force it to look at the sentinel again — see that effect's
+  // own comment on why a plain transition-only observer is not enough on its
+  // own. `null` outside the window the sentinel is actually mounted in.
+  const observerRef = useRef<IntersectionObserver | null>(null)
   // The oldest loaded message's own seq, not `messages.messages` itself: it
   // moves only when a page is *prepended* (a lower seq now leads the array),
   // and is untouched by the stream appending at the tail — which is exactly
@@ -138,10 +204,6 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // reader loses.
   const interacting = useRef(false)
   const interactionTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Frame ids `hold` (below) has scheduled and not yet run, so a later call
-  // can cancel them rather than pile a write from an earlier call on top of
-  // a newer one.
-  const pendingFrames = useRef<number[]>([])
 
   const clearInteractionTimer = () => {
     if (interactionTimer.current !== null) {
@@ -150,53 +212,15 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
     }
   }
 
-  // Re-asserts `correct` at commit and on every animation frame after, until
-  // it reports nothing left to correct for two frames running, or 500ms have
-  // passed since the hold started — whichever comes first, cancelling
-  // whatever an earlier call left outstanding. A row inserted under
-  // `content-visibility: auto` (transcript.tsx) contributes its 6rem
-  // placeholder at commit and its real height only once the engine judges it
-  // relevant and renders it — which takes an unpredictable number of frames,
-  // because every correction moves the viewport, which changes which rows
-  // now fall inside the relevance margin. A fixed number of passes cannot
-  // bound that; only "keep going until it stops mattering" can. `correct`
-  // performs one write and reports how many pixels it actually moved the
-  // scroller by, 0 once there is nothing left to do, which is what lets both
-  // callers below share this without either one having to know how many
-  // passes the other needs.
-  const hold = (correct: () => number) => {
-    for (const frame of pendingFrames.current) cancelAnimationFrame(frame)
-    const deadline = Date.now() + 500
-    let stableFrames = 0
-    const step = () => {
-      stableFrames = correct() === 0 ? stableFrames + 1 : 0
-      if (stableFrames >= 2 || Date.now() >= deadline) {
-        pendingFrames.current = []
-        return
-      }
-      pendingFrames.current = [requestAnimationFrame(step)]
-    }
-    step()
-  }
-
   // Shared by both places that pin the transcript to the bottom — the effect
-  // below, and the interaction timer's own catch-up once a gesture ends —
-  // so the per-frame `interacting` re-check only has to be gotten right once.
-  const holdAtBottom = () => {
+  // below, and the interaction timer's own catch-up once a gesture ends. A
+  // single write, not a loop: every row renders at its real height as soon
+  // as it commits (see transcript.tsx), so there is nothing left that could
+  // still be resolving a frame later for a second pass to catch.
+  const pinToBottom = () => {
     const el = scroller.current
     if (!el) return
-    hold(() => {
-      // Checked every frame, not just before the hold starts: a finger can
-      // touch down while a hold from an earlier arrival is still running,
-      // and writing `scrollTop` under it is exactly what turns "content
-      // grew" into a fight the reader loses (see `interacting`'s comment
-      // above) — the gate this replaces used to check that once, at commit,
-      // which an unbounded hold can no longer get away with.
-      if (interacting.current) return 0
-      const before = el.scrollTop
-      el.scrollTop = el.scrollHeight - el.clientHeight
-      return el.scrollTop - before
-    })
+    el.scrollTop = el.scrollHeight - el.clientHeight
   }
 
   // (Re)arms the 200ms window that closes a touch interaction. iOS keeps
@@ -209,14 +233,21 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
       interactionTimer.current = null
       interacting.current = false
       // Whatever arrived while the guard was up is not left stranded
-      // off-screen — applied once here, not resumed as an ongoing follow:
-      // the pin effect below declined to run while this was armed, and
-      // nothing re-arms it except a genuine new arrival.
-      if (pinned.current) holdAtBottom()
+      // off-screen — one write here, not an ongoing follow: the pin effect
+      // below declined to run while this was armed, and nothing re-arms it
+      // except a genuine new arrival.
+      if (pinned.current) pinToBottom()
     }, 200)
   }
 
-  const requestOlder = () => {
+  // Fetches one older page, anchoring the scroll on `pickAnchor` before it
+  // lands. `startedAtSeq` is captured now, synchronously, rather than read
+  // from `oldestSeq` inside `.then()` below: react-query has already written
+  // that fetch's result into the cache by the time its promise settles, but
+  // React may not have re-rendered from it yet, so `oldestSeq` read there
+  // could already be one fetch ahead of the value this call actually needs —
+  // "what was oldest when *this* fetch started".
+  const requestOlder = (auto = true) => {
     const el = scroller.current
     // `hasPreviousPage`, not `hasOlder`: the latter is only ever the *first*
     // loaded page's own flag, so a page that ever comes back empty while
@@ -226,32 +257,74 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
     // is derived from that same function, so it is false in exactly the cases
     // where fetching again would be a no-op.
     if (!el || loadingOlder.current || !messages.hasPreviousPage) return
+    // See `noProgressCursor`'s own comment: every automatic caller (the
+    // sentinel's observer defaults `auto` to `true`; so does the continuation
+    // below) is bound by it, the button's `onClick` is the one call site that
+    // passes `false`.
+    if (auto && oldestSeq !== undefined && oldestSeq === noProgressCursor.current) return
     loadingOlder.current = true
     anchor.current = pickAnchor(el)
     // A prepend is a scrollback read, never "stay pinned to the bottom" — even
     // a short first page that fits the whole viewport reads as `pinned` under
     // the at-bottom heuristic below, and without this it would get yanked
-    // back down the moment older history landed above it.
+    // back down the moment older history landed above it. The `oldestSeq`
+    // layout effect below recomputes it from the geometry actually committed
+    // once this fetch lands, so a reader who never left the bottom in the
+    // first place gets it back rather than staying stranded off it.
     pinned.current = false
-    // The seq before the fetch, so `.finally()` below can tell whether it
-    // actually prepended anything.
     const startedAtSeq = oldestSeq
-    void messages.loadOlder().finally(() => {
-      loadingOlder.current = false
-      // An empty page, or a fetch that failed, never moves the oldest cached
-      // seq — so the `oldestSeq`-keyed layout effect below never runs to
-      // consume and clear `anchor.current`, leaving `onScroll` to keep
-      // recomputing `offsetOf` against a row nothing will ever compensate for
-      // again. Read the cache directly rather than through `messages`: that
-      // binding is frozen at whichever render `requestOlder` was called from,
-      // and by the time this callback runs, react-query has already written
-      // the fetch's result into the cache (that write happens synchronously
-      // as part of settling this same promise) even if React has not
-      // re-rendered from it yet — so the cache, not this closure, is the
-      // only value guaranteed fresh here.
-      const cached = queryClient.getQueryData<MessagesData>(sessionMessagesKey(sessionId))
-      const freshOldestSeq = cached?.pages[0]?.messages[0]?.seq
-      if (freshOldestSeq === startedAtSeq) anchor.current = null
+    lastRequestedBefore.current = startedAtSeq
+    const myRequestId = ++olderRequestId.current
+    void messages.loadOlder().then((result) => {
+      // A later call — the geometric re-check below, most likely, or a
+      // session switch — has already moved on from this fetch. Its own
+      // `.then()` (or the session-switch effect) already owns
+      // `loadingOlder`/`anchor`/`lastRequestedBefore` now; touching any of
+      // them here would race whichever of those actually is current.
+      if (olderRequestId.current !== myRequestId) return
+      // The button/alert stay up as the manual retry — automatically
+      // retrying a fetch that just failed is exactly the loop "must not
+      // stall" did not ask for.
+      if (result.isFetchPreviousPageError) {
+        loadingOlder.current = false
+        anchor.current = null
+        lastRequestedBefore.current = undefined
+        return
+      }
+      // `result.data` is `select`'s own flattened shape (`selectMessages` in
+      // use-sessions.ts), so its first message's `seq` already *is* the
+      // post-fetch `oldestSeq` — read from the settled fetch's own result
+      // rather than from `messages` in this closure, which is not
+      // guaranteed fresh here (see this function's own comment above).
+      if (result.data?.messages[0]?.seq === startedAtSeq) {
+        // Nothing was prepended — an emptied page, most likely, while
+        // `hasPreviousPage` still claimed more (a cancelled fetch resolving
+        // with the data it started with, unchanged, lands here too — it is
+        // no different from an emptied page as far as "did this move
+        // anything" is concerned). `oldestSeq` never moved, so the layout
+        // effect below never runs to pick this up: no correction is due, and
+        // no commit is coming to close the guard for, which makes this the
+        // one place left to close it. This is where the chain ends instead
+        // of asking again with the very same cursor — which is exactly the
+        // loop that used to grow without bound.
+        loadingOlder.current = false
+        anchor.current = null
+        lastRequestedBefore.current = undefined
+        noProgressCursor.current = startedAtSeq
+        return
+      }
+      // Progress made: a commit is coming, so `loadingOlder` is left closed
+      // rather than cleared here — see its own comment for why the instant a
+      // promise resolves is already too early. `lastRequestedBefore` is left
+      // at `startedAtSeq` for the `oldestSeq` layout effect below to compare
+      // its own candidate continuation against, and that same effect is what
+      // finally reopens `loadingOlder` once it has actually processed this
+      // commit — that effect, not this callback, is what decides whether the
+      // chain goes on. `noProgressCursor` is cleared rather than left stale:
+      // `oldestSeq` has moved past whatever it held, so it would never have
+      // compared equal again regardless, but a stale value here is a trap
+      // for the next reader of this code, not for this component.
+      noProgressCursor.current = undefined
     })
   }
 
@@ -286,101 +359,185 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // ref callback.
   const [sentinelNode, setSentinelNode] = useState<HTMLDivElement | null>(null)
 
-  // `rootMargin` starts the fetch 300px before the sentinel is actually on
-  // screen, and an IntersectionObserver only fires on a *transition* into
-  // intersection, so bouncing at a top already reached (iOS rubber-band
-  // overscroll) cannot re-fire it — that re-arm rule is why no other
-  // threshold is needed. Kept as the explicit "load older" button's fallback
-  // for a page shorter than the 300px margin: the sentinel would never stop
-  // intersecting, and automatic loading quietly stops. Depends only on
-  // `sentinelNode`'s own identity, not `messages.hasPreviousPage` directly:
-  // the sentinel unmounts (node becomes `null`) exactly when that flag does,
-  // so the node's own transitions already carry it.
+  // `rootMargin` starts the fetch a full viewport height before the sentinel
+  // is actually on screen. 300px used to be the margin, and a normal scroll
+  // reaches the top well before a fetch that far out can land, which is what
+  // left the reader staring at the button. An IntersectionObserver only fires
+  // on a *transition* into intersection, so bouncing at a top already reached
+  // (iOS rubber-band overscroll) cannot re-fire it — that re-arm rule is why
+  // no other threshold is needed, and it is also why a page settling while
+  // the sentinel is *already* inside this margin never gets a second
+  // callback of its own: the geometric re-check in the `oldestSeq` effect
+  // below is what covers that case, using the exact same margin
+  // (`inLoadZone`) so the two never disagree about what "in the zone" means.
+  // The button stays up as the affordance for a failed fetch (no automatic
+  // retry there) and as a fallback should this observer ever not fire.
+  // Depends only on `sentinelNode`'s own identity, not `messages.hasPreviousPage`
+  // directly: the sentinel unmounts (node becomes `null`) exactly when that
+  // flag does, so the node's own transitions already carry it.
   useEffect(() => {
     const root = scroller.current
     if (!sentinelNode || !root) return
     const observer = new IntersectionObserver(
-      ([entry]) => {
+      (entries) => {
+        // The *last* entry, not the first: a batch can carry more than one
+        // for the same target when the browser has no native scroll
+        // anchoring of its own (iOS Safari) to smooth a page's arrival over —
+        // the re-observe below can hand back an "outside" entry for the
+        // instant it ran, immediately followed, in the same callback, by the
+        // very next frame's "inside" once the reader's own scroll carried the
+        // sentinel back in. Reading only the first would act on a state that
+        // was already stale by the time this callback ran at all.
+        const entry = entries[entries.length - 1]
         if (entry?.isIntersecting) requestOlderRef.current()
       },
-      { root, rootMargin: '300px 0px 0px 0px', threshold: 0 },
+      { root, rootMargin: '100% 0px 0px 0px', threshold: 0 },
     )
     observer.observe(sentinelNode)
-    return () => observer.disconnect()
+    observerRef.current = observer
+    return () => {
+      observer.disconnect()
+      observerRef.current = null
+    }
   }, [sentinelNode])
 
+  // `SessionRoute` renders this component with no `key` (app/project-routes.tsx),
+  // so navigating from one session to another reuses this exact instance and
+  // every ref above along with it. Left alone, a request-older fetch still in
+  // flight for the *old* session at the moment of that switch would settle
+  // afterwards and be read by the very next render's `oldestSeq`-keyed layout
+  // effect as if it were this (new) session's own settle — the same
+  // initial-load misfire that effect's own comment guards against, just
+  // reached through a different door. Bumping `olderRequestId` makes that
+  // stale fetch's own `.then()` a no-op the moment it does settle, rather
+  // than reading refs this reset already moved on from (or, worse, writing
+  // to them out from under whatever request the new session goes on to make
+  // of its own); the rest of this clears what a no-op `.then()` would
+  // otherwise have left behind, giving the newly-opened session the same
+  // clean defaults a first mount would have had.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId is the trigger, not a value read inside
+  useLayoutEffect(() => {
+    anchor.current = null
+    loadingOlder.current = false
+    lastRequestedBefore.current = undefined
+    noProgressCursor.current = undefined
+    pinned.current = true
+    olderRequestId.current++
+  }, [sessionId])
+
+  // Applies the prepend correction recorded in `anchor.current`, then decides
+  // whether the chain goes on: this is the one place a `requestOlder` chain
+  // actually continues itself (`requestOlder`'s own `.then()` above only ever
+  // ends one).
+  //
+  // Fires for three different reasons `oldestSeq` can change identity — the
+  // initial page landing, a session switch, or a genuine older-page fetch
+  // settling — and only the last of those has anything here to correct or
+  // recheck. `lastRequestedBefore.current` is what tells them apart: it is
+  // `undefined` for the first two (nothing has called `requestOlder` yet for
+  // *this* session — the layout effect above resets it on every `sessionId`
+  // change), and holds the settled fetch's own cursor for the third.
   // biome-ignore lint/correctness/useExhaustiveDependencies: oldestSeq is the trigger, not a value read inside
   useLayoutEffect(() => {
     const el = scroller.current
     const picked = anchor.current
     anchor.current = null
-    if (!el || !picked) return
-    // The anchor row is gone rather than merely pushed down: an older page
-    // restructured it (see `pickAnchor` above). Nothing here can say by how
-    // much the reader's position actually moved, so this does nothing rather
-    // than guess.
-    if (!picked.el.isConnected) return
-    // Inserting older messages above the viewport pushes everything already
-    // on screen down; reassigning `scrollTop` here rather than trusting the
-    // browser's own scroll anchoring, which iOS Safari does not implement at
-    // all. `offsetOf` is recomputed fresh on every `hold` pass, which is what
-    // makes this idempotent: once the delta below is applied, the anchor
-    // row's offset equals `picked.offset` again and every later pass adds
-    // zero — until a placeholder resolves to its real height and throws the
-    // delta off again, which is exactly what `hold` keeps re-correcting for.
-    let lastWritten = el.scrollTop
-    hold(() => {
-      // The anchor row can itself be removed mid-hold — a second older page
-      // landing inside the same 500ms window, restructuring the tree again
-      // (see `pickAnchor` above). Nothing left to correct against, so this
-      // is where the hold gives up rather than measuring a detached node.
-      if (!picked.el.isConnected) return 0
-      // The reader moved the scrollbar themselves since the last write —
-      // under momentum, or simply reading on — so the delta below has to be
-      // measured against *their* position, not the one recorded when this
-      // hold started or last corrected. Reporting the drift itself as
-      // "moved" is what keeps a genuine rebase from ever reading as settled.
-      if (el.scrollTop !== lastWritten) {
-        const drift = el.scrollTop - lastWritten
-        picked.offset = offsetOf(picked.el, el)
-        lastWritten = el.scrollTop
-        return drift
-      }
-      const before = el.scrollTop
+    if (el && picked?.el.isConnected) {
+      // Inserting older messages above the viewport pushes everything
+      // already on screen down; reassigning `scrollTop` here rather than
+      // trusting the browser's own scroll anchoring, which iOS Safari does
+      // not implement at all. This is a no-op wherever the browser already
+      // anchored (Chrome, Firefox): the anchor row's offset already equals
+      // `picked.offset`.
       el.scrollTop += offsetOf(picked.el, el) - picked.offset
-      lastWritten = el.scrollTop
-      return lastWritten - before
-    })
+    }
+    // The anchor row being gone rather than merely pushed down — an older
+    // page restructured it, see `pickAnchor`'s own comment — leaves nothing
+    // here able to say by how much the reader's position actually moved, so
+    // the branch above simply does not run rather than guess.
+    const requestedBefore = lastRequestedBefore.current
+    if (!el || requestedBefore === undefined) return
+    // This settle is spoken for from here on, regardless of whether
+    // `requestOlder`'s own `.then()` has actually run yet — query-core
+    // resolves that promise on its own schedule, not ordered against React's
+    // commit of the very state change this effect is reacting to. Clearing
+    // the guard here too is what keeps the continuation just below from
+    // tripping over a `.then()` that simply hasn't caught up yet.
+    loadingOlder.current = false
+    lastRequestedBefore.current = undefined
+    // The reader may never have left the bottom at all — a short first page
+    // auto-loading more before they have touched the scrollbar, say (see
+    // `requestOlder`'s own comment on why this is not decided there).
+    // Recomputed from the geometry the correction above just committed, not
+    // carried over from whatever `requestOlder` set it to when the fetch
+    // started.
+    pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+    // Forces the browser to redeliver an initial entry for the sentinel at
+    // its own next rendering update, evaluated against wherever the reader
+    // has actually scrolled to by then — not the geometry this effect just
+    // committed. A page landing inside a long commit frame can push the
+    // sentinel just outside `inLoadZone` at the exact instant the check below
+    // runs; if the reader's own wheel or fling carries it back inside before
+    // the browser's next update, a plain observer never saw an "outside"
+    // state to transition *from* and has nothing to call back about — this
+    // is what makes it look again anyway, rather than trusting a transition
+    // that may never come. Skipped once history is exhausted: nothing is
+    // left to watch, and the sentinel is on its way out of the tree in this
+    // same commit.
+    if (messages.hasPreviousPage && observerRef.current && sentinelNode) {
+      observerRef.current.unobserve(sentinelNode)
+      observerRef.current.observe(sentinelNode)
+    }
+    // What just landed can leave the sentinel still inside the load zone: a
+    // page of a hundred messages often collapses into very little rendered
+    // height (a grouped, collapsed task row), or an ordinary scroll simply
+    // outran the fetch. An IntersectionObserver only fires on a *transition*
+    // into intersection, so nothing else here will ever ask again on its
+    // own; this asks again itself, against the geometry just committed
+    // above, instead of waiting on a scroll event that may never come.
+    //
+    // `oldestSeq < requestedBefore`, not just "did it change": the structural
+    // half of not looping forever (`lastRequestedBefore`'s own comment
+    // above) — a continuation only ever fires with a cursor strictly older
+    // than the one that was just requested, so this chain is bounded by how
+    // far `seq` can still fall no matter what a page claims about `hasOlder`.
+    if (
+      messages.hasPreviousPage &&
+      sentinelNode &&
+      inLoadZone(sentinelNode, el) &&
+      oldestSeq !== undefined &&
+      oldestSeq < requestedBefore
+    ) {
+      requestOlder()
+    }
   }, [oldestSeq])
 
-  // Keeps the transcript pinned to the bottom while its content changes, not
-  // only when a message arrives: `.row`'s `content-visibility: auto` (see
-  // transcript.tsx) makes `scrollHeight` an *estimate* for a row never yet
-  // rendered, so `hold`'s later passes are what catch a row settling taller
-  // than its placeholder once markdown or code in it resolves.
+  // Keeps the transcript pinned to the bottom while its content changes. One
+  // write is enough now: every row renders at its real height as soon as it
+  // commits (see transcript.tsx — there is no `content-visibility` placeholder
+  // left to resolve afterwards), so there is nothing left for a follow-up
+  // pass to catch the way there was when this held the position open over
+  // several frames.
   //
   // Keyed on `messages.messages`' own identity, not a ResizeObserver on the
   // rendered content: `mergeSessionMessages`/`selectMessages`
   // (lib/message-cache.ts, hooks/use-sessions.ts) hand back the exact same
   // array reference for an arrival that changed nothing, so this never fires
-  // for a render that has nothing new for it. Given up along with the
-  // ResizeObserver it replaces: a row that grows *without* a new message
-  // arriving — a running task's progress note updating in place — is no
-  // longer followed. Re-adding that would mean re-adding the write-triggers-
-  // resize-triggers-write loop that made the phone case unreasonable in the
-  // first place.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: holdAtBottom is a fresh closure every render (it closes only over refs, so it is never stale); messages.messages is the one thing that should retrigger this
+  // for a render that has nothing new for it. Given up deliberately along
+  // with the ResizeObserver it replaced: a row that grows *without* a new
+  // message arriving — a running task's progress note updating in place — is
+  // no longer followed. Re-adding that would mean re-adding the
+  // write-triggers-resize-triggers-write loop that made the phone case
+  // unreasonable in the first place.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pinToBottom is a fresh closure every render (it closes only over refs, so it is never stale); messages.messages is the one thing that should retrigger this
   useLayoutEffect(() => {
     if (!scroller.current || !pinned.current || interacting.current) return
-    holdAtBottom()
+    pinToBottom()
   }, [messages.messages])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: clearInteractionTimer is a fresh closure every render (it closes only over the interactionTimer ref); this runs once, on unmount, regardless
   useEffect(() => {
-    return () => {
-      clearInteractionTimer()
-      for (const frame of pendingFrames.current) cancelAnimationFrame(frame)
-    }
+    return () => clearInteractionTimer()
   }, [])
 
   const onScroll = () => {
@@ -679,7 +836,7 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={requestOlder}
+                    onClick={() => requestOlder(false)}
                     disabled={messages.isLoadingOlder}
                   >
                     {messages.isLoadingOlder && (

@@ -1,7 +1,9 @@
 // The mechanisms session-page.tsx uses to keep the transcript's scroll
-// position sane: the IntersectionObserver-driven "load older" trigger, the
-// viewport-offset anchor that compensates a prepend, the `hold`-based
-// pin-to-bottom effect, and the touch guard that suppresses it mid-gesture.
+// position sane: the IntersectionObserver-driven "load older" trigger and its
+// post-settle geometric re-check, the viewport-offset anchor that compensates
+// a prepend (applied once, synchronously, at commit), the pin-to-bottom
+// effect (also one write at commit), and the touch guard that suppresses it
+// mid-gesture.
 //
 // WHAT IS SIMULATED, AND WHY IT STILL MEANS SOMETHING
 //
@@ -18,16 +20,26 @@
 //     at `i * ROW_HEIGHT` in the document, `scrollTop` clamps to
 //     `[0, scrollHeight - clientHeight]` the way a real one does, and
 //     `getBoundingClientRect()` is derived from that model for both the
-//     scroller and its rows;
+//     scroller and its rows — and for the sentinel, which sits at document
+//     position 0 (immediately before every row), so its own viewport offset
+//     is `-scrollTop`, exactly what `inLoadZone` (session-page.tsx) assumes;
 //   - a recording `IntersectionObserver` that remembers its callback, the
 //     options it was constructed with (including `root`), and the node it
 //     was pointed at, so a test can decide when the sentinel "intersects";
-//   - a recording `requestAnimationFrame`/`cancelAnimationFrame` pair, so
-//     `hold`'s follow-up passes run only when a test asks for them, and a
-//     cancelled frame can be told apart from one that ran, plus a fake clock
-//     for its 500ms hard stop (ticking fake frames does not advance any real
-//     one) and a mutable `extraGrowth` knob standing in for a row still
-//     resolving from its placeholder over several of them.
+//   - a recording `requestAnimationFrame`/`cancelAnimationFrame` pair, kept
+//     only as a regression guard: the production code no longer schedules a
+//     frame anywhere (both the prepend correction and the pin-to-bottom write
+//     happen once, synchronously, inside a layout effect), so every test here
+//     that touches this expects it to stay empty.
+//
+// The mocked backend (`respond`, set per test) is always finite: every
+// `before` cursor a test hands out eventually leads to `hasOlder: false`, the
+// same contract the real endpoint keeps. A backend that kept paginating
+// forever would be exercising a bug this component has to survive, not one
+// the mock should manufacture — the one test that hands back a page making no
+// progress (section 4, below) does so once, on purpose, and asserts the chain
+// ends there rather than asserts anything about what a non-terminating mock
+// would do to it.
 // Everything else is the real thing: the real component, the real hooks, the
 // real query client, the real cache.
 //
@@ -37,10 +49,9 @@
 // verify: that a real browser delivers an IntersectionObserver callback only
 // on a genuine transition into intersection (the "re-arm" rule the production
 // comment relies on — here a test fires it exactly when it wants to, which
-// assumes but does not prove that rule), that `content-visibility: auto`
-// makes `scrollHeight` an underestimate in the first place, or any of the
-// touch/momentum/keyboard/overscroll behaviour a real phone actually produces.
-// Those need a real browser; see the report.
+// assumes but does not prove that rule), or any of the touch/momentum/
+// keyboard/overscroll behaviour a real phone actually produces. Those need a
+// real browser; see the report.
 //
 // Class names prove nothing here — Tailwind utility classes are an
 // implementation detail a later restyle can change without changing
@@ -118,6 +129,23 @@ let fail = false
 let delay = 0
 /** Every send the composer attempted. */
 let sends: unknown[] = []
+/**
+ * A one-shot pause point the mocked backend awaits before resolving, for
+ * pinning a request precisely between "the fetch has resolved" and "React has
+ * committed the page it produced" — the gap `session-page.tsx`'s own
+ * `loadingOlder` guard now has to stay closed across. `openGate()` arms it for
+ * exactly the *next* call into the mock, whichever query that turns out to be;
+ * every call after that one proceeds unimpeded, because the mock clears this
+ * the moment it reads it, before ever awaiting it.
+ */
+let gate: Promise<void> | null = null
+function openGate(): () => void {
+  let release: () => void = () => {}
+  gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return release
+}
 
 const MESSAGES_CLIENT = '@/shared/api/generated/clients/getApiSessionsIdMessages'
 const SEND_CLIENT = '@/shared/api/generated/clients/postApiSessionsIdMessages'
@@ -140,6 +168,12 @@ const FILES_CLIENT = '@/shared/api/generated/clients/getApiSessionsIdFiles'
 await mockModule(MESSAGES_CLIENT, () => ({
   getApiSessionsIdMessages: async (opts: { query?: Query }) => {
     calls.push(opts.query)
+    // Read and cleared before awaiting it, not after: this is what makes the
+    // gate one-shot for whichever call happens to see it armed, rather than
+    // pausing every call made while a test forgets to release it.
+    const currentGate = gate
+    gate = null
+    if (currentGate) await currentGate
     if (delay > 0) await new Promise((r) => setTimeout(r, delay))
     if (fail && opts.query?.before !== undefined) throw new Error('older page failed')
     return { data: respond(opts.query) }
@@ -182,16 +216,6 @@ const realEventSource = (globalThis as { EventSource?: unknown }).EventSource
 const ROW_HEIGHT = 100
 const VIEWPORT = 300
 
-/** Extra pixels added to the container's simulated `scrollHeight`, on top of
- *  `rowCount() * ROW_HEIGHT` — the one thing a fixed-height-per-row model
- *  cannot stand in for on its own. A test drives this to fake a row still
- *  resolving from its `content-visibility: auto` placeholder into its real
- *  height over several frames, which is exactly what `hold`'s own
- *  re-assertion (session-page.tsx) exists to correct for. Reset to 0 in
- *  `beforeEach` — every test that never touches it gets the trivial
- *  "nothing ever grows" model the rest of this file relies on. */
-let extraGrowth = 0
-
 let client: QueryClient
 let container: HTMLDivElement
 let root: Root
@@ -214,7 +238,7 @@ function simulateLayout(el: HTMLElement) {
   let top = 0
   Object.defineProperty(el, 'scrollHeight', {
     configurable: true,
-    get: () => rowCount() * ROW_HEIGHT + extraGrowth,
+    get: () => rowCount() * ROW_HEIGHT,
   })
   Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => VIEWPORT })
   Object.defineProperty(el, 'scrollTop', {
@@ -252,6 +276,18 @@ function fakeRect(top: number, height: number): DOMRect {
  * would report it for a non-scrolling ancestor pinned at the viewport's own
  * top edge (which is what treating the scroller's own rect as `{ top: 0 }`
  * below amounts to).
+ *
+ * The sentinel gets the same treatment, not left to fall through to
+ * happy-dom's own always-zero stub: it renders immediately before every row
+ * (session-page.tsx), so its own document position is a fixed 0 — a
+ * viewport-relative top of `-scrollTop`, following the scroll exactly the
+ * way `inLoadZone` (session-page.tsx) assumes it does. Left unhandled, this
+ * fell through to the always-`{ top: 0 }` stub below regardless of
+ * `scrollTop`, which made `inLoadZone` read as permanently true and every
+ * "out of zone" assertion below pass for the wrong reason. Identified by
+ * `RecordingIntersectionObserver`'s own record of what it is watching,
+ * rather than a test-only attribute session-page.tsx would otherwise have to
+ * carry for no production reason.
  */
 const realGetBoundingClientRect = Element.prototype.getBoundingClientRect
 Element.prototype.getBoundingClientRect = function (this: Element) {
@@ -260,12 +296,19 @@ Element.prototype.getBoundingClientRect = function (this: Element) {
     const index = rows().indexOf(this as HTMLElement)
     if (index !== -1) return fakeRect(index * ROW_HEIGHT - scroller.scrollTop, ROW_HEIGHT)
   }
+  if (RecordingIntersectionObserver.live.some((o) => o.node === this)) {
+    return fakeRect(-scroller.scrollTop, 0)
+  }
   return realGetBoundingClientRect.call(this)
 }
 
 /** A user scroll: the position moves, then the container reports it. React
  *  attaches `onScroll` to the node itself (scroll does not bubble), so a
- *  direct dispatch is the same event the browser would deliver. */
+ *  direct dispatch is the same event the browser would deliver. Stands in for
+ *  any input that moves `scrollTop` without a touch sequence around it —
+ *  wheel, trackpad, keyboard, dragging the scrollbar — none of which this
+ *  component tells apart from one another; only `onTouchStart`/`onTouchEnd`
+ *  below, dispatched separately, mean "a finger is on the glass". */
 async function scrollTo(top: number) {
   await act(async () => {
     scroller.scrollTop = top
@@ -291,6 +334,21 @@ async function touch(type: 'touchstart' | 'touchend' | 'touchcancel') {
 class RecordingIntersectionObserver {
   static live: RecordingIntersectionObserver[] = []
   node: Element | null = null
+  /** Every `observe()`/`unobserve()` call in order, so a test can assert
+   *  session-page.tsx's own unobserve-then-observe re-registration happened
+   *  (or didn't) without inferring it from a side effect three steps removed. */
+  observeLog: Array<'observe' | 'unobserve'> = []
+  /** Set by every `observe()` call, consumed by `deliverFreshEntry` below —
+   *  the one part of a real observer's own behaviour a hand-fired `fire()`
+   *  cannot stand in for. A target newly (re-)registered — `observe()` called
+   *  on it while this instance was not already watching it — is queued for
+   *  its own "initial" notification at the browser's *next* intersection-
+   *  checking round, evaluated against whatever is true then, not against a
+   *  boolean a test hands in and not against geometry frozen at the moment
+   *  `observe()` was called. A plain geometry change with no fresh `observe()`
+   *  behind it delivers nothing — matching a real observer's transition-only
+   *  rule for a target it is already watching. */
+  private pendingFreshEntry = false
   constructor(
     readonly callback: IntersectionObserverCallback,
     readonly options?: IntersectionObserverInit,
@@ -299,8 +357,12 @@ class RecordingIntersectionObserver {
   }
   observe(node: Element) {
     this.node = node
+    this.observeLog.push('observe')
+    this.pendingFreshEntry = true
   }
-  unobserve() {}
+  unobserve(_node: Element) {
+    this.observeLog.push('unobserve')
+  }
   disconnect() {
     RecordingIntersectionObserver.live = RecordingIntersectionObserver.live.filter((o) => o !== this)
     this.node = null
@@ -316,53 +378,57 @@ class RecordingIntersectionObserver {
       this as unknown as IntersectionObserver,
     )
   }
+  /** Delivers one *batch* containing an entry per state given, in order — the
+   *  way a real observer can when it and the compositor never got a chance to
+   *  talk between two of the sentinel's own transitions (no native scroll
+   *  anchoring to smooth a page's arrival over, e.g. iOS Safari). Session-page.tsx
+   *  has to act on the *last* one, not the first. */
+  fireBatch(states: boolean[]) {
+    this.callback(
+      states.map((isIntersecting) => ({ isIntersecting, target: this.node }) as IntersectionObserverEntry),
+      this as unknown as IntersectionObserver,
+    )
+  }
+  /** Stands in for the browser's own next intersection-checking round
+   *  delivering a freshly-(re)observed target's initial entry, computed from
+   *  the node's actual current geometry against the same `rootMargin`
+   *  (`100%` of `root`'s height, the only margin this component ever
+   *  constructs one with) the production observer uses — not a boolean the
+   *  test hands in, and not whatever was true when `observe()` was called. */
+  deliverFreshEntry() {
+    if (!this.pendingFreshEntry || !this.node) return
+    this.pendingFreshEntry = false
+    const root = this.options?.root as HTMLElement | undefined
+    if (!root) return
+    const isIntersecting = this.node.getBoundingClientRect().top >= -root.clientHeight
+    this.fire(isIntersecting)
+  }
 }
 const realIntersectionObserver = (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver
 ;(globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = RecordingIntersectionObserver
 
-// --- `hold`'s animation frames, and its clock ------------------------------------
+// --- a regression guard: nothing here should ever schedule a frame -------------
 
 /** Records every frame `requestAnimationFrame` schedules and every one
- *  `cancelAnimationFrame` cancels, and runs nothing until a test asks it to —
- *  `hold` (session-page.tsx) schedules its next pass from inside the
- *  previous one, so "advance one frame" has to mean exactly that, not "run
- *  every frame there will ever be". */
+ *  `cancelAnimationFrame` cancels. Nothing in session-page.tsx calls either
+ *  any more — the prepend correction and the pin-to-bottom write are each one
+ *  synchronous write inside a layout effect — so every test that checks this
+ *  expects it to stay empty; a regression that brings back a per-frame loop
+ *  would show up here first. */
+let pendingFrameIds: number[] = []
 let frameId = 0
-let pendingFrames: Array<{ id: number; fn: FrameRequestCallback }> = []
-let cancelledFrames: number[] = []
-
-function fakeRequestAnimationFrame(fn: FrameRequestCallback): number {
+function fakeRequestAnimationFrame(): number {
   const id = ++frameId
-  pendingFrames.push({ id, fn })
+  pendingFrameIds.push(id)
   return id
 }
 function fakeCancelAnimationFrame(id: number): void {
-  cancelledFrames.push(id)
-  pendingFrames = pendingFrames.filter((f) => f.id !== id)
+  pendingFrameIds = pendingFrameIds.filter((f) => f !== id)
 }
 const realRAF = globalThis.requestAnimationFrame
 const realCAF = globalThis.cancelAnimationFrame
 globalThis.requestAnimationFrame = fakeRequestAnimationFrame as typeof requestAnimationFrame
 globalThis.cancelAnimationFrame = fakeCancelAnimationFrame as typeof cancelAnimationFrame
-
-/** `hold`'s 500ms hard stop is measured against `Date.now()`, not a frame
- *  count — ticking fake frames above does not advance any clock, so proving
- *  that bound actually fires needs a clock a test can move by hand instead of
- *  waiting out 500 real milliseconds. Reset to 0 in `beforeEach`. */
-let fakeNow = 0
-const realDateNow = Date.now
-Date.now = () => fakeNow
-
-/** Advances exactly one animation frame: everything scheduled so far runs
- *  once, and anything a running callback schedules for the *next* frame
- *  waits for the next call. */
-async function tick() {
-  const due = pendingFrames
-  pendingFrames = []
-  await act(async () => {
-    for (const { fn } of due) fn(0)
-  })
-}
 
 afterAll(() => {
   ;(globalThis as { EventSource?: unknown }).EventSource = realEventSource
@@ -370,7 +436,6 @@ afterAll(() => {
   Element.prototype.getBoundingClientRect = realGetBoundingClientRect
   globalThis.requestAnimationFrame = realRAF
   globalThis.cancelAnimationFrame = realCAF
-  Date.now = realDateNow
 })
 
 const { SessionPage } = await import('../src/features/sessions/components/session-page')
@@ -424,12 +489,10 @@ beforeEach(() => {
   sends = []
   fail = false
   delay = 0
+  gate = null
   RecordingIntersectionObserver.live = []
-  pendingFrames = []
-  cancelledFrames = []
+  pendingFrameIds = []
   frameId = 0
-  extraGrowth = 0
-  fakeNow = 0
 })
 
 /**
@@ -484,6 +547,65 @@ async function mount(
   // happy-dom's own permanently-zero `scrollHeight` and this harness never
   // gets a second chance at it.
   simulateLayout(scroller)
+  await settle(() => !scroller.textContent?.includes('common.loading'))
+}
+
+/**
+ * Re-renders the same root with a different `sessionId` — the same component
+ * instance, not a fresh mount, exactly the way `SessionRoute`
+ * (app/project-routes.tsx) hands a new `sessionId` prop to this same
+ * component on an ordinary in-app navigation between sessions. `mount()`'s
+ * own `createRoot` call would build an entirely new instance instead, with
+ * every ref back at its initial value — the opposite of what a test of *this*
+ * instance's own refs surviving a switch needs.
+ *
+ * Both the new session's row and its first page of messages are pre-seeded —
+ * a warm switch, the same cache state `mount()`'s own `messagesSeed`
+ * parameter puts session s1 in for "the sentinel observer is created on a
+ * warm cache" above — rather than leaving messages to load cold. On a warm
+ * switch every one of this component's own layout effects, the pin-to-bottom
+ * one included, fires synchronously as part of *this* commit rather than a
+ * later one this function has already returned from, which is why
+ * `simulateLayout` is (re)installed on `scroller` *before* triggering the
+ * render below, not after: installed only afterward, that first synchronous
+ * pin write would already have happened against happy-dom's own real,
+ * permanently-zero `scrollHeight`, and nothing here gets a second chance at
+ * it (see `mount()`'s own comment on the same requirement).
+ */
+async function switchSession(
+  newSessionId: string,
+  messagesSeed: { messages: Row[]; hasOlder: boolean },
+  sessionOverrides: Record<string, unknown> = {},
+) {
+  client.setQueryData(
+    getApiSessionsIdQueryKey({ path: { id: newSessionId } }),
+    session({ id: newSessionId, ...sessionOverrides }),
+  )
+  client.setQueryData(sessionMessagesKey(newSessionId), {
+    pages: [messagesSeed],
+    pageParams: [undefined],
+  })
+  const scrollerBeforeSwitch = scroller
+  simulateLayout(scroller)
+  await act(async () => {
+    root.render(
+      <I18nextProvider i18n={testI18n}>
+        <QueryClientProvider client={client}>
+          <SessionPage projectId="p1" sessionId={newSessionId} />
+        </QueryClientProvider>
+      </I18nextProvider>,
+    )
+  })
+  const footer = container.querySelector('footer')
+  if (!footer?.previousElementSibling) {
+    throw new Error('no scroll container before the composer after switching session')
+  }
+  scroller = footer.previousElementSibling as HTMLElement
+  // Only reinstalled if `.scroll` turned out to be a genuinely new node:
+  // `simulateLayout` closes over its own fresh `scrollTop`, starting at 0, so
+  // calling it again on the *same* node here would silently throw away the
+  // pin-to-bottom write the render above already made against it.
+  if (scroller !== scrollerBeforeSwitch) simulateLayout(scroller)
   await settle(() => !scroller.textContent?.includes('common.loading'))
 }
 
@@ -586,22 +708,69 @@ test('the sentinel observer is created on a warm cache, where it mounts in the s
   await unmount()
 })
 
+test('the sentinel is watched with a one-viewport prefetch margin above the top', async () => {
+  // 300px used to be the margin; a normal scroll reaches the top before a
+  // fetch that far out can land. `inLoadZone` (the post-settle geometric
+  // re-check, exercised in section 4 below) has to agree with this exact
+  // margin, or the two mechanisms disagree about what "in the zone" means.
+  respond = (query) =>
+    query?.before === undefined
+      ? { messages: range(10, 5), hasOlder: true }
+      : { messages: range(5, 5), hasOlder: false }
+  await mount()
+
+  expect(olderObserver()?.options?.rootMargin).toBe('100% 0px 0px 0px')
+  await unmount()
+})
+
 // --- 2. pin to the bottom, and letting go of it -------------------------------
 
 test('a transcript taller than the viewport opens at the bottom', async () => {
   respond = () => ({ messages: range(1, 5), hasOlder: false })
   await mount()
 
-  // The pin effect's own `fn()` runs synchronously at commit, inside the same
-  // `act` the mount already awaited — unlike the ResizeObserver this replaced,
-  // nothing here has to be told to fire by hand.
+  // The pin effect's own write runs synchronously at commit, inside the same
+  // `act` the mount already awaited — unlike the ResizeObserver this
+  // replaced, nothing here has to be told to fire by hand, and nothing here
+  // schedules a frame to do it in either.
   // Not `scrollHeight`: a browser clamps the pin to the last scrollable pixel.
   expect(scroller.scrollTop).toBe(200)
   expect(scroller.scrollTop).toBe(bottom())
+  expect(pendingFrameIds.length).toBe(0)
+  await unmount()
+})
+
+test('initial open pins to the bottom and issues no older-page request when the sentinel lands out of the zone', async () => {
+  // Regression for the ordering defect: the `oldestSeq`-keyed layout effect
+  // used to run its geometric re-check on the very first commit too — before
+  // the pin effect had even scrolled anywhere — and would find the sentinel
+  // (at `scrollTop` 0) "in zone" and fetch again, flipping `pinned` to
+  // `false` before the pin effect got a chance to read it.
+  respond = (query) =>
+    query?.before === undefined
+      ? { messages: range(10, 10), hasOlder: true }
+      : { messages: range(5, 5), hasOlder: false }
+  await mount()
+
+  // 10 rows of history pins at 700, which puts the sentinel (`-scrollTop`)
+  // at -700 — well outside the one-viewport (-300) zone.
+  expect(scroller.scrollTop).toBe(700)
+  expect(scroller.scrollTop).toBe(bottom())
+  expect(calls).toEqual([{ limit: 100 }])
+
+  // Waiting longer proves this is a stop, not a fetch quietly still in
+  // flight — the same shape as the other "no follow-up" tests in section 4.
+  await settle(() => false, 10)
+  expect(calls).toEqual([{ limit: 100 }])
   await unmount()
 })
 
 test('a message arriving while the reader has scrolled up does not move them', async () => {
+  // `scrollTo` stands in for any input that moves `scrollTop` without a touch
+  // sequence around it — wheel, trackpad, keyboard, the scrollbar — none of
+  // which `onScroll` (session-page.tsx) tells apart; all of them clear
+  // `pinned` the same way. No `touchstart`/`touchend` fire in this test at
+  // all, so this is specifically the non-touch path.
   respond = () => ({ messages: range(1, 5), hasOlder: false })
   await mount()
 
@@ -619,10 +788,11 @@ test('a message arriving while the reader has scrolled up does not move them', a
   await unmount()
 })
 
-test('a message arriving while the reader is at the bottom follows it down', async () => {
+test('a message arriving while the reader is at the bottom follows it down, in one write with no rAF', async () => {
   respond = () => ({ messages: range(1, 5), hasOlder: false })
   await mount()
   await scrollTo(bottom())
+  pendingFrameIds = []
 
   await act(async () => {
     appendStreamedMessage(client, 's1', [msg(6)])
@@ -631,6 +801,9 @@ test('a message arriving while the reader is at the bottom follows it down', asy
 
   expect(scroller.scrollTop).toBe(300)
   expect(scroller.scrollTop).toBe(bottom())
+  // One synchronous write at commit, not a loop: nothing here ever asked for
+  // a frame.
+  expect(pendingFrameIds.length).toBe(0)
   await unmount()
 })
 
@@ -650,54 +823,7 @@ test('within 80px of the bottom still counts as being at the bottom', async () =
   await unmount()
 })
 
-test('a hold with nothing left to correct settles in exactly two frames and stops scheduling', async () => {
-  // Nothing in this simulated model actually grows after commit unless a test
-  // drives `extraGrowth` itself (see the "hold" section below), so both of
-  // `hold`'s passes after the synchronous one at commit find the position
-  // already correct. Two is not a hardcoded count here — it is the minimum
-  // `hold` ever needs: one frame to notice nothing moved, a second to confirm
-  // that still holds, which is what "two consecutive" requires.
-  respond = () => ({ messages: range(1, 5), hasOlder: false })
-  await mount()
-  const atBottom = scroller.scrollTop
-  expect(atBottom).toBe(bottom())
-
-  expect(pendingFrames.length).toBeGreaterThan(0)
-  await tick()
-  expect(scroller.scrollTop).toBe(atBottom)
-  await tick()
-  expect(scroller.scrollTop).toBe(atBottom)
-  // Two consecutive zero-delta passes are enough on their own: the hold lets
-  // go instead of polling forever the way a loop with no exit condition would.
-  expect(pendingFrames.length).toBe(0)
-  await unmount()
-})
-
-test('a second arrival before the first one`s follow-up frames run cancels them', async () => {
-  respond = () => ({ messages: range(1, 5), hasOlder: false })
-  await mount()
-  pendingFrames = []
-  cancelledFrames = []
-
-  await act(async () => {
-    appendStreamedMessage(client, 's1', [msg(6)])
-  })
-  await settle(() => rowCount() === 6)
-  const firstFrame = pendingFrames[0]?.id
-  expect(firstFrame).toBeDefined()
-
-  await act(async () => {
-    appendStreamedMessage(client, 's1', [msg(7)])
-  })
-  await settle(() => rowCount() === 7)
-
-  // The frame the first arrival scheduled is cancelled, not left to run on
-  // top of whatever the second arrival's own pass does.
-  expect(cancelledFrames).toContain(firstFrame)
-  await unmount()
-})
-
-test('a touch in progress suppresses the pin until it ends', async () => {
+test('a touch in progress suppresses the pin until it ends, then catches up in one write', async () => {
   respond = () => ({ messages: range(1, 5), hasOlder: false })
   await mount()
   await scrollTo(bottom())
@@ -715,12 +841,16 @@ test('a touch in progress suppresses the pin until it ends', async () => {
   expect(scroller.scrollTop).toBe(wasAtBottom)
   expect(scroller.scrollTop).not.toBe(bottom())
 
+  pendingFrameIds = []
   await touch('touchend')
   // The 200ms window closes on a real timer — nothing here fakes it, so this
   // waits on the wall clock rather than a controllable frame.
   await settle(() => scroller.scrollTop === bottom(), 60)
 
   expect(scroller.scrollTop).toBe(bottom())
+  // The catch-up is the same single write as every other arrival, not a
+  // per-frame chase.
+  expect(pendingFrameIds.length).toBe(0)
   await unmount()
 })
 
@@ -757,128 +887,6 @@ test('momentum scrolling after a touch ends keeps the guard armed', async () => 
   await unmount()
 })
 
-// --- hold: how long it keeps re-asserting, and what ends it -------------------
-
-test('a hold keeps re-asserting while the target keeps moving, and stops once it stabilises twice in a row', async () => {
-  // Stands in for a row still resolving from its `content-visibility: auto`
-  // placeholder into its real height over several frames — this simulated
-  // model has no layout to do that on its own (see the file header), so the
-  // growth is driven by hand, one `extraGrowth` bump per tick.
-  respond = () => ({ messages: range(1, 5), hasOlder: false })
-  await mount()
-  await scrollTo(bottom())
-
-  await act(async () => {
-    appendStreamedMessage(client, 's1', [msg(6)])
-  })
-  await settle(() => rowCount() === 6)
-  expect(scroller.scrollTop).toBe(bottom())
-
-  // Frame 1: content grows further before the hold's next pass runs.
-  extraGrowth = 40
-  await tick()
-  expect(scroller.scrollTop).toBe(bottom())
-  expect(pendingFrames.length).toBeGreaterThan(0)
-
-  // Frame 2: it grows again — a real placeholder resolving is not a single
-  // step, and neither is this.
-  extraGrowth = 90
-  await tick()
-  expect(scroller.scrollTop).toBe(bottom())
-  expect(pendingFrames.length).toBeGreaterThan(0)
-
-  // Frame 3: nothing has changed since frame 2 — one settled pass, but one on
-  // its own is not enough to stop.
-  await tick()
-  expect(pendingFrames.length).toBeGreaterThan(0)
-
-  // Frame 4: settled a second time running — the hold lets go.
-  await tick()
-  expect(pendingFrames.length).toBe(0)
-  expect(scroller.scrollTop).toBe(bottom())
-  await unmount()
-})
-
-test('a hold that never stabilises is still cut off once 500ms have passed', async () => {
-  respond = () => ({ messages: range(1, 5), hasOlder: false })
-  await mount()
-  await scrollTo(bottom())
-
-  await act(async () => {
-    appendStreamedMessage(client, 's1', [msg(6)])
-  })
-  await settle(() => rowCount() === 6)
-
-  // Content keeps growing forever, so nothing here would ever hand `hold` two
-  // consecutive settled frames on its own — the clock is the only thing that
-  // can end this, which is the point of the test.
-  let ticks = 0
-  while (pendingFrames.length > 0 && ticks < 20) {
-    extraGrowth += 10
-    fakeNow += 60
-    await tick()
-    ticks++
-  }
-
-  expect(pendingFrames.length).toBe(0)
-  // Comfortably past the 500ms bound, not right at its edge — the deadline,
-  // not a lucky stabilisation, is what ended this.
-  expect(fakeNow).toBeGreaterThanOrEqual(500)
-  await unmount()
-})
-
-test('a touch beginning after a hold has already made its first pass still aborts it', async () => {
-  // The "suppresses the pin until it ends" test above covers a touch already
-  // in progress before the pin effect ever runs, which never calls `hold` at
-  // all. This covers what only a per-frame check inside `correct` itself can
-  // catch: the touch starting *after* the hold's first pass has already run.
-  respond = () => ({ messages: range(1, 5), hasOlder: false })
-  await mount()
-  await scrollTo(bottom())
-
-  await act(async () => {
-    appendStreamedMessage(client, 's1', [msg(6)])
-  })
-  await settle(() => rowCount() === 6)
-  expect(scroller.scrollTop).toBe(bottom())
-  expect(pendingFrames.length).toBeGreaterThan(0)
-
-  // Content is still resolving — left alone this would keep moving the
-  // scrollbar for several more frames, as the test above shows.
-  extraGrowth = 200
-  const growingBottom = bottom()
-
-  await touch('touchstart')
-  await tick()
-  // Aborted, not merely idle: the scrollbar never chased the new bottom.
-  expect(scroller.scrollTop).not.toBe(growingBottom)
-  expect(pendingFrames.length).toBeGreaterThan(0)
-
-  await tick()
-  expect(pendingFrames.length).toBe(0)
-  expect(scroller.scrollTop).not.toBe(growingBottom)
-
-  await touch('touchend')
-  await unmount()
-})
-
-test('unmounting mid-hold cancels whatever frame is still outstanding', async () => {
-  respond = () => ({ messages: range(1, 5), hasOlder: false })
-  await mount()
-
-  await act(async () => {
-    appendStreamedMessage(client, 's1', [msg(6)])
-  })
-  await settle(() => rowCount() === 6)
-
-  const outstanding = pendingFrames[0]?.id
-  expect(outstanding).toBeDefined()
-
-  await unmount()
-
-  expect(cancelledFrames).toContain(outstanding)
-})
-
 // --- 3. the prepend, and the position it has to preserve ----------------------
 
 test('older messages land above without moving what the reader is looking at', async () => {
@@ -902,6 +910,23 @@ test('older messages land above without moving what the reader is looking at', a
   // the reader's eyes only if the position moved down by exactly that much.
   expect(scroller.scrollHeight).toBe(1000)
   expect(scroller.scrollTop).toBe(550)
+  await unmount()
+})
+
+test('the prepend correction is applied synchronously at commit, with no rAF follow-up', async () => {
+  respond = (query) =>
+    query?.before === undefined
+      ? { messages: range(10, 5), hasOlder: true }
+      : { messages: range(5, 5), hasOlder: false }
+  await mount()
+  await scrollTo(50)
+  pendingFrameIds = []
+
+  await click(loadOlderButton() as Element)
+  await settle(() => rowCount() === 10)
+
+  expect(scroller.scrollTop).toBe(550)
+  expect(pendingFrameIds.length).toBe(0)
   await unmount()
 })
 
@@ -983,11 +1008,11 @@ test('scrolling further while the older page is still loading is not fought', as
   await unmount()
 })
 
-test('the reader scrolling mid-hold rebases the anchor instead of ending the hold early', async () => {
-  // `onScroll`'s own live re-recording of the anchor's offset (the test
-  // above) only matters before the layout effect below has run — once it has
-  // consumed `anchor.current` into a local `picked`, a further scroll can
-  // only be caught by `hold`'s own per-frame check.
+test('a reader who scrolls immediately after a prepend correction is left alone', async () => {
+  // With the correction now a single write at commit, there is no window
+  // afterwards for a second pass to fight the reader in — this is the
+  // regression guard for that: nothing here should ever move `scrollTop`
+  // again on its own once the commit that applied the correction is done.
   respond = (query) =>
     query?.before === undefined
       ? { messages: range(10, 5), hasOlder: true }
@@ -996,35 +1021,17 @@ test('the reader scrolling mid-hold rebases the anchor instead of ending the hol
   await scrollTo(50)
   await click(loadOlderButton() as Element)
   await settle(() => rowCount() === 10)
-
-  // The synchronous correct() at commit already applied the whole delta in
-  // one pass (nothing in this model needs a second), which is why a frame is
-  // still outstanding: `hold` cannot yet tell that pass was its last.
   expect(scroller.scrollTop).toBe(550)
-  expect(pendingFrames.length).toBeGreaterThan(0)
 
-  // The reader moves the scrollbar themselves before that frame runs — set
-  // directly rather than through `scrollTo`, so this exercises `hold`'s own
-  // rebase and not `onScroll`'s.
   scroller.scrollTop = 600
+  await settle(() => false, 10)
 
-  await tick()
-  // Left exactly where they put themselves — nothing fights the scroll back
-  // towards the pre-scroll anchor position.
   expect(scroller.scrollTop).toBe(600)
-  // A rebase reports non-zero on purpose, so this pass does not count towards
-  // the two consecutive settled frames a real stabilisation needs.
-  expect(pendingFrames.length).toBeGreaterThan(0)
-
-  await tick()
-  expect(pendingFrames.length).toBeGreaterThan(0)
-  await tick()
-  expect(pendingFrames.length).toBe(0)
-  expect(scroller.scrollTop).toBe(600)
+  expect(pendingFrameIds.length).toBe(0)
   await unmount()
 })
 
-// --- 4. asking for older pages: when, and how often ---------------------------
+// --- 4. asking for older pages: when, how often, and when it has to stop ------
 
 test('a burst of intersection events near the top asks for one older page, not one each', async () => {
   // A real observer would not deliver a second callback without the sentinel
@@ -1034,7 +1041,7 @@ test('a burst of intersection events near the top asks for one older page, not o
   respond = (query) =>
     query?.before === undefined
       ? { messages: range(10, 5), hasOlder: true }
-      : { messages: range(5, 5), hasOlder: true }
+      : { messages: range(5, 5), hasOlder: false }
   delay = 30
   await mount()
 
@@ -1046,6 +1053,185 @@ test('a burst of intersection events near the top asks for one older page, not o
   await settle(() => rowCount() === 10)
   delay = 0
 
+  expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }])
+  await unmount()
+})
+
+test('a successful prepend that leaves the sentinel inside the zone asks again, with no new intersection event', async () => {
+  respond = (query) => {
+    if (query?.before === undefined) return { messages: range(5, 5), hasOlder: true }
+    if (query.before === 5) return { messages: [msg(4)], hasOlder: true }
+    if (query.before === 4) return { messages: [msg(3)], hasOlder: false }
+    throw new Error(`unexpected before ${query?.before}`)
+  }
+  await mount()
+  await scrollTo(50)
+
+  await click(loadOlderButton() as Element)
+  await settle(() => rowCount() === 7)
+
+  // Two older pages landed from the one click above: a single new row barely
+  // moves the sentinel, so it is still inside the one-viewport load zone once
+  // the first settles, and the geometric re-check inside the correction's own
+  // layout effect is what asked again — nothing here ever fired a second
+  // intersection.
+  expect(calls).toEqual([{ limit: 100 }, { before: 5, limit: 100 }, { before: 4, limit: 100 }])
+  expect(rowCount()).toBe(7)
+  await unmount()
+})
+
+test('an intersection during an in-flight load is not lost: it yields exactly one follow-up once settled, if still in range', async () => {
+  respond = (query) => {
+    if (query?.before === undefined) return { messages: range(20, 5), hasOlder: true }
+    if (query.before === 20) return { messages: [msg(19)], hasOlder: true }
+    if (query.before === 19) return { messages: [msg(18)], hasOlder: false }
+    throw new Error(`unexpected before ${query?.before}`)
+  }
+  delay = 30
+  await mount()
+  await scrollTo(50)
+
+  const observer = olderObserver()
+  if (!observer) throw new Error('no sentinel observer')
+  await act(async () => {
+    observer.fire(true)
+  })
+  // Dropped outright by the `loadingOlder` guard: the fetch above is still in
+  // flight, so firing again here must not queue a second request behind it.
+  await act(async () => {
+    observer.fire(true)
+  })
+
+  await settle(() => rowCount() === 7, 30)
+  delay = 0
+
+  // One request for each of the two older pages, plus the follow-up the
+  // geometric re-check asked for once the first settled still inside the
+  // zone — not a second one for the dropped intersection above.
+  expect(calls).toEqual([{ limit: 100 }, { before: 20, limit: 100 }, { before: 19, limit: 100 }])
+  expect(rowCount()).toBe(7)
+  await unmount()
+})
+
+test('a reader at the bottom stays pinned through an auto-prefetch and follows the next arrival', async () => {
+  // Regression: `requestOlder` clears `pinned` unconditionally (it has to —
+  // see its own comment on why a short first page must not read as "stay
+  // pinned"), and nothing used to put it back once the fetch it started
+  // landed. A reader who never touched the scrollbar, sitting through a
+  // first page short enough to auto-load more on open, would come out of
+  // that with `pinned` stuck `false` and stop following the live session.
+  respond = (query) => {
+    // Exactly one viewport (3 rows @ 100px = 300px): short enough that the
+    // sentinel is inside the one-viewport zone the instant it mounts, the
+    // same way a real IntersectionObserver's own initial callback would
+    // report it, without this test needing to fire a second one to get
+    // there.
+    if (query?.before === undefined) return { messages: range(8, 3), hasOlder: true }
+    if (query.before === 8) return { messages: [msg(7)], hasOlder: false }
+    throw new Error(`unexpected before ${query?.before}`)
+  }
+  await mount()
+  expect(scroller.scrollTop).toBe(bottom())
+
+  // Stands in for the real IntersectionObserver's own initial delivery
+  // (`RecordingIntersectionObserver.fire` is otherwise only ever called by
+  // hand — see the file's own top comment on what a mocked observer does not
+  // prove) — the one already-covered by "the sentinel is watched with a
+  // one-viewport prefetch margin above the top" that a page this short falls
+  // inside from the moment the sentinel mounts.
+  const observer = olderObserver()
+  if (!observer) throw new Error('no sentinel observer')
+  await act(async () => {
+    observer.fire(true)
+  })
+  await settle(() => rowCount() === 4)
+
+  // The prepend's own anchor correction already kept the reader wherever
+  // they were — here, the very bottom, since the whole transcript fit in one
+  // viewport before this landed — and history is exhausted, so the chain
+  // stopped on its own.
+  expect(rowCount()).toBe(4)
+  expect(scroller.scrollTop).toBe(bottom())
+  expect(olderObserver()).toBeUndefined()
+
+  await act(async () => {
+    appendStreamedMessage(client, 's1', [msg(11)])
+  })
+  await settle(() => rowCount() === 5)
+
+  // Still following: `pinned` was recomputed from the committed geometry
+  // once the auto-prefetch settled, not left at whatever `requestOlder` set
+  // it to when the fetch started.
+  expect(scroller.scrollTop).toBe(bottom())
+  await unmount()
+})
+
+test('no follow-up once the sentinel has scrolled out of the load zone, even with more history to fetch', async () => {
+  respond = (query) =>
+    query?.before === undefined
+      ? { messages: range(10, 5), hasOlder: true }
+      : { messages: range(5, 5), hasOlder: true }
+  await mount()
+  await scrollTo(50)
+  await click(loadOlderButton() as Element)
+  await settle(() => rowCount() === 10)
+
+  // The 500px this prepend added carried the sentinel well outside the
+  // one-viewport load zone (clientHeight 300) — `hasPreviousPage` is still
+  // true and the button is still offered, but nothing here asks again on its
+  // own.
+  expect(scroller.scrollTop).toBe(550)
+  expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }])
+  expect(loadOlderButton()).toBeDefined()
+  await settle(() => false, 10)
+  expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }])
+  await unmount()
+})
+
+test('no follow-up once hasPreviousPage is false, however close the sentinel still is', async () => {
+  respond = (query) =>
+    query?.before === undefined
+      ? { messages: range(1, 2), hasOlder: true }
+      : { messages: [msg(0)], hasOlder: false }
+  await mount()
+
+  await click(loadOlderButton() as Element)
+  await settle(() => rowCount() === 3)
+
+  expect(calls).toEqual([{ limit: 100 }, { before: 1, limit: 100 }])
+  // Waiting longer proves this is a stop, not a fetch still quietly in
+  // flight.
+  await settle(() => false, 10)
+  expect(calls).toEqual([{ limit: 100 }, { before: 1, limit: 100 }])
+  expect(loadOlderButton()).toBeUndefined()
+  await unmount()
+})
+
+test('no follow-up when a page makes no progress, even with the sentinel in zone and more history claimed', async () => {
+  // The defect this guards against: `requestOlder` used to ask again with
+  // the very same cursor whenever a page failed to move `oldestSeq`, which a
+  // backend that keeps answering with the same page (a real bug, but exactly
+  // the shape this test simulates) turned into an unbounded loop — the one
+  // that grew this file's own process past the machine's memory. A page that
+  // makes no progress has to end the chain, not repeat the request that just
+  // made none.
+  respond = () => ({ messages: range(10, 5), hasOlder: true })
+  await mount()
+  const observer = olderObserver()
+  if (!observer) throw new Error('no sentinel observer')
+
+  await click(loadOlderButton() as Element)
+  await settle(() => calls.length === 2)
+
+  expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }])
+  // No re-observe either: a page that made no progress is not a settle the
+  // `oldestSeq` effect's own re-observe step ever runs for (`oldestSeq`
+  // itself never moved), and there is nothing to look at again on purpose —
+  // only the one `observe()` the sentinel's mount performed.
+  expect(observer.observeLog).toEqual(['observe'])
+  // Long enough that a same-cursor retry loop would already have shown up —
+  // the same shape as the other "no follow-up" tests above.
+  await settle(() => false, 10)
   expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }])
   await unmount()
 })
@@ -1104,6 +1290,274 @@ test('a failed older page keeps the transcript and says so, and the retry works'
 
   expect(rowCount()).toBe(10)
   expect(container.textContent).not.toContain('sessions.transcript.loadOlderFailed')
+  await unmount()
+})
+
+test('a failed fetch does not retry itself automatically, even with the sentinel still in the zone', async () => {
+  respond = (query) =>
+    query?.before === undefined
+      ? { messages: range(10, 5), hasOlder: true }
+      : { messages: range(5, 5), hasOlder: false }
+  await mount()
+  fail = true
+
+  const observer = olderObserver()
+  if (!observer) throw new Error('no sentinel observer')
+
+  await click(loadOlderButton() as Element)
+  await settle(() => container.textContent?.includes('loadOlderFailed') === true)
+
+  expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }])
+  // No re-observe either: `oldestSeq` never moves on an error, so the
+  // `oldestSeq` effect's own re-observe step never runs for it — only the
+  // sentinel's own mount-time `observe()` is on the log.
+  expect(observer.observeLog).toEqual(['observe'])
+  // Long enough that an automatic retry loop would have shown up by now — the
+  // button and the alert are the only path back, not a background retry.
+  await settle(() => false, 20)
+  expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }])
+  await unmount()
+})
+
+test('a manual click that makes progress re-observes the sentinel', async () => {
+  // Coverage for the other half of the re-observe fix: not just "does it
+  // happen for an automatic trigger" but "does it happen at all, for a
+  // settle a person's own click caused" — the `oldestSeq` effect this lives
+  // in does not know or care which of `requestOlder`'s three call sites
+  // asked.
+  respond = (query) =>
+    query?.before === undefined
+      ? { messages: range(10, 5), hasOlder: true }
+      : { messages: range(5, 5), hasOlder: true }
+  await mount()
+  const observer = olderObserver()
+  if (!observer) throw new Error('no sentinel observer')
+  expect(observer.observeLog).toEqual(['observe'])
+
+  await click(loadOlderButton() as Element)
+  await settle(() => rowCount() === 10)
+
+  // Unobserve-then-observe, not a second independent `observe()`: that pair
+  // is what forces the browser to treat the sentinel as freshly registered
+  // and hand back an "initial" entry at its own next round, rather than
+  // waiting on a transition that may or may not still come.
+  expect(observer.observeLog).toEqual(['observe', 'unobserve', 'observe'])
+  await unmount()
+})
+
+test('a page landing with the sentinel just outside the zone still gets one follow-up once the reader scrolls back in, with no intersection event of its own', async () => {
+  // The stall the real-browser trace found: a page can land in a long commit
+  // frame that pushes the sentinel just outside the one-viewport zone at the
+  // exact instant the synchronous `inLoadZone` check runs, so the chain does
+  // not continue on the spot. If the reader's own wheel or fling then carries
+  // the sentinel back inside before the browser's next rendering update, a
+  // plain observer never saw an "outside" state to transition *from* and has
+  // nothing to call back about on its own — nothing here ever fires a second
+  // intersection event. The fix is the re-observe two tests up: it forces a
+  // fresh entry, evaluated against geometry as of *that* next update, which
+  // is what `deliverFreshEntry` below stands in for.
+  respond = (query) => {
+    if (query?.before === undefined) return { messages: range(10, 7), hasOlder: true }
+    if (query.before === 10) return { messages: range(7, 3), hasOlder: true }
+    if (query.before === 7) return { messages: [msg(6)], hasOlder: false }
+    throw new Error(`unexpected before ${query?.before}`)
+  }
+  await mount()
+  const observer = olderObserver()
+  if (!observer) throw new Error('no sentinel observer')
+  // Drains the mount's own initial entry (out of zone at `scrollTop` 400, so
+  // this is a no-op) — without this, the assertion below could pass on the
+  // strength of that first, unrelated `observe()` call instead of the
+  // re-observe this test is actually about.
+  await act(async () => {
+    observer.deliverFreshEntry()
+  })
+
+  await scrollTo(50)
+  await click(loadOlderButton() as Element)
+  await settle(() => rowCount() === 10)
+
+  // 300px of new history landed above a row that was 250px into the
+  // viewport; the correction preserves that, which puts the sentinel (at
+  // `-scrollTop`) outside the one-viewport zone by 50px — the reader had not
+  // scrolled since clicking, so nothing else here could have asked again yet.
+  expect(scroller.scrollTop).toBe(350)
+  expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }])
+
+  // The reader's own fling, not a click or a sentinel transition: carries the
+  // sentinel back inside the zone with no `fire()` of any kind.
+  await scrollTo(100)
+  expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }])
+
+  // Stands in for the browser's own next intersection-checking round, which
+  // the re-observe above queued a fresh entry for — evaluated here against
+  // the geometry just scrolled to, not the geometry `scrollTop` 350 the page
+  // actually landed at.
+  await act(async () => {
+    observer.deliverFreshEntry()
+  })
+  await settle(() => rowCount() === 11)
+
+  expect(calls).toEqual([
+    { limit: 100 },
+    { before: 10, limit: 100 },
+    { before: 7, limit: 100 },
+  ])
+  expect(rowCount()).toBe(11)
+  await unmount()
+})
+
+test("an intersection batch acts on the sentinel's own last entry, not its first", async () => {
+  // The real-browser trace: a re-observe's own fresh "outside" entry and the
+  // very next frame's "inside" transition can arrive together, in that order,
+  // in one callback — no native scroll anchoring (iOS Safari) to smooth the
+  // page's arrival over the way Chromium's own anchoring does. Reading only
+  // the first entry acted on a state that was already stale by the time the
+  // callback ran at all, and the reader stalled until the manual button.
+  respond = (query) =>
+    query?.before === undefined
+      ? { messages: range(10, 5), hasOlder: true }
+      : { messages: range(5, 5), hasOlder: false }
+  await mount()
+  const observer = olderObserver()
+  if (!observer) throw new Error('no sentinel observer')
+
+  // [true, false]: the sentinel's own last word in this batch is "outside" —
+  // nothing here has any business loading on the strength of an entry that is
+  // already stale by the time this callback runs.
+  await act(async () => {
+    observer.fireBatch([true, false])
+  })
+  await settle(() => false, 5)
+  expect(calls).toEqual([{ limit: 100 }])
+
+  // [false, true]: the reverse, and the shape that actually stalled — the
+  // sentinel's last word is "inside".
+  await act(async () => {
+    observer.fireBatch([false, true])
+  })
+  await settle(() => rowCount() === 10)
+  expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }])
+  await unmount()
+})
+
+test('a fresh entry landing after a fetch resolves but before React commits its page issues no request; the commit still gets its own anchor, and no cursor is ever requested twice', async () => {
+  // The other real-browser defect: react-query writes a settled fetch's
+  // result into the cache — and resolves `.then()` — before React has
+  // committed the resulting page. The old code closed `loadingOlder` only
+  // until the promise resolved, not until commit, so anything automatic that
+  // slipped into that gap could dispatch a second request before the first
+  // one's own `anchor`/`lastRequestedBefore` had even been read, corrupting
+  // both: one page landing with no correction, the other correcting for a
+  // cursor it never actually requested.
+  respond = (query) => {
+    if (query?.before === undefined) return { messages: range(10, 5), hasOlder: true }
+    if (query.before === 10) return { messages: range(5, 5), hasOlder: true }
+    if (query.before === 5) return { messages: [msg(4)], hasOlder: false }
+    throw new Error(`unexpected before ${query?.before}`)
+  }
+  await mount()
+  await scrollTo(50)
+
+  const release = openGate()
+  await click(loadOlderButton() as Element)
+  expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }])
+
+  const observer = olderObserver()
+  if (!observer) throw new Error('no sentinel observer')
+  await act(async () => {
+    // Lets the gated fetch resolve, then drains enough of the microtask
+    // queue for react-query's own machinery and this component's `.then()`
+    // to run all the way through — a purely microtask-based drain, never a
+    // macrotask (`setTimeout`) one, which is what keeps this inside `act`'s
+    // own batching window: React's own scheduled re-render here runs on a
+    // macrotask, so yielding to one before this callback returns would let
+    // it jump the queue and commit early, defeating the very gap this models.
+    release()
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+    // Modelling the gap explicitly: a fresh entry (the re-observe from a page
+    // this component itself has not even committed yet, or any other
+    // automatic trigger) landing in exactly this window.
+    observer.fire(true)
+  })
+  await settle(() => rowCount() === 10)
+
+  // The fire during the gap issued nothing: still the one request the click
+  // made, and the commit that follows corrects for its own anchor (the row
+  // 250px into the viewport when the click fired), not a cursor some second,
+  // premature request would have overwritten it with.
+  expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }])
+  expect(scroller.scrollTop).toBe(550)
+  expect(rowCount()).toBe(10)
+
+  // After the commit, a fresh entry does yield exactly one follow-up.
+  await act(async () => {
+    observer.fire(true)
+  })
+  await settle(() => rowCount() === 11)
+  expect(calls).toEqual([
+    { limit: 100 },
+    { before: 10, limit: 100 },
+    { before: 5, limit: 100 },
+  ])
+  expect(rowCount()).toBe(11)
+
+  // No cursor was ever asked for twice, across the whole sequence above.
+  const beforeCursors = calls.map((c) => c?.before).filter((b) => b !== undefined)
+  expect(new Set(beforeCursors).size).toBe(beforeCursors.length)
+  await unmount()
+})
+
+test('a fetch abandoned by a session switch cannot leave the guard stuck: the button and the sentinel both still work for the new session', async () => {
+  respond = (query) => {
+    if (query?.before === undefined) return { messages: range(10, 5), hasOlder: true }
+    if (query.before === 10) return { messages: range(5, 5), hasOlder: true }
+    if (query.before === 5) return { messages: [msg(4)], hasOlder: false }
+    throw new Error(`unexpected before ${query?.before}`)
+  }
+  await mount()
+
+  // Superseded, not merely slow: this fetch is abandoned by the switch below
+  // before it ever gets a chance to resolve.
+  const release = openGate()
+  await click(loadOlderButton() as Element)
+  expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }])
+
+  // A warm switch (see `switchSession`'s own comment) — the new session opens
+  // with no fetch of its own, so `calls` does not grow here at all.
+  await switchSession('s2', { messages: range(10, 5), hasOlder: true })
+  expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }])
+  expect(rowCount()).toBe(5)
+  expect(scroller.scrollTop).toBe(bottom())
+
+  // Left stuck closed by the abandoned fetch above, neither of these would
+  // ever do anything again.
+  const button = loadOlderButton()
+  if (!button) throw new Error('no load-older button for the new session')
+  await click(button)
+  await settle(() => rowCount() === 10)
+  expect(rowCount()).toBe(10)
+  expect(calls).toEqual([{ limit: 100 }, { before: 10, limit: 100 }, { before: 10, limit: 100 }])
+
+  const observer = olderObserver()
+  if (!observer) throw new Error('no sentinel observer for the new session')
+  await act(async () => {
+    observer.fire(true)
+  })
+  await settle(() => rowCount() === 11)
+  expect(rowCount()).toBe(11)
+  expect(loadOlderButton()).toBeUndefined()
+
+  // The abandoned session's own fetch finally resolving, late, touches
+  // nothing: `olderRequestId` already moved on at the switch (and twice more
+  // since, from the new session's own two requests above), so this stale
+  // `.then()` finds itself superseded and is a no-op.
+  const callsBeforeRelease = calls.length
+  release()
+  await settle(() => false, 10)
+  expect(rowCount()).toBe(11)
+  expect(scroller.scrollTop).toBe(bottom())
+  expect(calls.length).toBe(callsBeforeRelease)
   await unmount()
 })
 

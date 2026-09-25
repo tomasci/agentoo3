@@ -79,6 +79,18 @@ export type TranscriptNode =
       status: 'running' | 'completed' | 'failed' | 'killed'
       /** Latest progress ping, shown while the task is still running. */
       progress: string | null
+      /**
+       * True until this group's own `task_started` has been seen — see
+       * `partialGroupFor` below. A partial group is a normal collapsible row,
+       * just missing the detail only `task_started` carries: `agent`/`title`
+       * stay `''` (or hold whatever a `task_progress` ping already gave away,
+       * see the `task_progress` branch), and `prompt`/`command` stay `null`,
+       * until either `task_started` loads or the tree is rebuilt without this
+       * node ever being asked for again. The renderer (`transcript.tsx`) uses
+       * this to show a neutral badge and a translated placeholder instead of
+       * guessing at a name or an accent colour it has no basis for.
+       */
+      partial: boolean
       children: TranscriptNode[]
       createdAt: string
     }
@@ -107,18 +119,45 @@ const NOTIFICATION_STATUS: Record<string, TaskNode['status']> = {
 export const displayAgent = (name: string) => name.replace(/^agentoo:/, '')
 
 /**
+ * A task node's id, and its React key once it reaches `transcript.tsx` — see
+ * `partialGroupFor` and the `task_started` branch below, the two places that
+ * mint one. Derived from the delegation's own `tool_use_id` rather than the
+ * `task_started` message's id: the whole point is that a partial group
+ * (created before that message has loaded) and the real group it upgrades
+ * into (once it has) are the *same* row, so they need the same key whether or
+ * not `task_started` is in the window this call was given. `task:` can never
+ * collide with a message id (a uuid — see `SessionMessage`), so this is safe
+ * to use unconditionally; `fallback` (today's `message.id`) only fires for a
+ * `task_started` with no `tool_use_id` at all, which cannot become partial in
+ * the first place (nothing could name it as a parent without one).
+ */
+const taskNodeId = (toolUseId: string | undefined, fallback: string): string =>
+  toolUseId ? `task:${toolUseId}` : fallback
+
+/**
  * `messages` is a *window* into the transcript, not the whole of it, now that
  * the caller pages: the newest `PAGE_SIZE` on open, older pages prepended as
- * the reader scrolls up (see use-sessions.ts). When the window happens to
- * start mid-turn, four things degrade, all accepted rather than worked
- * around, because every one of them self-heals as the next older page loads:
+ * the reader scrolls up (see use-sessions.ts). A window that starts mid-task
+ * used to degrade in a way that only looked temporary: every message of a
+ * still-open delegation whose `task_started` was above the window rendered
+ * flattened at the top level, and the moment that older page loaded they all
+ * collapsed into the single row they should have been the whole time — right
+ * under the reader's eyes, taking the scroll anchor with them. That is fixed:
+ * a message whose `parentToolUseId` names a group not (yet) in the window
+ * gets a *partial* task group instead of falling through to `roots` (see
+ * `partialGroupFor`), so the row count a loaded window renders does not
+ * change shape as an older page fills in detail it already knew was missing.
+ * The real `task_started`, if it turns up later in the same pass, fills that
+ * same object in rather than creating a second one (see the `task_started`
+ * branch below); and because a task node's `id` is derived from its
+ * `tool_use_id` (`taskNodeId`) rather than from whichever message happened to
+ * create the group, the *next* build — the one after the older page has
+ * actually loaded — produces a real group under the exact same id, so React
+ * keeps the same row mounted instead of swapping one element for another.
  *
- * - a `task_started` above the window means `listFor()` below falls back to
- *   `roots` for that group's own children, so a subagent's messages render
- *   flattened at top level instead of nested under it;
- * - `task_progress` / `task_updated` / `task_notification` naming a task
- *   whose `task_started` is above the window find no group in `byTaskId` and
- *   are silently ignored;
+ * Two degradations from the old version of this comment remain, genuinely
+ * unrelated to task nesting:
+ *
  * - a `tool_result` whose `tool_use` is above the window finds no owner in
  *   `toolUseOwners`, so the result is discarded — real content loss, but one
  *   that predates pagination (a `tool_use`/`tool_result` pair has always been
@@ -126,27 +165,102 @@ export const displayAgent = (name: string) => name.replace(/^agentoo:/, '')
  *   common case instead of the theoretical one;
  * - `markAnswers` walks `roots` positionally, so a window that starts or ends
  *   mid-turn can promote the wrong assistant message as "the answer", or none.
+ *   A subagent's own reply cannot be caught by this any more, though: it now
+ *   nests inside its (real or partial) task group instead of sitting in
+ *   `roots`, so `markAnswers` — which only ever looks at `roots` — never sees
+ *   it as a candidate in the first place.
  *
  * The alternative — pages aligned to turn boundaries — would need turn
  * boundaries recorded in the schema, and even then could not bound a page's
  * size (one turn can be arbitrarily long), so it was not worth the schema
- * change for a problem four cheap, self-healing degradations already cover.
+ * change for the two degradations partial groups do not already cover.
  */
 export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
   const roots: TranscriptNode[] = []
-  // tool_use_id -> the group collecting that delegation's messages.
+  // tool_use_id -> the group collecting that delegation's messages — real
+  // once its own task_started has been seen in this window, partial before
+  // that (see partialGroupFor).
   const groups = new Map<string, TaskNode>()
   // task_id -> the same group, for the status patches that arrive later.
   const byTaskId = new Map<string, TaskNode>()
   // tool_use_id -> the row that made that call, for the tool_result that
   // answers it — arriving as a separate, untitled message later on.
   const toolUseOwners = new Map<string, EventNode>()
+  // tool_use_id of a task_started the backend itself declined to title
+  // (ambient housekeeping, or explicitly marked skip_transcript): recorded so
+  // a stray child, progress ping or notification for the same id keeps
+  // falling through to `roots` exactly as it did before partial groups
+  // existed, rather than growing a group nobody asked to see.
+  const skipped = new Set<string>()
 
   const ordered = [...messages].sort((a, b) => a.seq - b.seq)
 
-  /** Where a message belongs: inside its parent's group, or at the top. */
-  const listFor = (parentToolUseId: string | null): TranscriptNode[] =>
-    (parentToolUseId ? groups.get(parentToolUseId)?.children : undefined) ?? roots
+  /**
+   * The group for `toolUseId`, real or partial — creating a partial one at
+   * the back of `roots` the first time anything needs it. `roots`, because a
+   * partial group's own parent is unknown by definition: the one message that
+   * would say so, its `task_started`, has not been seen. If that message
+   * turns up later in this same pass, the `task_started` branch below finds
+   * this exact object by `toolUseId` and fills it in rather than moving it —
+   * relocating it once its real parent is known would just trade the jump
+   * this function exists to remove for a different one.
+   */
+  function partialGroupFor(toolUseId: string, seq: number, createdAt: string): TaskNode {
+    const existing = groups.get(toolUseId)
+    if (existing) return existing
+    const group: TaskNode = {
+      kind: 'task',
+      id: taskNodeId(toolUseId, toolUseId),
+      seq,
+      taskId: toolUseId,
+      agent: '',
+      title: '',
+      prompt: null,
+      command: null,
+      status: 'running',
+      progress: null,
+      partial: true,
+      children: [],
+      createdAt,
+    }
+    groups.set(toolUseId, group)
+    roots.push(group)
+    return group
+  }
+
+  /** Where a message belongs: inside its parent's group — a partial one, if
+   * that group's own task_started has not loaded yet — or at the top, for a
+   * message with no parent or one whose parent was itself declined a title
+   * and must not grow a group of its own (see `skipped`). */
+  const listFor = (
+    parentToolUseId: string | null,
+    seq: number,
+    createdAt: string,
+  ): TranscriptNode[] => {
+    if (!parentToolUseId || skipped.has(parentToolUseId)) return roots
+    return partialGroupFor(parentToolUseId, seq, createdAt).children
+  }
+
+  /**
+   * A group named by `toolUseId` if the payload carries one, else by
+   * `taskId` — task_progress and task_notification carry both (see the doc
+   * comment above), task_updated only ever carries the latter. Only the
+   * `toolUseId` path can create a group that is not there yet: a bare
+   * `taskId` alone is not enough to derive the stable id a partial group
+   * needs (`taskNodeId`), so task_updated can only ever resolve a group
+   * something else already created — exactly the shape the pre-pagination
+   * code had for it.
+   */
+  function resolveGroup(
+    toolUseId: string | undefined,
+    taskId: string | undefined,
+    seq: number,
+    createdAt: string,
+  ): TaskNode | undefined {
+    if (toolUseId)
+      return skipped.has(toolUseId) ? undefined : partialGroupFor(toolUseId, seq, createdAt)
+    return taskId ? byTaskId.get(taskId) : undefined
+  }
 
   for (const message of ordered) {
     const payload = (message.payload ?? {}) as Payload
@@ -174,37 +288,68 @@ export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
     }
 
     if (payload.subtype === 'task_started') {
-      // Housekeeping the engine runs for itself; the backend already declines
-      // to title these, and they are not the user's work.
-      if (payload.ambient === true || payload.skip_transcript === true) continue
-
       const toolUseId = str(payload, 'tool_use_id')
       const taskId = str(payload, 'task_id')
+
+      // Housekeeping the engine runs for itself; the backend already declines
+      // to title these, and they are not the user's work. Recorded by
+      // tool_use_id (see `skipped` above) rather than simply skipped, so
+      // nothing downstream mistakes one for a delegation still waiting on
+      // this very message.
+      if (payload.ambient === true || payload.skip_transcript === true) {
+        if (toolUseId) skipped.add(toolUseId)
+        continue
+      }
+
       // Only a spawned agent is a delegation; a backgrounded Bash call carries
       // no subagent_type or prompt at all and needs a badge that says so
       // honestly, rather than the generic fallback that used to read
       // 'subagent' regardless of what actually ran.
       const isBash = str(payload, 'task_type') === 'local_bash'
       const description = str(payload, 'description')
+      const agent = isBash ? 'shell' : displayAgent(str(payload, 'subagent_type') ?? 'task')
+      // The description alone: the badge beside it already names the agent,
+      // and "ARCHITECT | architect: investigate" says it twice. `||`, not
+      // `??`: an empty-string description is still not a title, and should
+      // fall through the same as a missing one.
+      const title = isBash ? 'Shell command' : description || message.title || 'delegated task'
+      const prompt = isBash ? null : (str(payload, 'prompt') ?? null)
+      const command = isBash ? description || null : null
+
+      const existing = toolUseId ? groups.get(toolUseId) : undefined
+      if (existing?.partial) {
+        // A partial group already sits wherever an earlier orphaned child (or
+        // a progress/notification ping) put it — filled in, in place, rather
+        // than replaced: the row a reader may already be looking at stays the
+        // same DOM element instead of disappearing behind a second one.
+        existing.seq = message.seq
+        existing.taskId = taskId ?? existing.taskId
+        existing.agent = agent
+        existing.title = title
+        existing.prompt = prompt
+        existing.command = command
+        existing.createdAt = message.createdAt
+        existing.partial = false
+        if (taskId) byTaskId.set(taskId, existing)
+        continue
+      }
+
       const group: TaskNode = {
         kind: 'task',
-        id: message.id,
+        id: taskNodeId(toolUseId, message.id),
         seq: message.seq,
         taskId: taskId ?? message.id,
-        agent: isBash ? 'shell' : displayAgent(str(payload, 'subagent_type') ?? 'task'),
-        // The description alone: the badge beside it already names the agent,
-        // and "ARCHITECT | architect: investigate" says it twice. `||`, not
-        // `??`: an empty-string description is still not a title, and should
-        // fall through the same as a missing one.
-        title: isBash ? 'Shell command' : description || message.title || 'delegated task',
-        prompt: isBash ? null : (str(payload, 'prompt') ?? null),
-        command: isBash ? description || null : null,
+        agent,
+        title,
+        prompt,
+        command,
         status: 'running',
         progress: null,
+        partial: false,
         children: [],
         createdAt: message.createdAt,
       }
-      listFor(parent).push(group)
+      listFor(parent, message.seq, message.createdAt).push(group)
       if (toolUseId) groups.set(toolUseId, group)
       if (taskId) byTaskId.set(taskId, group)
       continue
@@ -212,11 +357,31 @@ export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
 
     // Progress pings arrive at the top level with no parentToolUseId, so they
     // would otherwise sit beside the orchestrator's own steps, repeating work
-    // that is already nested inside the group. They belong to their task.
+    // that is already nested inside the group. They belong to their task —
+    // found (or, if task_started has not loaded yet, created) by tool_use_id;
+    // task_id is only ever the fallback for a payload that carries nothing
+    // else, the shape every fixture predating this change already used.
     if (payload.subtype === 'task_progress') {
       const taskId = str(payload, 'task_id')
-      const group = taskId ? byTaskId.get(taskId) : undefined
-      if (group) group.progress = str(payload, 'summary') ?? str(payload, 'last_tool_name') ?? null
+      const toolUseId = str(payload, 'tool_use_id')
+      const group = resolveGroup(toolUseId, taskId, message.seq, message.createdAt)
+      if (group) {
+        if (taskId) {
+          group.taskId = taskId
+          byTaskId.set(taskId, group)
+        }
+        // Only while the group is still waiting on its own task_started, and
+        // only to fill what is not already known: a ping can name the
+        // delegation before the window's own task_started does, but it is
+        // never a more authoritative source than that message once it exists.
+        if (group.partial) {
+          const subagentType = str(payload, 'subagent_type')
+          const description = str(payload, 'description')
+          if (!group.agent && subagentType) group.agent = displayAgent(subagentType)
+          if (!group.title && description) group.title = description
+        }
+        group.progress = str(payload, 'summary') ?? str(payload, 'last_tool_name') ?? null
+      }
       continue
     }
 
@@ -224,6 +389,9 @@ export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
       const taskId = str(payload, 'task_id')
       const patch = (payload.patch ?? {}) as Payload
       const status = str(patch, 'status')
+      // task_updated carries only task_id and patch — no tool_use_id (see the
+      // doc comment above resolveGroup) — so this can only ever resolve a
+      // group task_started, task_progress or task_notification already made.
       const group = taskId ? byTaskId.get(taskId) : undefined
       if (group && status && status !== 'pending' && status !== 'paused') {
         group.status = status as TaskNode['status']
@@ -238,10 +406,17 @@ export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
     // of the untitled traffic.
     if (payload.subtype === 'task_notification') {
       const taskId = str(payload, 'task_id')
+      const toolUseId = str(payload, 'tool_use_id')
       const status = str(payload, 'status')
-      const group = taskId ? byTaskId.get(taskId) : undefined
-      const resolved = status ? NOTIFICATION_STATUS[status] : undefined
-      if (group && resolved) group.status = resolved
+      const group = resolveGroup(toolUseId, taskId, message.seq, message.createdAt)
+      if (group) {
+        if (taskId) {
+          group.taskId = taskId
+          byTaskId.set(taskId, group)
+        }
+        const resolved = status ? NOTIFICATION_STATUS[status] : undefined
+        if (resolved) group.status = resolved
+      }
       continue
     }
 
@@ -271,7 +446,7 @@ export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
       createdAt: message.createdAt,
     }
     for (const call of toolCallsOf(message)) toolUseOwners.set(call.id, node)
-    listFor(parent).push(node)
+    listFor(parent, message.seq, message.createdAt).push(node)
   }
 
   markAnswers(roots)

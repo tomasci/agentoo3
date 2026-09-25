@@ -499,10 +499,21 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
     )
   }
 
+  // A group whose own task_started has not loaded yet, and that has not
+  // picked up an agent from a task_progress ping either (see buildTranscript):
+  // nothing here is a guess, so it gets a neutral badge and a translated
+  // placeholder rather than an accent-toned row claiming to be running
+  // something specific it has no basis for naming.
+  const pending = !node.agent
+  const pendingLabel = t('sessions.transcript.pendingTask')
+
   return (
     <TranscriptDisclosure
-      title={node.title}
-      badge={{ label: node.agent, tone: TASK_TONE[node.status] }}
+      title={node.title || pendingLabel}
+      badge={{
+        label: node.agent || pendingLabel,
+        tone: pending ? 'neutral' : TASK_TONE[node.status],
+      }}
       // Live progress, but only while it means something: on a finished task the
       // last ping is just whatever it happened to be doing when it stopped.
       note={node.status === 'running' ? node.progress : null}
@@ -567,26 +578,21 @@ function TranscriptView({
   return (
     <div className="grid grid-cols-1 gap-2">
       {nodes.map((node) => (
-        // The `content-visibility` containment boundary: the textarea's
-        // auto-grow forces a synchronous layout on every keystroke, and
-        // without a boundary here its scope was the whole transcript rather
-        // than whatever rows are actually on screen. Only top-level nodes get
-        // one — a nested row inside an open task group is already gated by
-        // Collapsible's own unmount-on-exit, and wrapping one there anyway
-        // does not just duplicate that work: the size containment freezes it
-        // at the 6rem placeholder, clipping whatever the child actually
-        // renders. `data-transcript-row` is the contract session-page.tsx's
+        // No `content-visibility` here any more. It bounded the layout cost
+        // of the composer's own JS auto-grow, which ran on every keystroke;
+        // the composer now auto-grows with CSS `field-sizing: content`
+        // (shared/ui/textarea.tsx), so there is nothing left recomputing
+        // layout that often for this to bound. What it cost instead: a
+        // never-rendered row reported a flat 6rem guess, so scrolling up
+        // through unseen history grew content *above* the reader as each row
+        // resolved to its real height — engines with scroll anchoring
+        // (Chrome, Firefox) silently absorbed that, but it is exactly the
+        // "flickers and jumps" a reader without one sees. The wrapper itself
+        // stays: `data-transcript-row` is the contract session-page.tsx's
         // scroll-position compensation selects on inside the scroll
-        // container: every top-level row carries it, in document order, and
-        // only a top-level row ever does. `auto 6rem` (not `auto none`) is
-        // the stable, non-zero placeholder a skipped row must contribute —
-        // see the file's own git history (6bb68bb) for the prepend-to-the-top
-        // bug a zero-size fallback caused.
-        <div
-          key={node.id}
-          className="[contain-intrinsic-size:auto_6rem] [content-visibility:auto]"
-          data-transcript-row=""
-        >
+        // container, one per top-level node, in document order, and only a
+        // top-level node ever carries it.
+        <div key={node.id} data-transcript-row="">
           <Node node={node} sessionId={sessionId} />
         </div>
       ))}
