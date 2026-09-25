@@ -84,7 +84,12 @@ export function ProjectSessions({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className="grid gap-5">
+    // The root grid has no explicit columns, so its single `auto` track
+    // grows to the widest child's min-content width — a session card's
+    // working-dir path (`Code wrap` only wraps lines, it doesn't shrink
+    // min-content) pushed that past a phone's viewport. `grid-cols-1`'s
+    // `minmax(0, 1fr)` caps the column at the container's own width instead.
+    <div className="grid grid-cols-1 gap-5">
       <Card>
         <CardHeader>
           <CardTitle>{t('sessions.form.heading')}</CardTitle>
