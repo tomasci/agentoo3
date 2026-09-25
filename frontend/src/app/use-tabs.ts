@@ -115,7 +115,10 @@ export function useTabs() {
  * Keeps the stored tab row in step with the URL and with the server.
  *
  * Mounted once, in the shell: these are three rules about the workspace as a
- * whole, not about whoever happens to be rendering.
+ * whole, not about whoever happens to be rendering. All three write from
+ * facts only this window has — its own URL, its own project list, its own
+ * dismissed ids — which is exactly why the row itself is per-window rather
+ * than live-shared; see shared/store/tabs.ts's comment on `storedTabsAtom`.
  */
 export function useWorkspaceSync() {
   const [tabs, setTabs] = useAtom(tabsAtom)
@@ -133,7 +136,7 @@ export function useWorkspaceSync() {
   const go = useCallback((path: string) => void navigate({ href: path }), [navigate])
 
   // A URL naming a tab we do not have: a pasted link, a bookmark, or a project
-  // opened in another window. Waits for the project list, so a slow request
+  // link opened in a new window. Waits for the project list, so a slow request
   // cannot conjure a tab for a project that turns out to be gone.
   useEffect(() => {
     if (active) {
