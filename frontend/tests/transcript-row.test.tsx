@@ -19,8 +19,10 @@
 // Tailwind's own utility classes are literal strings in this DOM.
 
 import { expect, test } from 'bun:test'
+import i18next from 'i18next'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
+import { I18nextProvider } from 'react-i18next'
 import { buildTranscript } from '../src/features/sessions/lib/transcript'
 import { Transcript } from '../src/features/sessions/components/transcript'
 
@@ -292,8 +294,51 @@ test('an empty transcript renders the empty state, with no wrapper around nothin
   // which other file in the run got there first, and this test is not about
   // that. The empty state is `ui/empty`, not the `.grid` container, so there is
   // no row level here at all to leave a stray boundary behind.
-  expect(container.textContent ?? '').toMatch(/sessions\.transcript\.empty|Nothing yet/)
+  expect(container.textContent ?? '').toMatch(/sessions\.transcript\.empty|No messages yet/)
   expect(container.querySelectorAll('[data-slot="collapsible"]').length).toBe(0)
+})
+
+test('the empty state is an unbordered ui/empty with an icon, a title and a description', async () => {
+  // Under a private cimode instance, unlike the test above: this one asserts
+  // exactly which key lands in which slot, which needs `t()` to return the key
+  // whatever other file initialised the global i18n first.
+  const cimode = i18next.createInstance()
+  await cimode.init({ lng: 'cimode', fallbackLng: 'cimode' })
+  const container = document.createElement('div')
+  document.body.append(container)
+  await act(async () => {
+    createRoot(container).render(
+      <I18nextProvider i18n={cimode}>
+        <Transcript messages={[]} />
+      </I18nextProvider>,
+    )
+  })
+
+  const empties = [...container.querySelectorAll('[data-slot="empty"]')]
+  expect(empties.length).toBe(1)
+  const empty = empties[0] as HTMLElement
+  // No `border` utility of any kind — the old `className="border"` is gone.
+  const classes = (empty.getAttribute('class') ?? '').split(/\s+/)
+  expect(classes.includes('border')).toBe(false)
+  expect(classes.filter((c) => /^border(-(t|b|l|r|x|y|\d+))?$/.test(c))).toEqual([])
+
+  const icon = empty.querySelector('[data-slot="empty-icon"]')
+  expect(icon).not.toBeNull()
+  expect(icon?.querySelector('svg')).not.toBeNull()
+  expect(empty.querySelector('[data-slot="empty-title"]')?.textContent).toBe(
+    'sessions.transcript.empty',
+  )
+  expect(empty.querySelector('[data-slot="empty-description"]')?.textContent).toBe(
+    'sessions.transcript.emptyDescription',
+  )
+  // Icon, then title, then description, in document order.
+  const title = empty.querySelector('[data-slot="empty-title"]')
+  const description = empty.querySelector('[data-slot="empty-description"]')
+  if (!icon || !title || !description) throw new Error('empty state is missing a slot')
+  expect((icon.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true)
+  expect(
+    (title.compareDocumentPosition(description) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+  ).toBe(true)
 })
 
 // --- the declarations the DOM structure exists to carry -------------------------

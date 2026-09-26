@@ -213,6 +213,10 @@
       "baseSha": "Base commit",
       "orchestrator": "Orchestrator"
     },
+    "detailsFields": {
+      "worktree": "Worktree",
+      "cost": "Cost"
+    },
     "form": {
       "heading": "New session",
       "title": "Title",
@@ -235,6 +239,7 @@
     "deleteTitle": "Delete session?",
     "actionsFor": "Actions for {{name}}",
     "open": "Open",
+    "details": "Session details",
     "live": "Live",
     "reconnecting": "Reconnecting…",
     "stop": "Stop",
@@ -246,6 +251,7 @@
     "composerPlaceholder": "Tell the orchestrator what to do…",
     "needsOrchestrator": "This session has no orchestrator, so it cannot run. Set one from the sessions list.",
     "sendFailed": "Could not send the message",
+    "stopFailed": "Could not stop the session",
     "pendingPrompts_one": "{{count}} message waiting",
     "pendingPrompts_other": "{{count}} messages waiting",
     "attachments": {
@@ -265,7 +271,8 @@
     "transcript": {
       "you": "You",
       "model": "Model: {{model}}",
-      "empty": "Nothing yet. Send a message to start the session.",
+      "empty": "No messages yet",
+      "emptyDescription": "Send a message below to start the session.",
       "delegatedPrompt": "Prompt given to {{agent}}",
       "thinking": "Thinking",
       "command": "Command",

@@ -2,6 +2,7 @@ import {
   ChevronRightIcon,
   FileIcon,
   FileXIcon,
+  MessageSquareIcon,
   OctagonXIcon,
   TriangleAlertIcon,
 } from 'lucide-react'
@@ -21,7 +22,7 @@ import {
 } from '@/shared/ui/attachment'
 import { Button } from '@/shared/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/shared/ui/collapsible'
-import { Empty, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/shared/ui/empty'
 import type { SessionMessage } from '../hooks/use-sessions'
 import { attachmentDescription, isInlineImage, sessionFileUrl } from '../lib/attachments'
 import { formatFullTime, formatTime } from '../lib/format'
@@ -562,9 +563,13 @@ function TranscriptView({
 
   if (nodes.length === 0) {
     return (
-      <Empty className="border">
+      <Empty>
         <EmptyHeader>
+          <EmptyMedia variant="icon">
+            <MessageSquareIcon />
+          </EmptyMedia>
           <EmptyTitle>{t('sessions.transcript.empty')}</EmptyTitle>
+          <EmptyDescription>{t('sessions.transcript.emptyDescription')}</EmptyDescription>
         </EmptyHeader>
       </Empty>
     )

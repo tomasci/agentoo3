@@ -1,4 +1,11 @@
-import { CornerDownLeftIcon, FileIcon, PlusIcon, TriangleAlertIcon, XIcon } from 'lucide-react'
+import {
+  CornerDownLeftIcon,
+  FileIcon,
+  PlusIcon,
+  SquareIcon,
+  TriangleAlertIcon,
+  XIcon,
+} from 'lucide-react'
 import type { DragEvent, KeyboardEvent } from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -157,6 +164,9 @@ export function Composer({
   onKeyDown,
   sending,
   canSend,
+  canStop,
+  stopping,
+  onStop,
   orchestratorMissing,
   queueLine,
   error,
@@ -168,6 +178,13 @@ export function Composer({
   onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void
   sending: boolean
   canSend: boolean
+  /** Whether the session can currently be stopped — renders the stop button
+   * immediately before send, in whichever addon holds it, and renders nothing
+   * at all when false. Optional, reading as falsy: tests that mount this
+   * component without a session to stop never have to pass it. */
+  canStop?: boolean
+  stopping?: boolean
+  onStop?: () => void
   orchestratorMissing: boolean
   queueLine: string
   error: string | null
@@ -251,6 +268,20 @@ export function Composer({
       onClick={onSubmit}
     >
       {sending ? <Spinner /> : <CornerDownLeftIcon />}
+    </InputGroupButton>
+  )
+
+  // Sits immediately before send, in whichever addon holds it — compact or
+  // expanded never affects whether this shows, only send's own emptiness
+  // check does that.
+  const stopButton = canStop && (
+    <InputGroupButton
+      size="icon-xs"
+      aria-label={t('sessions.stop')}
+      disabled={stopping}
+      onClick={onStop}
+    >
+      <SquareIcon className="fill-current" />
     </InputGroupButton>
   )
 
@@ -341,13 +372,19 @@ export function Composer({
           }}
           placeholder={t('sessions.composerPlaceholder')}
         />
-        {!expanded && sendButton && (
-          <InputGroupAddon align="inline-end">{sendButton}</InputGroupAddon>
+        {!expanded && (showSend || canStop) && (
+          <InputGroupAddon align="inline-end">
+            {stopButton}
+            {sendButton}
+          </InputGroupAddon>
         )}
         {expanded && (
           <InputGroupAddon align="block-end" className="justify-between">
             {attachButton}
-            {sendButton}
+            <span className="flex items-center gap-1">
+              {stopButton}
+              {sendButton}
+            </span>
           </InputGroupAddon>
         )}
       </InputGroup>
