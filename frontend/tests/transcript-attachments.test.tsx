@@ -74,6 +74,8 @@ afterEach(() => {
     root.unmount()
   })
   container.remove()
+  // A lightbox opened by one test portals outside `container`.
+  document.body.replaceChildren()
 })
 
 test('a ready image file renders as a thumbnail pointed at the hand-built download route', () => {
@@ -95,7 +97,15 @@ test('a ready non-image file renders as a chip linking at the download route', (
   const link = container.querySelector('a')
   expect(link).not.toBeNull()
   expect(link?.getAttribute('href')).toBe('/api/sessions/s1/files/doc-1')
-  expect(link?.textContent).toContain('notes.txt')
+  // The link is a childless overlay across the whole tile (shadcn's
+  // `AttachmentTrigger render={<a/>}`), so the filename is not its own text:
+  // it lives in the sibling title, in the same tile, and the link announces
+  // itself through its aria-label instead.
+  expect(link?.getAttribute('download')).toBe('notes.txt')
+  expect(link?.getAttribute('aria-label')).toBe('sessions.attachments.download')
+  const tile = link?.closest('[data-slot="attachment"]')
+  expect(tile).not.toBeNull()
+  expect(tile?.querySelector('[data-slot="attachment-title"]')?.textContent).toBe('notes.txt')
   expect(container.querySelector('img')).toBeNull()
 })
 
@@ -166,4 +176,109 @@ test('several files on one prompt each render on their own merits — mixed read
 
   expect(container.querySelector('img')).not.toBeNull()
   expect(container.textContent).toContain('sessions.attachments.removed')
+})
+
+// --- The vertical tile layout shared with the composer's tray ---------------
+
+const flush = async () => {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+}
+
+const tiles = () => Array.from(container.querySelectorAll('[data-slot="attachment"]'))
+const dialogContent = () => document.querySelector('[data-slot="dialog-content"]')
+
+test('every ready file is a vertical tile titled by filename, described "<EXT> · <size>"', () => {
+  mount([
+    file({ id: 'img-1', originalFilename: 'shot.png', mimeType: 'image/png', sizeBytes: 2048, status: 'ready' }),
+    file({ id: 'doc-1', originalFilename: 'notes.txt', mimeType: 'text/plain', sizeBytes: 42, status: 'ready' }),
+    file({ id: 'mk-1', originalFilename: 'Makefile', mimeType: 'text/plain', sizeBytes: 1536, status: 'ready' }),
+  ])
+
+  const t = tiles()
+  expect(t.length).toBe(3)
+  expect(t.map((x) => x.getAttribute('data-orientation'))).toEqual(['vertical', 'vertical', 'vertical'])
+  expect(t.map((x) => x.getAttribute('data-state'))).toEqual(['done', 'done', 'done'])
+  expect(t.map((x) => x.querySelector('[data-slot="attachment-title"]')?.textContent)).toEqual([
+    'shot.png',
+    'notes.txt',
+    'Makefile',
+  ])
+  expect(t.map((x) => x.querySelector('[data-slot="attachment-description"]')?.textContent)).toEqual([
+    'PNG · 2.0 KB',
+    'TXT · 42 B',
+    '1.5 KB',
+  ])
+})
+
+test('an image tile has a preview trigger, not a download link, that opens a dialog with the full image', async () => {
+  mount([
+    file({ id: 'img-1', originalFilename: 'shot.png', mimeType: 'image/png', sizeBytes: 100, status: 'ready' }),
+  ])
+  const [tile] = tiles()
+  expect(tile).toBeDefined()
+  const thumb = tile?.querySelector('[data-slot="attachment-media"] img')
+  expect(thumb?.getAttribute('src')).toBe('/api/sessions/s1/files/img-1')
+  expect(tile?.querySelector('a')).toBeNull()
+
+  const trigger = tile?.querySelector<HTMLButtonElement>('[aria-label="sessions.attachments.preview"]')
+  expect(trigger).not.toBeNull()
+  expect(trigger?.tagName).toBe('BUTTON')
+  expect(dialogContent()).toBeNull()
+
+  await act(async () => {
+    trigger?.click()
+  })
+  await flush()
+
+  const dlg = dialogContent()
+  expect(dlg).not.toBeNull()
+  const full = dlg?.querySelector('img')
+  expect(full?.getAttribute('src')).toBe('/api/sessions/s1/files/img-1')
+  expect(full?.getAttribute('alt')).toBe('shot.png')
+  expect(dlg?.textContent).toContain('shot.png')
+})
+
+test('a non-image tile is a download-link overlay inside the tile, with no preview trigger', () => {
+  mount([
+    file({ id: 'pdf-1', originalFilename: 'spec.pdf', mimeType: 'application/pdf', sizeBytes: 10, status: 'ready' }),
+  ])
+  const [tile] = tiles()
+  const link = tile?.querySelector('a')
+  expect(link).not.toBeNull()
+  expect(link?.getAttribute('href')).toBe('/api/sessions/s1/files/pdf-1')
+  expect(link?.getAttribute('download')).toBe('spec.pdf')
+  expect(link?.getAttribute('aria-label')).toBe('sessions.attachments.download')
+  expect(tile?.textContent).toContain('spec.pdf')
+  expect(tile?.querySelector('[aria-label="sessions.attachments.preview"]')).toBeNull()
+  expect(tile?.querySelector('img')).toBeNull()
+})
+
+test('a broken thumbnail falls back to the download-link tile with the same title and description', () => {
+  mount([
+    file({ id: 'img-1', originalFilename: 'shot.png', mimeType: 'image/png', sizeBytes: 2048, status: 'ready' }),
+  ])
+  act(() => {
+    container.querySelector('img')?.dispatchEvent(new Event('error'))
+  })
+  const [tile] = tiles()
+  expect(tile?.querySelector('img')).toBeNull()
+  expect(tile?.querySelector('[aria-label="sessions.attachments.preview"]')).toBeNull()
+  const link = tile?.querySelector('a')
+  expect(link?.getAttribute('download')).toBe('shot.png')
+  expect(link?.getAttribute('aria-label')).toBe('sessions.attachments.download')
+  expect(tile?.querySelector('[data-slot="attachment-title"]')?.textContent).toBe('shot.png')
+  expect(tile?.querySelector('[data-slot="attachment-description"]')?.textContent).toBe('PNG · 2.0 KB')
+})
+
+test('a removed file is an idle vertical placeholder tile with no img and no link', () => {
+  mount([file({ id: null, originalFilename: 'gone.png' })])
+  const [tile] = tiles()
+  expect(tile?.getAttribute('data-state')).toBe('idle')
+  expect(tile?.getAttribute('data-orientation')).toBe('vertical')
+  expect(tile?.textContent).toContain('sessions.attachments.removed')
+  expect(tile?.querySelector('img')).toBeNull()
+  expect(tile?.querySelector('a')).toBeNull()
+  expect(tile?.querySelector('button')).toBeNull()
 })

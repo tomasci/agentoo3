@@ -1571,7 +1571,7 @@ test('sending a message follows the transcript again, even from halfway up', asy
   const textarea = container.querySelector('textarea')
   if (!textarea) throw new Error('no composer')
   await type(textarea, 'do the thing')
-  const send = buttons().find((b) => b.textContent === 'sessions.send')
+  const send = buttons().find((b) => b.getAttribute('aria-label') === 'sessions.send')
   if (!send) throw new Error(`no send button among ${buttonLabels().join(', ')}`)
   await click(send)
   await settle(() => sends.length > 0)

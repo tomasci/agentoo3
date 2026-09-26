@@ -20,3 +20,17 @@ const INLINE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'im
 export function isInlineImage(mimeType: string): boolean {
   return INLINE_IMAGE_TYPES.has(mimeType)
 }
+
+/**
+ * An attachment tile's second line: `"<EXT> · <detail>"`, or just `<detail>`
+ * when the filename carries no extension — shared by the composer's tray and
+ * the transcript's own tiles so the two never drift on how this reads.
+ * `detail` is whatever fits the tile's own state, not always a size: a
+ * formatted byte count for a finished upload, an in-flight percentage for one
+ * still uploading.
+ */
+export function attachmentDescription(filename: string, detail: string): string {
+  const dot = filename.lastIndexOf('.')
+  const hasExt = dot > 0 && dot < filename.length - 1
+  return hasExt ? `${filename.slice(dot + 1).toUpperCase()} · ${detail}` : detail
+}

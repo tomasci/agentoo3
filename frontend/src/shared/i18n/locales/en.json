@@ -258,7 +258,9 @@
       "usage": "{{count}} of {{maxFiles}} files · {{used}} of {{max}}",
       "blockingSend_one": "Waiting for {{count}} upload to finish before this can be sent",
       "blockingSend_other": "Waiting for {{count}} uploads to finish before this can be sent",
-      "removed": "File removed"
+      "removed": "File removed",
+      "preview": "Preview {{name}}",
+      "download": "Download {{name}}"
     },
     "transcript": {
       "you": "You",

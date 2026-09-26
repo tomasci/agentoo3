@@ -17,13 +17,13 @@ import {
   AttachmentGroup,
   AttachmentMedia,
   AttachmentTitle,
+  AttachmentTrigger,
 } from '@/shared/ui/attachment'
 import { Button } from '@/shared/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/shared/ui/collapsible'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/ui/dialog'
 import { Empty, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
 import type { SessionMessage } from '../hooks/use-sessions'
-import { isInlineImage, sessionFileUrl } from '../lib/attachments'
+import { attachmentDescription, isInlineImage, sessionFileUrl } from '../lib/attachments'
 import { formatFullTime, formatTime } from '../lib/format'
 import {
   buildTranscript,
@@ -35,6 +35,7 @@ import {
   thinkingOf,
   toolCallsOf,
 } from '../lib/transcript'
+import { AttachmentLightbox } from './attachment-lightbox'
 
 type TaskStatus = Extract<TranscriptNode, { kind: 'task' }>['status']
 
@@ -320,15 +321,18 @@ function readyAttachment(file: MessageFile): ReadyAttachment | null {
 }
 
 /**
- * One file a prompt carried. An image gets a thumbnail that opens a `Dialog`
- * lightbox; anything else is a chip linking at the hand-built download route
+ * One file a prompt carried, as the same vertical tile the composer's own
+ * tray uses. An image gets a thumbnail whose `AttachmentTrigger` opens the
+ * shared lightbox (`attachment-lightbox.tsx`); anything else gets a trigger
+ * rendered as a real `<a download>` at the hand-built download route
  * (`lib/attachments.ts` — the OpenAPI router does not carry this one, see its
- * own comment for why). Both cases wrap the whole `Attachment` tile in the
- * real control (a `<button>` or an `<a>`) rather than only an inner icon, so
- * the filename and size are part of what the control announces.
+ * own comment for why). Either way the trigger overlays the whole tile
+ * (`attachment.tsx`'s own `absolute inset-0`), so the filename and size
+ * beside it are still part of what the control announces, without wrapping
+ * the tile in a second, redundant `<button>`/`<a>` of our own.
  */
 function AttachmentItem({ sessionId, file }: { sessionId: string; file: ReadyAttachment }) {
-  const [open, setOpen] = useState(false)
+  const { t } = useTranslation()
   // Flips true only if the browser itself fails to load the thumbnail — a
   // GC race between the file list request and the download, say. Never
   // trusted as the sole signal that a file is gone (see `readyAttachment`
@@ -338,8 +342,8 @@ function AttachmentItem({ sessionId, file }: { sessionId: string; file: ReadyAtt
   const url = sessionFileUrl(sessionId, file.id)
   const isImage = isInlineImage(file.mimeType) && !broken
 
-  const tile = (
-    <Attachment state="done" size="sm">
+  return (
+    <Attachment orientation="vertical" state="done">
       <AttachmentMedia variant={isImage ? 'image' : 'icon'}>
         {isImage ? (
           <img src={url} alt={file.originalFilename} onError={() => setBroken(true)} />
@@ -348,38 +352,29 @@ function AttachmentItem({ sessionId, file }: { sessionId: string; file: ReadyAtt
         )}
       </AttachmentMedia>
       <AttachmentContent>
-        <AttachmentTitle>{file.originalFilename}</AttachmentTitle>
-        <AttachmentDescription>{formatBytes(file.sizeBytes)}</AttachmentDescription>
+        <AttachmentTitle title={file.originalFilename}>{file.originalFilename}</AttachmentTitle>
+        <AttachmentDescription>
+          {attachmentDescription(file.originalFilename, formatBytes(file.sizeBytes))}
+        </AttachmentDescription>
       </AttachmentContent>
-    </Attachment>
-  )
-
-  if (isImage) {
-    return (
-      <>
-        <button type="button" className="block text-left" onClick={() => setOpen(true)}>
-          {tile}
-        </button>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{file.originalFilename}</DialogTitle>
-            </DialogHeader>
-            <img
-              src={url}
-              alt={file.originalFilename}
-              className="mx-auto block max-h-[70vh] max-w-full rounded-sm"
+      {isImage ? (
+        <AttachmentLightbox
+          filename={file.originalFilename}
+          src={url}
+          triggerLabel={t('sessions.attachments.preview', { name: file.originalFilename })}
+        />
+      ) : (
+        <AttachmentTrigger
+          render={
+            <a
+              href={url}
+              download={file.originalFilename}
+              aria-label={t('sessions.attachments.download', { name: file.originalFilename })}
             />
-          </DialogContent>
-        </Dialog>
-      </>
-    )
-  }
-
-  return (
-    <a href={url} download={file.originalFilename} className="block">
-      {tile}
-    </a>
+          }
+        />
+      )}
+    </Attachment>
   )
 }
 
@@ -398,7 +393,7 @@ function PromptAttachments({ sessionId, files }: { sessionId: string; files: Mes
         const ready = readyAttachment(file)
         if (!ready) {
           return (
-            <Attachment key={file.id ?? `removed-${i}`} state="idle" size="sm">
+            <Attachment key={file.id ?? `removed-${i}`} orientation="vertical" state="idle">
               <AttachmentMedia>
                 <FileXIcon aria-hidden="true" />
               </AttachmentMedia>
