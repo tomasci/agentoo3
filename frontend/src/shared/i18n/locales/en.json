@@ -19,7 +19,7 @@
   "health": {
     "checking": "Checking backend…",
     "ok": "Backend ready",
-    "down": "Backend unreachable",
+    "reconnecting": "Reconnecting…",
     "noCredential": "No Claude credential",
     "outdatedTitle": "Update available",
     "outdatedMessage": "This tab is running an older build than the server. Reload to pick up the latest version.",
@@ -240,8 +240,6 @@
     "actionsFor": "Actions for {{name}}",
     "open": "Open",
     "details": "Session details",
-    "live": "Live",
-    "reconnecting": "Reconnecting…",
     "stop": "Stop",
     "export": "Export JSON",
     "send": "Send",

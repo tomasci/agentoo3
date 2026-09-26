@@ -1,6 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query'
+import { useSetAtom } from 'jotai'
 import { useEffect, useRef, useState } from 'react'
 import { getApiSessionsIdQueryKey } from '@/shared/api/generated/hooks/useGetApiSessionsId'
+import { addReconnectingStreamAtom, removeReconnectingStreamAtom } from '@/shared/store/connection'
 import { appendStreamedMessage, isFetchingOlderPage, newestCachedSeq } from '../lib/message-cache'
 import { parseStreamedMessage } from '../lib/streamed-message'
 import type { SessionMessage } from './use-sessions'
@@ -26,6 +28,8 @@ import type { SessionMessage } from './use-sessions'
  */
 export function useSessionStream(sessionId: string, enabled = true) {
   const queryClient = useQueryClient()
+  const addReconnecting = useSetAtom(addReconnectingStreamAtom)
+  const removeReconnecting = useSetAtom(removeReconnectingStreamAtom)
   const [connected, setConnected] = useState(false)
   // Read inside the effect without making it a dependency: a changing seq must
   // not tear the connection down and rebuild it on every message.
@@ -88,7 +92,10 @@ export function useSessionStream(sessionId: string, enabled = true) {
       const after = lastSeq.current
       source = new EventSource(`/api/sessions/${sessionId}/events?after=${after}`)
 
-      source.addEventListener('open', () => setConnected(true))
+      source.addEventListener('open', () => {
+        setConnected(true)
+        removeReconnecting(sessionId)
+      })
 
       source.addEventListener('message', (event) => {
         // Validated at the boundary (streamed-message.ts), not cast: an
@@ -109,6 +116,12 @@ export function useSessionStream(sessionId: string, enabled = true) {
       source.addEventListener('error', () => {
         setConnected(false)
         source?.close()
+        // Marks this session's stream as reconnecting only from here — never
+        // from `connect`'s own first call — so the first attempt, which has
+        // not failed yet, never flashes "Reconnecting…" (see connection.ts's
+        // own comment; use-container-logs.ts's local `reconnecting` state
+        // follows the identical rule).
+        if (!closed) addReconnecting(sessionId)
         // Reconnect ourselves, from where we left off. `buffer`/`frame` are
         // deliberately untouched here: they belong to this effect run, not to
         // this one connection, so anything still queued keeps its place and
@@ -138,8 +151,9 @@ export function useSessionStream(sessionId: string, enabled = true) {
       if (!isFetchingOlderPage(queryClient, sessionId)) flush()
       source?.close()
       setConnected(false)
+      removeReconnecting(sessionId)
     }
-  }, [sessionId, enabled, queryClient])
+  }, [sessionId, enabled, queryClient, addReconnecting, removeReconnecting])
 
   return { connected }
 }

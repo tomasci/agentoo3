@@ -370,7 +370,7 @@ test("a rejected interrupt toasts the API's own error message when it has one", 
 
 // --- 7. header no longer shows orchestrator / branch / cost ---------------
 
-test('the header shows no orchestrator, branch or cost text, but keeps the live indicator', async () => {
+test('the header shows no orchestrator, branch, cost or live-status text', async () => {
   currentSession = session({
     status: 'running',
     orchestrator: 'claude',
@@ -391,9 +391,9 @@ test('the header shows no orchestrator, branch or cost text, but keeps the live 
   expect(text).not.toContain('/srv/wt/s-x')
   expect(text).not.toContain('sessions.meta.orchestrator')
   expect(text).not.toContain('sessions.meta.branch')
-  // No stream connects in this harness (inert EventSource), so the indicator
-  // reads "reconnecting" — either key proves it is still in the header.
-  expect(/sessions\.(live|reconnecting)/.test(text)).toBe(true)
+  // The Live/Reconnecting indicator is gone from the header entirely — see
+  // app/status-bar.tsx's own "Reconnecting…" line instead.
+  expect(/sessions\.(live|reconnecting)/.test(text)).toBe(false)
 })
 
 test('opening the popover still does not put those values into the header itself', async () => {
@@ -508,4 +508,90 @@ test('with messages: the transcript wrapper carries no class attribute at all', 
   expect(w.hasAttribute('class')).toBe(false)
   expect(w.querySelector('[data-slot="empty"]')).toBeNull()
   expect(w.querySelectorAll('[data-transcript-row]').length).toBe(2)
+})
+
+// --- 11. no live-status indicator next to the title -------------------------
+//
+// The Live/Reconnecting text and its StatusDot left the header: a dropped
+// stream now shows up in the status bar instead (app/status-bar.tsx, see
+// tests/status-bar-reconnecting.test.tsx). What stays: the status badge (whose
+// own dot is the only dot in the header), the title, the details trigger and
+// the actions menu.
+
+/** Every StatusDot in `scope` — shared/components/status-dot.tsx's round
+ *  `span[aria-hidden]`. */
+const dotsIn = (scope: ParentNode) => [
+  ...scope.querySelectorAll('span.rounded-full[aria-hidden="true"]'),
+]
+
+/** Opens as soon as it is constructed, so the hook's `connected` goes true —
+ *  the state that used to render "Live". */
+class OpeningEventSource {
+  static opens = 0
+  private readonly listeners = new Map<string, Set<(e: Event) => void>>()
+  constructor(readonly url: string) {
+    setTimeout(() => {
+      const fns = [...(this.listeners.get('open') ?? [])]
+      if (fns.length > 0) OpeningEventSource.opens++
+      for (const fn of fns) fn(new Event('open'))
+    }, 0)
+  }
+  addEventListener(type: string, fn: (e: Event) => void) {
+    const set = this.listeners.get(type) ?? new Set()
+    set.add(fn)
+    this.listeners.set(type, set)
+  }
+  removeEventListener() {}
+  close() {}
+}
+
+test('the header keeps the badge, title, details trigger and actions menu', async () => {
+  currentSession = session({ status: 'running' })
+  await mount()
+  const h = header()
+  expect(h.querySelectorAll('[data-slot="badge"]').length).toBe(1)
+  expect(h.querySelector('[data-slot="badge"]')?.textContent).toBe('sessions.status.running')
+  expect(h.querySelector('h1')?.textContent).toBe('A session')
+  expect(detailsTrigger().getAttribute('aria-label')).toBe('sessions.details')
+  const actions = [...h.querySelectorAll('button')].filter(
+    (b) => b.getAttribute('aria-label') === 'sessions.actionsFor',
+  )
+  expect(actions.length).toBe(1)
+})
+
+test("the header's only StatusDot is the one inside the status badge", async () => {
+  currentSession = session({ status: 'running' })
+  await mount()
+  const h = header()
+  const badge = h.querySelector('[data-slot="badge"]')
+  const dots = dotsIn(h)
+  expect(dots.length).toBe(1)
+  expect(badge?.contains(dots[0] ?? null)).toBe(true)
+})
+
+test('nothing between the title and the action group: the title is followed directly by the actions', async () => {
+  await mount()
+  const title = header().querySelector('h1')
+  const next = title?.nextElementSibling
+  // The action group (details trigger lives in it), not a status span.
+  expect(next?.contains(detailsTrigger())).toBe(true)
+  expect(dotsIn(next ?? document.createElement('div')).length).toBe(0)
+})
+
+test('with the stream actually open, the header still shows no live text and no extra dot', async () => {
+  ;(globalThis as { EventSource?: unknown }).EventSource = OpeningEventSource
+  OpeningEventSource.opens = 0
+  try {
+    currentSession = session({ status: 'running' })
+    await mount()
+    await settle()
+    // The page really did open a stream: this is the connected state.
+    expect(OpeningEventSource.opens).toBeGreaterThanOrEqual(1)
+    const text = header().textContent ?? ''
+    expect(text).not.toContain('sessions.live')
+    expect(text).not.toContain('sessions.reconnecting')
+    expect(dotsIn(header()).length).toBe(1)
+  } finally {
+    ;(globalThis as { EventSource?: unknown }).EventSource = InertEventSource
+  }
 })

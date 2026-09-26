@@ -1,8 +1,10 @@
+import { useAtomValue } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { useHealth } from '@/features/health'
 import { formatBytes, useSystem } from '@/features/system'
 import { StatusDot, type Tone } from '@/shared/components'
 import { cn } from '@/shared/lib/utils'
+import { reconnectingStreamsAtom } from '@/shared/store/connection'
 import { buttonVariants } from '@/shared/ui/button'
 import {
   Popover,
@@ -12,16 +14,17 @@ import {
   PopoverTrigger,
 } from '@/shared/ui/popover'
 import { Progress, ProgressLabel, ProgressValue } from '@/shared/ui/progress'
+import { Spinner } from '@/shared/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 
-// StatusDot only speaks in the five shared tones — 'neutral' covers both
-// "still checking" and "actually unreachable", so it reads as neutral rather
-// than alarming: a slow health check should not look identical to a real
-// failure.
-const DOT_TONE: Record<'ok' | 'warn' | 'down', Tone> = {
+// StatusDot only speaks in the five shared tones. "Actually unreachable" is
+// no longer one of this dot's tones at all — see `state`/`label` below — so
+// this only ever has to tell "still checking" (neutral) from the two
+// answered states.
+const DOT_TONE: Record<'checking' | 'ok' | 'warn', Tone> = {
+  checking: 'neutral',
   ok: 'success',
   warn: 'warning',
-  down: 'neutral',
 }
 
 type MetricKey = 'cpu' | 'mem' | 'disk'
@@ -107,20 +110,27 @@ export function StatusBar() {
   const { t, i18n } = useTranslation()
   const { data: health, isPending, isError } = useHealth()
   const { data: system } = useSystem()
+  // Every live session's own stream (use-session-stream.ts) reports here when
+  // it drops — folded into the same line as the health check itself, so an
+  // operator sees "Reconnecting…" whichever of the two actually failed,
+  // without having to open a session tab to find out which.
+  const reconnectingStreams = useAtomValue(reconnectingStreamsAtom)
+  const reconnecting = isError || !health || reconnectingStreams.size > 0
 
-  // Three states, because "backend down" and "backend up but agents cannot run"
-  // call for different actions.
+  // Four states: still checking, reconnecting (backend unreachable or a
+  // stream dropped), up but no credential, or fully ok — each calling for a
+  // different glance.
   const state = isPending
-    ? 'down'
-    : isError || !health
-      ? 'down'
+    ? 'checking'
+    : reconnecting
+      ? 'reconnecting'
       : health.claudeCredential
         ? 'ok'
         : 'warn'
   const label = isPending
     ? t('health.checking')
-    : isError || !health
-      ? t('health.down')
+    : reconnecting
+      ? t('health.reconnecting')
       : health.claudeCredential
         ? t('health.ok')
         : t('health.noCredential')
@@ -153,7 +163,11 @@ export function StatusBar() {
           gives way and truncates when the row is too narrow to fit
           everything. */}
       <span className="flex min-w-0 items-center gap-2 overflow-hidden">
-        <StatusDot tone={DOT_TONE[state]} />
+        {state === 'reconnecting' ? (
+          <Spinner aria-hidden="true" className="size-3" />
+        ) : (
+          <StatusDot tone={DOT_TONE[state]} />
+        )}
         <span className="truncate">{label}</span>
       </span>
 

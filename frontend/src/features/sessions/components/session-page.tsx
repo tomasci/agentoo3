@@ -11,7 +11,6 @@ import {
   DefinitionList,
   Loading,
   StatusBadge,
-  StatusDot,
   toast,
 } from '@/shared/components'
 import { Alert, AlertDescription } from '@/shared/ui/alert'
@@ -130,7 +129,7 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // seed `lastSeq` from, so the backend treats it as a brand new reader and
   // replays the entire transcript down the stream on top of the REST fetch
   // that just did the same thing.
-  const { connected } = useSessionStream(sessionId, messages.isSuccess)
+  useSessionStream(sessionId, messages.isSuccess)
 
   const files = useSessionFiles(sessionId)
   const uploads = useAttachmentUploads(sessionId)
@@ -724,18 +723,6 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
           {t(`sessions.status.${data.status}`)}
         </StatusBadge>
         <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
-        {/* Live status, not set-once configuration — orchestrator/branch/cost
-            moved into the details popover below, in the action group. Still
-            forced onto its own full-width row below `md`, same as the old
-            meta row did: without `order-1 basis-full` here, this joins the
-            badge/title/actions on the first line below `md` and squeezes the
-            title down to a handful of pixels — there simply is not room for
-            all of it beside a full set of action buttons on a narrow phone
-            screen. From `md` up there is room, so it rejoins the row inline. */}
-        <span className="order-1 flex shrink-0 basis-full items-center gap-2 whitespace-nowrap text-xs text-muted-foreground md:order-none md:basis-auto md:text-sm">
-          <StatusDot tone={connected ? 'accent' : 'neutral'} />
-          {connected ? t('sessions.live') : t('sessions.reconnecting')}
-        </span>
         <div className="flex shrink-0 items-center gap-2">
           {/* Only sessions handed off from an idea have anywhere to link back
               to; a session created directly has no `ideaId` and shows nothing
@@ -795,7 +782,7 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
           )}
           {/* Orchestrator/branch/worktree/cost live here now, not in the
               header row itself — set-once configuration nobody needs to see
-              at a glance the way the status badge or the live dot do. */}
+              at a glance the way the status badge does. */}
           <Popover>
             <PopoverTrigger
               aria-label={t('sessions.details')}
