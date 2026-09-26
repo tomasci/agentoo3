@@ -68,14 +68,20 @@ export function TabBar({ mode }: { mode: TabKind }) {
     <header className="flex h-12 shrink-0 items-center gap-1 px-2">
       {/* An empty tab has no sidebar to toggle (root-layout.tsx forces it
           closed and empty in this mode) — a trigger with nothing behind it
-          would be a control that does nothing. */}
-      {mode !== 'new' && <SidebarTrigger aria-label={t('shell.toggleSidebar')} />}
+          would be a control that does nothing. `icon`, not the default
+          `icon-sm`, so it's the same 32px as a tab pill and the [+], and
+          shares their vertical centerline in the 48px header. */}
+      {mode !== 'new' && <SidebarTrigger size="icon" aria-label={t('shell.toggleSidebar')} />}
 
       <nav
         aria-label={t('tabs.label')}
         className="hidden min-w-0 flex-1 items-stretch gap-1 self-stretch overflow-x-auto md:flex"
       >
-        <ul className="flex min-w-0 items-stretch gap-1 py-1.5">
+        {/* `items-center`, not `items-stretch`: the `<li>`s only need to
+            hold the (32px) `ButtonGroup`s, not fill the nav's own height, so
+            centering here is what puts every tab's centerline level with the
+            toggle and the [+] instead of at the top of a stretched `<li>`. */}
+        <ul className="flex min-w-0 items-center gap-1">
           {tabs.map((tab) => {
             const active = tab.id === activeId
             const variant = active ? 'secondary' : 'ghost'
