@@ -842,3 +842,191 @@ test('the X on an error tile calls onRemove(upload)', () => {
   })
   expect(calls.onRemove).toEqual([u])
 })
+
+// --- 13. the stop button ----------------------------------------------------
+//
+// `canStop`/`stopping`/`onStop` moved the session's stop control out of the
+// page header and into the composer, immediately before send. Everything
+// below is located by aria-label and addon slot/align, never by class.
+
+const STOP = 'sessions.stop'
+
+let stops = 0
+const stopProps = (o: Partial<ComposerProps> = {}): ComposerProps =>
+  props({
+    onStop: () => {
+      stops++
+    },
+    ...o,
+  })
+
+beforeEach(() => {
+  stops = 0
+})
+
+const labelsIn = (scope: Element | null) =>
+  qa<HTMLButtonElement>('button', scope ?? document.createElement('div')).map((b) =>
+    b.getAttribute('aria-label'),
+  )
+
+test('canStop renders an icon-only stop button with an svg; absent or false renders none anywhere', () => {
+  mount(stopProps({ value: 'hello', canStop: true }))
+  const stop = byLabel(STOP)
+  expect(stop).not.toBeNull()
+  expect(stop?.tagName).toBe('BUTTON')
+  expect(stop?.textContent).toBe('')
+  expect(stop?.querySelector('svg')).not.toBeNull()
+  unmount()
+  document.body.replaceChildren()
+
+  for (const canStop of [false, undefined]) {
+    for (const value of ['', 'hello', 'a\nb']) {
+      mount(stopProps({ value, canStop }))
+      expect(document.body.querySelectorAll(`[aria-label="${STOP}"]`).length).toBe(0)
+      unmount()
+      document.body.replaceChildren()
+    }
+  }
+})
+
+test('compact with text: inline-end holds stop then send, in that DOM order', () => {
+  mount(stopProps({ value: 'hello', canStop: true }))
+  const end = addon('inline-end')
+  expect(end).not.toBeNull()
+  expect(labelsIn(end)).toEqual([STOP, SEND])
+  // Attach is untouched, still on its own at the start.
+  expect(labelsIn(addon('inline-start'))).toEqual([ATTACH])
+  expect(addon('block-end')).toBeNull()
+})
+
+test('compact while sending with an empty value: stop precedes the sending button', () => {
+  mount(stopProps({ value: '', sending: true, canSend: false, canStop: true }))
+  expect(labelsIn(addon('inline-end'))).toEqual([STOP, SENDING])
+})
+
+test('empty value with canStop: an inline-end addon exists holding only stop', () => {
+  mount(stopProps({ value: '', canStop: true }))
+  const end = addon('inline-end')
+  expect(end).not.toBeNull()
+  expect(labelsIn(end)).toEqual([STOP])
+  expect(byLabel(SEND)).toBeNull()
+  expect(addon('block-end')).toBeNull()
+})
+
+test('empty value, no canStop, not sending: still no inline-end addon at all', () => {
+  mount(stopProps({ value: '', canStop: false }))
+  expect(addon('inline-end')).toBeNull()
+})
+
+test('expanded: one block-end addon, attach first, then stop, then send, stop and send grouped at the end', () => {
+  mount(stopProps({ value: 'line one\nline two', canStop: true }))
+  const blocks = qa('[data-slot="input-group-addon"][data-align="block-end"]', inputGroup())
+  expect(blocks.length).toBe(1)
+  const block = blocks[0] ?? null
+  expect(addon('inline-start')).toBeNull()
+  expect(addon('inline-end')).toBeNull()
+  expect(labelsIn(block)).toEqual([ATTACH, STOP, SEND])
+
+  const stop = byLabel(STOP, block ?? container)
+  const send = byLabel(SEND, block ?? container)
+  if (!stop || !send) throw new Error('stop or send missing')
+  // "Together at the end": stop and send share one parent, which is the last
+  // child of the addon, and attach is not in it.
+  expect(stop.parentElement).toBe(send.parentElement)
+  expect(block?.lastElementChild).toBe(stop.parentElement)
+  expect(stop.parentElement?.contains(byLabel(ATTACH))).toBe(false)
+})
+
+test('expanded with an emptied-but-whitespace value: attach then stop, no send', () => {
+  mount(stopProps({ value: 'a\nb', canStop: true }))
+  render(stopProps({ value: ' ', canStop: true }))
+  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, STOP])
+})
+
+test('stopping disables stop, and a click on it then calls nothing', () => {
+  mount(stopProps({ value: 'hello', canStop: true, stopping: true }))
+  const stop = byLabel(STOP)
+  expect(stop?.disabled).toBe(true)
+  act(() => {
+    stop?.click()
+  })
+  expect(stops).toBe(0)
+  expect(calls.onSubmit).toBe(0)
+})
+
+test('an enabled stop calls onStop exactly once and never onSubmit', () => {
+  mount(stopProps({ value: 'hello', canStop: true, stopping: false }))
+  const stop = byLabel(STOP)
+  expect(stop?.disabled).toBe(false)
+  act(() => {
+    stop?.click()
+  })
+  expect(stops).toBe(1)
+  expect(calls.onSubmit).toBe(0)
+})
+
+test('an enabled stop in expanded mode also calls onStop once and never onSubmit', () => {
+  mount(stopProps({ value: 'a\nb', canStop: true }))
+  act(() => {
+    byLabel(STOP)?.click()
+  })
+  expect(stops).toBe(1)
+  expect(calls.onSubmit).toBe(0)
+})
+
+test('stop is not a submit button: clicking it inside a form submits nothing', () => {
+  // The composer sits in no <form> today, but a stop that defaulted to
+  // type="submit" would send the prompt the moment one wrapped it.
+  mount(stopProps({ value: 'hello', canStop: true }))
+  expect(byLabel(STOP)?.getAttribute('type')).toBe('button')
+})
+
+test('toggling canStop never changes compact/expanded mode and never remounts the textarea', () => {
+  mount(stopProps({ value: 'hello', canStop: false }))
+  const ta = textarea()
+  expect(ta.getAttribute('rows')).toBe('1')
+
+  render(stopProps({ value: 'hello', canStop: true }))
+  expect(textarea()).toBe(ta)
+  expect(ta.getAttribute('rows')).toBe('1')
+  expect(addon('block-end')).toBeNull()
+  expect(addon('inline-start')).not.toBeNull()
+
+  render(stopProps({ value: 'hello', canStop: false }))
+  expect(textarea()).toBe(ta)
+  expect(addon('block-end')).toBeNull()
+
+  // Empty value: the inline-end addon appears and disappears with canStop —
+  // the textarea it sits beside must not be rebuilt either way.
+  render(stopProps({ value: '', canStop: false }))
+  expect(addon('inline-end')).toBeNull()
+  render(stopProps({ value: '', canStop: true }))
+  expect(textarea()).toBe(ta)
+  expect(addon('inline-end')).not.toBeNull()
+  render(stopProps({ value: '', canStop: false }))
+  expect(textarea()).toBe(ta)
+  expect(addon('inline-end')).toBeNull()
+
+  // Expanded stays expanded across a toggle.
+  render(stopProps({ value: 'a\nb', canStop: false }))
+  expect(ta.getAttribute('rows')).toBe('3')
+  render(stopProps({ value: 'a\nb', canStop: true }))
+  expect(textarea()).toBe(ta)
+  expect(ta.getAttribute('rows')).toBe('3')
+  expect(addon('block-end')).not.toBeNull()
+  expect(addon('inline-start')).toBeNull()
+  render(stopProps({ value: 'a\nb', canStop: false }))
+  expect(textarea()).toBe(ta)
+  expect(addon('block-end')).not.toBeNull()
+  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, SEND])
+})
+
+test('focus survives canStop toggling on and off', () => {
+  mount(stopProps({ value: '', canStop: false }))
+  const ta = textarea()
+  ta.focus()
+  render(stopProps({ value: '', canStop: true }))
+  expect(document.activeElement).toBe(ta)
+  render(stopProps({ value: '', canStop: false }))
+  expect(document.activeElement).toBe(ta)
+})

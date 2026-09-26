@@ -1,12 +1,28 @@
 import { Link } from '@tanstack/react-router'
-import { OctagonXIcon } from 'lucide-react'
+import { InfoIcon, OctagonXIcon } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useEditorStop } from '@/features/editor'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { ActionsMenu, Code, Loading, StatusBadge, StatusDot, toast } from '@/shared/components'
+import {
+  ActionsMenu,
+  Code,
+  type DefinitionItem,
+  DefinitionList,
+  Loading,
+  StatusBadge,
+  StatusDot,
+  toast,
+} from '@/shared/components'
 import { Alert, AlertDescription } from '@/shared/ui/alert'
 import { Button, buttonVariants } from '@/shared/ui/button'
+import {
+  Popover,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from '@/shared/ui/popover'
 import { Spinner } from '@/shared/ui/spinner'
 import {
   type AttachmentUpload,
@@ -632,6 +648,47 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   const data = session.data
   const title = data.title ?? t('sessions.untitled', { id: data.id.slice(0, 8) })
 
+  // The header's details popover: set-once configuration, not live status —
+  // orchestrator/branch/worktree only ever appear when the session actually
+  // has one; cost is always shown (including $0.0000), the same formatting
+  // the header used to render inline.
+  const detailItems: DefinitionItem[] = [
+    ...(data.orchestrator
+      ? [
+          {
+            id: 'orchestrator',
+            term: t('sessions.meta.orchestrator'),
+            description: data.orchestrator,
+          },
+        ]
+      : []),
+    ...(data.branch
+      ? [
+          {
+            id: 'branch',
+            term: t('sessions.meta.branch'),
+            description: <Code>{data.branch}</Code>,
+          },
+        ]
+      : []),
+    // Only an isolated session has a worktree of its own — the same gate the
+    // Docker/Editor links above use.
+    ...(data.isolated && data.worktreePath
+      ? [
+          {
+            id: 'worktree',
+            term: t('sessions.detailsFields.worktree'),
+            description: <Code wrap>{data.worktreePath}</Code>,
+          },
+        ]
+      : []),
+    {
+      id: 'cost',
+      term: t('sessions.detailsFields.cost'),
+      description: `$${data.totalCostUsd.toFixed(4)}`,
+    },
+  ]
+
   // Queue state that matters when you are about to type, not when you glance
   // at the title (that's why it moved out of the header): whether sending now
   // would just join a queue, and how many prompts are already waiting in it.
@@ -667,24 +724,26 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
           {t(`sessions.status.${data.status}`)}
         </StatusBadge>
         <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
-        <div className="order-1 flex basis-full flex-wrap items-center gap-2 overflow-hidden text-xs text-muted-foreground md:order-none md:basis-auto md:flex-nowrap md:text-sm">
-          {/* Set-once configuration, not live status — it steps aside below
-              `md` so the row has room for what actually changes. */}
-          {data.orchestrator && <span className="hidden md:inline">{data.orchestrator}</span>}
-          {data.branch && <Code>{data.branch}</Code>}
-          {data.totalCostUsd > 0 && <span>${data.totalCostUsd.toFixed(4)}</span>}
-          <span className="order-first inline-flex items-center gap-2 whitespace-nowrap md:order-none">
-            <StatusDot tone={connected ? 'accent' : 'neutral'} />
-            {connected ? t('sessions.live') : t('sessions.reconnecting')}
-          </span>
-        </div>
+        {/* Live status, not set-once configuration — orchestrator/branch/cost
+            moved into the details popover below, in the action group. Still
+            forced onto its own full-width row below `md`, same as the old
+            meta row did: without `order-1 basis-full` here, this joins the
+            badge/title/actions on the first line below `md` and squeezes the
+            title down to a handful of pixels — there simply is not room for
+            all of it beside a full set of action buttons on a narrow phone
+            screen. From `md` up there is room, so it rejoins the row inline. */}
+        <span className="order-1 flex shrink-0 basis-full items-center gap-2 whitespace-nowrap text-xs text-muted-foreground md:order-none md:basis-auto md:text-sm">
+          <StatusDot tone={connected ? 'accent' : 'neutral'} />
+          {connected ? t('sessions.live') : t('sessions.reconnecting')}
+        </span>
         <div className="flex shrink-0 items-center gap-2">
           {/* Only sessions handed off from an idea have anywhere to link back
               to; a session created directly has no `ideaId` and shows nothing
-              here. Placed ahead of Stop/the menu so navigation reads to the
-              left of the destructive and overflow actions. Styled through
-              `buttonVariants` rather than `Button render={<Link/>}` — see the
-              track's own rule on link-as-button. */}
+              here. Placed ahead of the details popover and the menu so
+              navigation reads to the left of the informational and overflow
+              actions. Styled through `buttonVariants` rather than
+              `Button render={<Link/>}` — see the track's own rule on
+              link-as-button. */}
           {data.ideaId && (
             <Link
               to="/projects/$projectId/ideas/$ideaId"
@@ -734,17 +793,23 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
               {t('sessions.editor')}
             </Link>
           )}
-          {/* Visible at every size while busy: the only way to halt a running
-              agent does not belong behind a menu. */}
-          {busy && (
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => interrupt.mutate({ path: { id: sessionId } })}
+          {/* Orchestrator/branch/worktree/cost live here now, not in the
+              header row itself — set-once configuration nobody needs to see
+              at a glance the way the status badge or the live dot do. */}
+          <Popover>
+            <PopoverTrigger
+              aria-label={t('sessions.details')}
+              render={<Button variant="ghost" size="icon-sm" />}
             >
-              {t('sessions.stop')}
-            </Button>
-          )}
+              <InfoIcon />
+            </PopoverTrigger>
+            <PopoverContent align="end">
+              <PopoverHeader>
+                <PopoverTitle>{t('sessions.details')}</PopoverTitle>
+              </PopoverHeader>
+              <DefinitionList layout="stacked" items={detailItems} />
+            </PopoverContent>
+          </Popover>
           <ActionsMenu
             label={t('sessions.actionsFor', { name: title })}
             actions={[
@@ -827,7 +892,7 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
             </AlertDescription>
           </Alert>
         ) : (
-          <div>
+          <div className={messages.messages.length === 0 ? 'flex h-full flex-col' : undefined}>
             {messages.hasPreviousPage && (
               <>
                 <div ref={setSentinelNode} className="h-0" />
@@ -876,6 +941,17 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
         }}
         sending={send.isPending}
         canSend={!send.isPending && text.trim().length > 0 && uploads.pendingCount === 0}
+        canStop={busy}
+        stopping={interrupt.isPending}
+        onStop={() =>
+          interrupt.mutate(
+            { path: { id: sessionId } },
+            {
+              onError: (e) =>
+                toast.add({ title: apiErrorMessage(e, t('sessions.stopFailed')), type: 'error' }),
+            },
+          )
+        }
         orchestratorMissing={!data.orchestrator}
         queueLine={queueLine}
         error={error}

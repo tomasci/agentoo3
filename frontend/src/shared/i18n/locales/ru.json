@@ -213,6 +213,10 @@
       "baseSha": "Базовый коммит",
       "orchestrator": "Оркестратор"
     },
+    "detailsFields": {
+      "worktree": "Worktree",
+      "cost": "Стоимость"
+    },
     "form": {
       "heading": "Новая сессия",
       "title": "Название",
@@ -235,6 +239,7 @@
     "deleteTitle": "Удалить сессию?",
     "actionsFor": "Действия для {{name}}",
     "open": "Открыть",
+    "details": "Сведения о сессии",
     "live": "В эфире",
     "reconnecting": "Переподключение…",
     "stop": "Остановить",
@@ -246,6 +251,7 @@
     "composerPlaceholder": "Что нужно сделать оркестратору…",
     "needsOrchestrator": "У сессии нет оркестратора, запустить её нельзя. Выберите его в списке сессий.",
     "sendFailed": "Не удалось отправить сообщение",
+    "stopFailed": "Не удалось остановить сессию",
     "pendingPrompts_one": "{{count}} сообщение в очереди",
     "pendingPrompts_few": "{{count}} сообщения в очереди",
     "pendingPrompts_many": "{{count}} сообщений в очереди",
@@ -267,7 +273,8 @@
     "transcript": {
       "you": "Вы",
       "model": "Модель: {{model}}",
-      "empty": "Пока пусто. Отправьте сообщение, чтобы начать сессию.",
+      "empty": "Сообщений пока нет",
+      "emptyDescription": "Отправьте сообщение ниже, чтобы начать сессию.",
       "delegatedPrompt": "Промпт для {{agent}}",
       "thinking": "Размышления",
       "command": "Команда",
