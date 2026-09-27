@@ -1,11 +1,4 @@
-import {
-  CornerDownLeftIcon,
-  FileIcon,
-  PlusIcon,
-  SquareIcon,
-  TriangleAlertIcon,
-  XIcon,
-} from 'lucide-react'
+import { CornerDownLeftIcon, FileIcon, PlusIcon, SquareIcon, XIcon } from 'lucide-react'
 import type { DragEvent, KeyboardEvent } from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -181,7 +174,6 @@ export function Composer({
   canStop,
   stopping,
   onStop,
-  orchestratorMissing,
   queueLine,
   error,
   attachments,
@@ -203,7 +195,6 @@ export function Composer({
   canStop?: boolean
   stopping?: boolean
   onStop?: () => void
-  orchestratorMissing: boolean
   queueLine: string
   error: string | null
   attachments: ComposerAttachments
@@ -445,12 +436,6 @@ export function Composer({
         )}
       </InputGroup>
 
-      {orchestratorMissing && (
-        <Alert role="status">
-          <TriangleAlertIcon />
-          <AlertDescription>{t('sessions.needsOrchestrator')}</AlertDescription>
-        </Alert>
-      )}
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>

@@ -329,11 +329,54 @@ async function duplicateUploadResponse(): Promise<void> {
   }
 }
 
+// --- E1: the orchestrator is cleared after the prompt is already ready ------
+//
+// createIdeaPrompt's own guard (features/ideas/service.ts) refuses to
+// generate a prompt for an orchestrator-less idea, so the ordinary sweep
+// never reaches resolveSession with idea.orchestrator === null — that guard
+// runs long before a card here. The gap dispatchRun's own docblock names is
+// narrower: the idea already had an orchestrator when its prompt turned
+// ready, and only lost it — via PATCH /ideas/{id}, which allows a null
+// orchestrator on an idea even though createSession's own is now required —
+// in the window before the sweep actually dispatches. Reproduced here by
+// clearing it by hand between "prompt ready" and the dispatching sweep.
+
+async function orchestratorClearedMidRun(): Promise<void> {
+  const project = await newProject('e1')
+  const idea = await newIdea(project) // starts with orchestrator: 'coder'
+
+  await sweepIdeaHandoffs() // claims, generates the (pending) prompt, links promptId
+  const prompt = await latestPromptForIdea(idea)
+  if (!prompt) throw new Error('no prompt row')
+  await markPromptReady(prompt.id, 'Title', 'Do the thing, please.')
+
+  await updateIdea(idea, { orchestrator: null }) // the race: cleared before dispatch
+
+  await sweepIdeaHandoffs() // dispatches: resolveSession's guard has to fire here
+
+  const ideaAfter = await ideaRow(idea)
+  const run = (await runsForIdea(idea))[0]
+  const sessionRows = await db.select().from(sessions).where(eq(sessions.projectId, project))
+
+  facts.orchestratorClearedMidRun = {
+    runStatus: run?.status,
+    runOutcome: run?.outcome,
+    runClosed: run?.endedAt !== null,
+    ideaStatus: ideaAfter?.status,
+    lastErrorMentionsOrchestrator: String(ideaAfter?.lastError ?? '')
+      .toLowerCase()
+      .includes('orchestrator'),
+    sessionIdSet: Boolean(ideaAfter?.sessionId),
+    sessionRowCount: sessionRows.length,
+  }
+}
+
 async function main() {
   await crashBetweenClaimWrites()
   await stuckPendingPromptRegenerates()
   await filenameReconciliation()
   await duplicateUploadResponse()
+  await orchestratorClearedMidRun()
 
   console.log(`__FACTS__${JSON.stringify(facts)}`)
 }

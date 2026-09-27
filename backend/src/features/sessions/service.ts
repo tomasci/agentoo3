@@ -285,6 +285,17 @@ export async function createSession(
   projectId: string,
   input: CreateSessionInput,
 ): Promise<SessionDto> {
+  // Checked before requireProject, and before anything else in this function
+  // touches the filesystem or the database: createSessionSchema already
+  // requires this at the HTTP boundary, but an internal caller (e.g.
+  // features/ideas/handoff.ts) reaches this function directly, bypassing zod
+  // entirely. A session with no orchestrator can never run a turn (see
+  // sendMessage's own guard below), so nothing gets to create one — not a
+  // git worktree, not a row — regardless of caller.
+  if (!input.orchestrator || input.orchestrator.trim() === '') {
+    throw badRequest('orchestrator is required to create a session')
+  }
+
   const project = await requireProject(projectId)
   if (project.status !== 'ready') {
     throw conflict(`Project is "${project.status}"; it has to finish setup first`)
@@ -318,7 +329,7 @@ export async function createSession(
     .values({
       projectId,
       title: input.title ?? null,
-      orchestrator: input.orchestrator ?? null,
+      orchestrator: input.orchestrator,
       maxBudgetUsd: input.maxBudgetUsd ?? null,
       status: 'idle',
     })

@@ -371,24 +371,13 @@ test('the form is not on the page by default; the header button opens it in a mo
   expect(submitButton().textContent?.trim()).toBe('Create session')
 })
 
-test('the orchestrator select offers None plus the library orchestrators, defaulting to None', async () => {
-  currentAgents = [agent('lead', 'orchestrator'), agent('helper', 'subagent')]
+test('an untouched form, orchestrator picked, POSTs only that field', async () => {
+  currentAgents = [agent('lead', 'orchestrator')]
   await mount()
   await openDialog()
-  const trigger = labelledControl(dialog() as HTMLElement, 'Orchestrator')
-  expect(trigger.textContent).toContain('None')
-  await click(trigger, 'orchestrator trigger')
-  const options = [...document.body.querySelectorAll('[role="option"]')].map(
-    (o) => o.querySelector('span')?.textContent?.trim() ?? '',
-  )
-  expect(options).toEqual(['None', 'lead'])
-})
-
-test('an untouched form POSTs an empty body — every optional field omitted', async () => {
-  await mount()
-  await openDialog()
+  await chooseOrchestrator('lead')
   await click(submitButton(), 'submit')
-  expect(createCalls).toEqual([{ path: { id: 'p1' }, body: {} }])
+  expect(createCalls).toEqual([{ path: { id: 'p1' }, body: { orchestrator: 'lead' } }])
 })
 
 test('filled fields reach the body: title and base branch trimmed, budget a number', async () => {
@@ -415,31 +404,24 @@ test('filled fields reach the body: title and base branch trimmed, budget a numb
 })
 
 test('whitespace-only title and base branch are omitted, not sent as "" or "   "', async () => {
+  currentAgents = [agent('lead', 'orchestrator')]
   await mount()
   await openDialog()
   await type(input('Title'), '   ')
   await type(input('Base branch'), '   ')
-  await click(submitButton(), 'submit')
-  expect(createCalls.length).toBe(1)
-  expect(createCalls[0]?.body).toEqual({})
-})
-
-test('picking an orchestrator and then None again omits orchestrator', async () => {
-  currentAgents = [agent('lead', 'orchestrator')]
-  await mount()
-  await openDialog()
   await chooseOrchestrator('lead')
-  await chooseOrchestrator('None')
   await click(submitButton(), 'submit')
   expect(createCalls.length).toBe(1)
-  expect('orchestrator' in (createCalls[0]?.body ?? {})).toBe(false)
+  expect(createCalls[0]?.body).toEqual({ orchestrator: 'lead' })
 })
 
 test('a successful create closes the dialog and the new session shows up in the list', async () => {
   sessions = [session({ id: 's1', title: 'Old one' })]
+  currentAgents = [agent('lead', 'orchestrator')]
   await mount()
   await openDialog()
   await type(input('Title'), 'Fresh one')
+  await chooseOrchestrator('lead')
   await click(submitButton(), 'submit')
   expect(createCalls.length).toBe(1)
   expect(dialog()).toBeNull()
@@ -451,8 +433,10 @@ test('while the create is in flight the submit is disabled and reads Creating…
   createGate = new Promise<void>((r) => {
     release = r
   })
+  currentAgents = [agent('lead', 'orchestrator')]
   await mount()
   await openDialog()
+  await chooseOrchestrator('lead')
   await click(submitButton(), 'submit')
   expect(submitButton().disabled).toBe(true)
   expect(submitButton().textContent?.trim()).toBe('Creating…')
@@ -465,9 +449,11 @@ test('while the create is in flight the submit is disabled and reads Creating…
 
 test("an API error is shown inside the dialog, which stays open", async () => {
   createFailure = { response: { status: 400, data: { error: 'Branch "nope" does not exist' } } }
+  currentAgents = [agent('lead', 'orchestrator')]
   await mount()
   await openDialog()
   await type(input('Base branch'), 'nope')
+  await chooseOrchestrator('lead')
   await click(submitButton(), 'submit')
 
   expect(createCalls.length).toBe(1)
@@ -482,16 +468,20 @@ test("an API error is shown inside the dialog, which stays open", async () => {
 
 test('an error with no API message of its own falls back to "Could not create the session"', async () => {
   createFailure = { response: { status: 500, data: 'upstream exploded' } }
+  currentAgents = [agent('lead', 'orchestrator')]
   await mount()
   await openDialog()
+  await chooseOrchestrator('lead')
   await click(submitButton(), 'submit')
   expect(dialog()?.textContent).toContain('Could not create the session')
 })
 
 test('Cancel after an error, then reopening, shows no stale error', async () => {
   createFailure = { response: { status: 400, data: { error: 'boom from the API' } } }
+  currentAgents = [agent('lead', 'orchestrator')]
   await mount()
   await openDialog()
+  await chooseOrchestrator('lead')
   await click(submitButton(), 'submit')
   expect(dialog()?.textContent).toContain('boom from the API')
 
@@ -504,8 +494,10 @@ test('Cancel after an error, then reopening, shows no stale error', async () => 
 
 test('Escape after an error, then reopening, shows no stale error', async () => {
   createFailure = { response: { status: 400, data: { error: 'boom from the API' } } }
+  currentAgents = [agent('lead', 'orchestrator')]
   await mount()
   await openDialog()
+  await chooseOrchestrator('lead')
   await click(submitButton(), 'submit')
   expect(dialog()?.textContent).toContain('boom from the API')
 
@@ -529,8 +521,10 @@ test('closing the dialog while a create is still in flight, then reopening after
     release = r
   })
   createFailure = { response: { status: 400, data: { error: 'late failure' } } }
+  currentAgents = [agent('lead', 'orchestrator')]
   await mount()
   await openDialog()
+  await chooseOrchestrator('lead')
   await click(submitButton(), 'submit')
   expect(submitButton().disabled).toBe(true)
 
@@ -554,9 +548,11 @@ test('a create that succeeds after the dialog was cancelled and reopened does no
   createGate = new Promise<void>((r) => {
     release = r
   })
+  currentAgents = [agent('lead', 'orchestrator')]
   await mount()
   await openDialog()
   await type(input('Title'), 'First attempt')
+  await chooseOrchestrator('lead')
   await click(submitButton(), 'submit')
   await click(buttonsByText(dialog() as HTMLElement, 'Cancel')[0], 'Cancel')
 
@@ -585,6 +581,7 @@ for (const status of ['pending', 'cloning', 'failed'] as const) {
 }
 
 test('a ready project: submit enabled, no finish-setup note', async () => {
+  currentAgents = [agent('lead', 'orchestrator')]
   await mount()
   await openDialog()
   expect(submitButton().disabled).toBe(false)

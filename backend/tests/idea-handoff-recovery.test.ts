@@ -87,6 +87,7 @@ test('the scenarios ran at all, against a real Postgres', () => {
     'crashBetweenClaimWrites',
     'duplicateUploadResponse',
     'filenameReconciliation',
+    'orchestratorClearedMidRun',
     'stuckPendingPromptRegenerates',
   ])
 })
@@ -202,4 +203,25 @@ dbTest('an upload matching an existing checksum says so, honestly', () => {
 dbTest('...and a genuinely new upload is not mislabelled either', () => {
   const f = fact('duplicateUploadResponse')
   expect(f.freshMatchedExisting).toBe(false)
+})
+
+// --- E1: the orchestrator is cleared after the prompt is already ready -----
+
+dbTest('a run that loses its orchestrator mid-flight closes needs_attention, not silently', () => {
+  const f = fact('orchestratorClearedMidRun')
+  expect(f.runStatus).toBe('closed')
+  expect(f.runOutcome).toBe('needs_attention')
+  expect(f.runClosed).toBe(true)
+})
+
+dbTest("...naming the orchestrator, and creating no session for the idea", () => {
+  const f = fact('orchestratorClearedMidRun')
+  expect(f.lastErrorMentionsOrchestrator).toBe(true)
+  expect(f.sessionIdSet).toBe(false)
+  expect(f.sessionRowCount).toBe(0)
+})
+
+dbTest('...and leaves the card exactly where it was, same as every other needs_attention close', () => {
+  const f = fact('orchestratorClearedMidRun')
+  expect(f.ideaStatus).toBe('selected_for_development')
 })

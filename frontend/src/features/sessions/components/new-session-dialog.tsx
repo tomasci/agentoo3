@@ -13,7 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/shared/ui/dialog'
-import { Field, FieldDescription, FieldLabel } from '@/shared/ui/field'
+import { Field, FieldDescription, FieldError, FieldLabel } from '@/shared/ui/field'
 import { Input } from '@/shared/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import { Spinner } from '@/shared/ui/spinner'
@@ -39,11 +39,21 @@ export function NewSessionDialog({
 }) {
   const { t } = useTranslation()
   const { data: projects } = useProjects()
-  const { data: agents } = useAgents()
+  // `isSuccess` (not just `agents`), so a query still loading or one that
+  // failed reads as "unknown", not "empty" — otherwise `agents` is
+  // `undefined` in both cases, `orchestrators` below comes out `[]` either
+  // way, and the dialog would flash "No orchestrator agents in the library
+  // yet…" on every open, real library or not, until the request actually
+  // settles.
+  const { data: agents, isSuccess: agentsLoaded } = useAgents()
   const create = useCreateSession(projectId)
 
   const [title, setTitle] = useState('')
   const [orchestrator, setOrchestrator] = useState('')
+  // Only raised on a submit attempted with nothing chosen — not on every
+  // keystroke — and cleared the moment a choice is made (the Select's own
+  // `onValueChange` below) or the form resets.
+  const [orchestratorError, setOrchestratorError] = useState(false)
   const [budget, setBudget] = useState('')
   const [baseBranch, setBaseBranch] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
@@ -58,24 +68,24 @@ export function NewSessionDialog({
   const titleId = useId()
   const baseBranchId = useId()
   const orchestratorId = useId()
+  const orchestratorMessageId = useId()
   const budgetId = useId()
 
   const project = (projects ?? []).find((p) => p.id === projectId)
 
+  // Orchestrator is now required — the backend rejects a create with none —
+  // so the list is only ever the library's own orchestrators, chosen through
+  // the trigger's placeholder rather than an explicit "(none)" item a reader
+  // could pick their way back to.
   const orchestrators = (agents ?? []).filter((a) => a.role === 'orchestrator')
-  // An explicit "(none)" option, not a placeholder: the reader needs to be able
-  // to pick their way back to no orchestrator, not just start there.
-  const orchestratorOptions = [
-    {
-      value: '',
-      label: t('sessions.form.orchestratorNone'),
-      description: undefined as string | undefined,
-    },
-    // Just the name in the trigger's own label: a long unbroken orchestrator
-    // name is demoted to the item's own description line instead, shown only
-    // inside the open list.
-    ...orchestrators.map((a) => ({ value: a.name, label: a.name, description: a.description })),
-  ]
+  // Just the name in the trigger's own label: a long unbroken orchestrator
+  // name is demoted to the item's own description line instead, shown only
+  // inside the open list.
+  const orchestratorOptions = orchestrators.map((a) => ({
+    value: a.name,
+    label: a.name,
+    description: a.description,
+  }))
 
   const trimmedBaseBranch = baseBranch.trim()
   // The placeholder and the hint say the same thing two ways: an empty
@@ -94,6 +104,7 @@ export function NewSessionDialog({
   const resetForm = () => {
     setTitle('')
     setOrchestrator('')
+    setOrchestratorError(false)
     setBudget('')
     setBaseBranch('')
     setFormError(null)
@@ -109,6 +120,13 @@ export function NewSessionDialog({
   }
 
   const onCreate = () => {
+    // Nothing is sent without an orchestrator — the backend requires one on
+    // every create — so a submit with none chosen stops here, in an inline
+    // field error, rather than round-tripping to learn the same thing.
+    if (!orchestrator) {
+      setOrchestratorError(true)
+      return
+    }
     setFormError(null)
     const myGeneration = generationRef.current
     create.mutate(
@@ -116,7 +134,7 @@ export function NewSessionDialog({
         path: { id: projectId },
         body: {
           ...(title.trim() ? { title: title.trim() } : {}),
-          ...(orchestrator ? { orchestrator } : {}),
+          orchestrator,
           ...(budget ? { maxBudgetUsd: Number(budget) } : {}),
           ...(trimmedBaseBranch ? { baseBranch: trimmedBaseBranch } : {}),
         },
@@ -177,15 +195,23 @@ export function NewSessionDialog({
             <FieldDescription>{baseBranchHint}</FieldDescription>
           </Field>
 
-          <Field>
+          <Field data-invalid={orchestratorError || undefined}>
             <FieldLabel htmlFor={orchestratorId}>{t('sessions.form.orchestrator')}</FieldLabel>
             <Select
               items={orchestratorOptions}
-              value={orchestrator}
-              onValueChange={(value) => setOrchestrator(value ?? '')}
+              value={orchestrator || null}
+              onValueChange={(value) => {
+                setOrchestrator(value ?? '')
+                setOrchestratorError(false)
+              }}
             >
-              <SelectTrigger id={orchestratorId} className="w-full">
-                <SelectValue />
+              <SelectTrigger
+                id={orchestratorId}
+                className="w-full"
+                aria-invalid={orchestratorError}
+                aria-describedby={orchestratorMessageId}
+              >
+                <SelectValue placeholder={t('sessions.form.orchestratorPlaceholder')} />
               </SelectTrigger>
               <SelectContent>
                 {orchestratorOptions.map((option) => (
@@ -200,11 +226,17 @@ export function NewSessionDialog({
                 ))}
               </SelectContent>
             </Select>
-            <FieldDescription>
-              {orchestrators.length === 0
-                ? t('sessions.form.orchestratorEmpty')
-                : t('sessions.form.orchestratorHint')}
-            </FieldDescription>
+            {orchestratorError ? (
+              <FieldError id={orchestratorMessageId}>
+                {t('sessions.form.orchestratorRequired')}
+              </FieldError>
+            ) : (
+              <FieldDescription id={orchestratorMessageId}>
+                {orchestrators.length === 0 && agentsLoaded
+                  ? t('sessions.form.orchestratorEmpty')
+                  : t('sessions.form.orchestratorHint')}
+              </FieldDescription>
+            )}
           </Field>
 
           <Field>
@@ -238,7 +270,7 @@ export function NewSessionDialog({
           <Button
             type="submit"
             form={NEW_SESSION_FORM_ID}
-            disabled={create.isPending || project?.status !== 'ready'}
+            disabled={create.isPending || project?.status !== 'ready' || orchestrators.length === 0}
           >
             {create.isPending && <Spinner data-icon="inline-start" aria-hidden="true" />}
             {create.isPending ? t('sessions.form.creating') : t('sessions.form.submit')}
