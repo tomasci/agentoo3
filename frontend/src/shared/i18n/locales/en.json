@@ -19,7 +19,7 @@
   "health": {
     "checking": "Checking backend…",
     "ok": "Backend ready",
-    "down": "Backend unreachable",
+    "reconnecting": "Reconnecting…",
     "noCredential": "No Claude credential",
     "outdatedTitle": "Update available",
     "outdatedMessage": "This tab is running an older build than the server. Reload to pick up the latest version.",
@@ -187,7 +187,9 @@
     "backToProjects": "All projects",
     "backToIdea": "Back to Idea",
     "docker": "Docker",
+    "dockerTooltip": "Start and manage Docker containers for this session's worktree",
     "editor": "Editor",
+    "editorTooltip": "Open a code editor on this session's worktree, in a new browser tab",
     "stopEditor": "Stop editor",
     "editorStopped": "Editor stopped",
     "empty": "No sessions yet. Create one above — it gets its own git worktree and branch, so it will not collide with anything else running on this project.",
@@ -240,11 +242,11 @@
     "actionsFor": "Actions for {{name}}",
     "open": "Open",
     "details": "Session details",
-    "live": "Live",
-    "reconnecting": "Reconnecting…",
     "stop": "Stop",
+    "stopTooltip": "Stop the current turn",
     "export": "Export JSON",
     "send": "Send",
+    "sendTooltip": "Send (Enter) · Shift+Enter for a new line",
     "sending": "Sending…",
     "willQueueRunning": "This session is mid-turn — this will be sent as soon as it finishes",
     "willQueueQueued": "This session's turn is starting — this will join it",
@@ -256,6 +258,7 @@
     "pendingPrompts_other": "{{count}} messages waiting",
     "attachments": {
       "attach": "Attach a file",
+      "attachTooltip": "Attach files — you can also paste or drop them here",
       "cancel": "Cancel uploading {{name}}",
       "remove": "Remove {{name}}",
       "tooLargeForSession": "Too large for what's left of this session's storage limit",
@@ -391,7 +394,8 @@
     }
   },
   "shell": {
-    "toggleSidebar": "Toggle sidebar"
+    "hideSidebar": "Hide sidebar",
+    "showSidebar": "Show sidebar"
   },
   "tabs": {
     "label": "Workspace tabs",
@@ -400,6 +404,7 @@
     "loading": "Loading…",
     "close": "Close {{name}}",
     "add": "New tab",
+    "addTooltip": "Open a project in a new tab",
     "unknown": "Unknown project"
   },
   "picker": {

@@ -63,6 +63,7 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import i18next from 'i18next'
+import { createStore, Provider as JotaiProvider } from 'jotai'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
@@ -217,6 +218,14 @@ const ROW_HEIGHT = 100
 const VIEWPORT = 300
 
 let client: QueryClient
+// A fresh store per test, the same way tests/status-bar-reconnecting.test.tsx
+// isolates its own Jotai reads/writes: `useAttachmentUploads`'s tray
+// (use-session-files.ts) is now one module-level atom per session, keyed by session
+// id but not by test, so two tests reusing session id 's1' would otherwise
+// see each other's tray. `mount`/`switchSession` both wrap `<SessionPage>` in
+// this same store, matching how one `<JotaiProvider>` wraps the whole real
+// app for as long as it stays open.
+let store: ReturnType<typeof createStore>
 let container: HTMLDivElement
 let root: Root
 let scroller: HTMLElement
@@ -493,6 +502,13 @@ beforeEach(() => {
   RecordingIntersectionObserver.live = []
   pendingFrameIds = []
   frameId = 0
+  store = createStore()
+  // The composer's draft (use-session-draft.ts) persists to localStorage
+  // keyed by session id, and this file reuses 's1'/'s2' across many tests —
+  // without this, text a send-failure test restores into the box (or one a
+  // test leaves mid-typed without ever sending) would still be sitting in
+  // storage for the next test's fresh `mount()` to pick up.
+  localStorage.clear()
 })
 
 /**
@@ -529,9 +545,11 @@ async function mount(
   await act(async () => {
     root.render(
       <I18nextProvider i18n={testI18n}>
-        <QueryClientProvider client={client}>
-          <SessionPage projectId="p1" sessionId="s1" />
-        </QueryClientProvider>
+        <JotaiProvider store={store}>
+          <QueryClientProvider client={client}>
+            <SessionPage projectId="p1" sessionId="s1" />
+          </QueryClientProvider>
+        </JotaiProvider>
       </I18nextProvider>,
     )
   })
@@ -590,9 +608,11 @@ async function switchSession(
   await act(async () => {
     root.render(
       <I18nextProvider i18n={testI18n}>
-        <QueryClientProvider client={client}>
-          <SessionPage projectId="p1" sessionId={newSessionId} />
-        </QueryClientProvider>
+        <JotaiProvider store={store}>
+          <QueryClientProvider client={client}>
+            <SessionPage projectId="p1" sessionId={newSessionId} />
+          </QueryClientProvider>
+        </JotaiProvider>
       </I18nextProvider>,
     )
   })

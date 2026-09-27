@@ -11,7 +11,6 @@ import {
   DefinitionList,
   Loading,
   StatusBadge,
-  StatusDot,
   toast,
 } from '@/shared/components'
 import { Alert, AlertDescription } from '@/shared/ui/alert'
@@ -24,6 +23,8 @@ import {
   PopoverTrigger,
 } from '@/shared/ui/popover'
 import { Spinner } from '@/shared/ui/spinner'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
+import { useSessionDraft } from '../hooks/use-session-draft'
 import {
   type AttachmentUpload,
   useAttachmentUploads,
@@ -130,13 +131,17 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // seed `lastSeq` from, so the backend treats it as a brand new reader and
   // replays the entire transcript down the stream on top of the REST fetch
   // that just did the same thing.
-  const { connected } = useSessionStream(sessionId, messages.isSuccess)
+  useSessionStream(sessionId, messages.isSuccess)
 
   const files = useSessionFiles(sessionId)
+  // Attachment ids are rehydrated and kept in sync with the tray entirely
+  // inside this hook now (use-session-files.ts) — see its own comment.
   const uploads = useAttachmentUploads(sessionId)
   const deleteFile = useDeleteSessionFile(sessionId)
+  // The composer's own text for this session — see use-session-draft.ts's
+  // own comment on why this is `useSyncExternalStore`, not a `useState`.
+  const draft = useSessionDraft(sessionId)
 
-  const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
   const pinned = useRef(true)
@@ -582,7 +587,7 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   const busy = BUSY.includes(session.data?.status ?? '')
 
   const submit = () => {
-    const value = text.trim()
+    const value = draft.text.trim()
     // Also refuses while an upload is still in flight — see Composer's own
     // "why is send disabled" line, which reads this same count.
     if (!value || uploads.pendingCount > 0) return
@@ -592,7 +597,12 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
     // come back — so the box still held the sent text, the next few keystrokes
     // appended to it, and the late `setText('')` then wiped them. Consistently
     // the first two or three characters of every message after the first.
-    setText('')
+    // Clearing the draft's text, together with `clearSent`'s own write
+    // below (via `onSuccess`) clearing the tray's `fileIds` in storage,
+    // removes the draft's localStorage entry entirely once both are empty
+    // (lib/drafts.ts) — a sent prompt leaves nothing behind for a reload to
+    // restore.
+    draft.setText('')
     pinned.current = true
     // Read before the mutation fires, not inside `onSuccess`: by the time a
     // response comes back the reader may already have attached more files for
@@ -614,7 +624,7 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
           // attachments stay in the tray untouched either way — the upload
           // itself succeeded independently of this send, and is still there
           // to pair with a retry.
-          setText((current) => (current === '' ? value : current))
+          draft.setText((current) => (current === '' ? value : current))
           setError(apiErrorMessage(e, t('sessions.sendFailed')))
         },
       },
@@ -724,18 +734,6 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
           {t(`sessions.status.${data.status}`)}
         </StatusBadge>
         <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
-        {/* Live status, not set-once configuration — orchestrator/branch/cost
-            moved into the details popover below, in the action group. Still
-            forced onto its own full-width row below `md`, same as the old
-            meta row did: without `order-1 basis-full` here, this joins the
-            badge/title/actions on the first line below `md` and squeezes the
-            title down to a handful of pixels — there simply is not room for
-            all of it beside a full set of action buttons on a narrow phone
-            screen. From `md` up there is room, so it rejoins the row inline. */}
-        <span className="order-1 flex shrink-0 basis-full items-center gap-2 whitespace-nowrap text-xs text-muted-foreground md:order-none md:basis-auto md:text-sm">
-          <StatusDot tone={connected ? 'accent' : 'neutral'} />
-          {connected ? t('sessions.live') : t('sessions.reconnecting')}
-        </span>
         <div className="flex shrink-0 items-center gap-2">
           {/* Only sessions handed off from an idea have anywhere to link back
               to; a session created directly has no `ideaId` and shows nothing
@@ -756,15 +754,26 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
           {/* Only an isolated session has a worktree of its own to run docker
               against — a shared-checkout session has none, and the backend
               400s on it (features/docker/scope.ts) — so the link is never
-              offered for one at all. */}
+              offered for one at all. The trigger stays a `Link` styled
+              through `buttonVariants`, not `Button render={<a/>}` — see the
+              track's own rule on link-as-button — so `TooltipTrigger` wraps
+              it via its own `render`, the same composition `PopoverTrigger`
+              uses for the details button below. */}
           {data.isolated && (
-            <Link
-              to="/projects/$projectId/sessions/$sessionId/docker"
-              params={{ projectId: data.projectId, sessionId: data.id }}
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-            >
-              {t('sessions.docker')}
-            </Link>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Link
+                    to="/projects/$projectId/sessions/$sessionId/docker"
+                    params={{ projectId: data.projectId, sessionId: data.id }}
+                    className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                  />
+                }
+              >
+                {t('sessions.docker')}
+              </TooltipTrigger>
+              <TooltipContent>{t('sessions.dockerTooltip')}</TooltipContent>
+            </Tooltip>
           )}
           {/* Same gate as Docker above, for the same reason: a code-server
               container runs against this session's own worktree
@@ -783,19 +792,26 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
               *new* tab rather than an in-app navigation: this tab's own
               workspace state must stay exactly as the reader left it. */}
           {data.isolated && (
-            <Link
-              to="/projects/$projectId/sessions/$sessionId/editor"
-              params={{ projectId: data.projectId, sessionId: data.id }}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={buttonVariants({ variant: 'outline', size: 'sm' })}
-            >
-              {t('sessions.editor')}
-            </Link>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Link
+                    to="/projects/$projectId/sessions/$sessionId/editor"
+                    params={{ projectId: data.projectId, sessionId: data.id }}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                  />
+                }
+              >
+                {t('sessions.editor')}
+              </TooltipTrigger>
+              <TooltipContent>{t('sessions.editorTooltip')}</TooltipContent>
+            </Tooltip>
           )}
           {/* Orchestrator/branch/worktree/cost live here now, not in the
               header row itself — set-once configuration nobody needs to see
-              at a glance the way the status badge or the live dot do. */}
+              at a glance the way the status badge does. */}
           <Popover>
             <PopoverTrigger
               aria-label={t('sessions.details')}
@@ -928,8 +944,9 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
       </div>
 
       <Composer
-        value={text}
-        onChange={setText}
+        sessionId={sessionId}
+        value={draft.text}
+        onChange={draft.setText}
         onSubmit={submit}
         onKeyDown={(e) => {
           // Enter sends; Shift+Enter is a newline. A prompt is usually one
@@ -940,7 +957,7 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
           }
         }}
         sending={send.isPending}
-        canSend={!send.isPending && text.trim().length > 0 && uploads.pendingCount === 0}
+        canSend={!send.isPending && draft.text.trim().length > 0 && uploads.pendingCount === 0}
         canStop={busy}
         stopping={interrupt.isPending}
         onStop={() =>

@@ -9,6 +9,7 @@
 
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createStore, Provider as JotaiProvider } from 'jotai'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { mockModule } from './mock-module'
@@ -55,6 +56,16 @@ await mockModule(CLIENT_SPEC, () => ({
     }),
 }))
 
+// `useAttachmentUploads` now also reads the files list itself, to rehydrate a
+// session's tray from its persisted draft — nothing here exercises that
+// path (no test seeds a draft), but every mount still fires the request, so
+// it still has to be mocked or each one hits a real, absent backend.
+await mockModule('@/shared/api/generated/clients/getApiSessionsIdFiles', () => ({
+  getApiSessionsIdFiles: async () => ({
+    data: { files: [], usage: { fileCount: 0, sizeBytes: 0, maxFiles: 20, maxSessionBytes: 0 } },
+  }),
+}))
+
 const fileDto = (overrides: Partial<SessionFile> = {}): SessionFile => ({
   id: 'server-file-1',
   sessionId: 's1',
@@ -70,6 +81,14 @@ const fileDto = (overrides: Partial<SessionFile> = {}): SessionFile => ({
 })
 
 let client: QueryClient
+// A fresh store per test: the tray (`use-session-files.ts`'s
+// `sessionTrayAtom`) is a module-level atom keyed by session id, not by
+// test, so every test here reusing the default 's1' would otherwise see the
+// previous test's own chips still in it. `useAttachmentUploads` reads/writes
+// through `useStore()`, so wrapping `<Probe>` in a fresh `<Provider>` per
+// mount is what isolates them — the same pattern
+// tests/status-bar-reconnecting.test.tsx uses for the same reason.
+let store: ReturnType<typeof createStore>
 let container: HTMLDivElement
 let root: Root
 // biome-ignore lint/style/useConst: reassigned by <Probe> on every render
@@ -86,9 +105,11 @@ async function mount(sessionId = 's1') {
   root = createRoot(container)
   await act(async () => {
     root.render(
-      <QueryClientProvider client={client}>
-        <Probe sessionId={sessionId} />
-      </QueryClientProvider>,
+      <JotaiProvider store={store}>
+        <QueryClientProvider client={client}>
+          <Probe sessionId={sessionId} />
+        </QueryClientProvider>
+      </JotaiProvider>,
     )
   })
 }
@@ -115,6 +136,7 @@ const file = (name = 'a.txt', body = 'hello', type = 'text/plain') => new File([
 beforeEach(() => {
   calls = []
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  store = createStore()
 })
 
 afterEach(async () => {
@@ -146,8 +168,8 @@ test('onUploadProgress updates that chip, and only that chip', async () => {
     calls[0]?.onUploadProgress?.({ loaded: 5, total: 10 })
   })
 
-  expect(api.uploads.find((u) => u.file.name === 'a.txt')?.progress).toBe(50)
-  expect(api.uploads.find((u) => u.file.name === 'b.txt')?.progress).toBe(0)
+  expect(api.uploads.find((u) => u.name === 'a.txt')?.progress).toBe(50)
+  expect(api.uploads.find((u) => u.name === 'b.txt')?.progress).toBe(0)
 })
 
 test('a successful upload flips the chip to "done" and clears pendingCount', async () => {

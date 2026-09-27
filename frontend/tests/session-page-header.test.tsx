@@ -36,6 +36,7 @@ import {
   RouterProvider,
 } from '@tanstack/react-router'
 import i18next from 'i18next'
+import { createStore, Provider as JotaiProvider } from 'jotai'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
@@ -163,6 +164,11 @@ const { Toaster, toast } = await import('../src/shared/ui/toast')
 let container: HTMLDivElement
 let client: QueryClient
 let root: Root
+// A fresh store per test — see tests/session-page-scroll.test.tsx's own
+// comment on the same wrapping, for the same reason: `useAttachmentUploads`'s
+// tray (use-session-files.ts) is a module-level per-session atom keyed by session
+// id, and every test in this file mounts session id 's1'.
+let store: ReturnType<typeof createStore>
 
 async function settle(ticks = 10) {
   for (let i = 0; i < ticks; i++) {
@@ -190,10 +196,12 @@ async function mount() {
   await act(async () => {
     root.render(
       <I18nextProvider i18n={testI18n}>
-        <QueryClientProvider client={client}>
-          <Toaster />
-          <RouterProvider router={router} />
-        </QueryClientProvider>
+        <JotaiProvider store={store}>
+          <QueryClientProvider client={client}>
+            <Toaster />
+            <RouterProvider router={router} />
+          </QueryClientProvider>
+        </JotaiProvider>
       </I18nextProvider>,
     )
   })
@@ -210,6 +218,11 @@ beforeEach(() => {
   interruptReject = null
   interruptGate = null
   sends = []
+  store = createStore()
+  // The composer's draft (use-session-draft.ts) persists to localStorage
+  // keyed by session id — see tests/session-page-scroll.test.tsx's own
+  // comment on the same clear, for the same reason.
+  localStorage.clear()
 })
 
 afterEach(async () => {
@@ -370,7 +383,7 @@ test("a rejected interrupt toasts the API's own error message when it has one", 
 
 // --- 7. header no longer shows orchestrator / branch / cost ---------------
 
-test('the header shows no orchestrator, branch or cost text, but keeps the live indicator', async () => {
+test('the header shows no orchestrator, branch, cost or live-status text', async () => {
   currentSession = session({
     status: 'running',
     orchestrator: 'claude',
@@ -391,9 +404,9 @@ test('the header shows no orchestrator, branch or cost text, but keeps the live 
   expect(text).not.toContain('/srv/wt/s-x')
   expect(text).not.toContain('sessions.meta.orchestrator')
   expect(text).not.toContain('sessions.meta.branch')
-  // No stream connects in this harness (inert EventSource), so the indicator
-  // reads "reconnecting" — either key proves it is still in the header.
-  expect(/sessions\.(live|reconnecting)/.test(text)).toBe(true)
+  // The Live/Reconnecting indicator is gone from the header entirely — see
+  // app/status-bar.tsx's own "Reconnecting…" line instead.
+  expect(/sessions\.(live|reconnecting)/.test(text)).toBe(false)
 })
 
 test('opening the popover still does not put those values into the header itself', async () => {
@@ -508,4 +521,170 @@ test('with messages: the transcript wrapper carries no class attribute at all', 
   expect(w.hasAttribute('class')).toBe(false)
   expect(w.querySelector('[data-slot="empty"]')).toBeNull()
   expect(w.querySelectorAll('[data-transcript-row]').length).toBe(2)
+})
+
+// --- 11. no live-status indicator next to the title -------------------------
+//
+// The Live/Reconnecting text and its StatusDot left the header: a dropped
+// stream now shows up in the status bar instead (app/status-bar.tsx, see
+// tests/status-bar-reconnecting.test.tsx). What stays: the status badge (whose
+// own dot is the only dot in the header), the title, the details trigger and
+// the actions menu.
+
+/** Every StatusDot in `scope` — shared/components/status-dot.tsx's round
+ *  `span[aria-hidden]`. */
+const dotsIn = (scope: ParentNode) => [
+  ...scope.querySelectorAll('span.rounded-full[aria-hidden="true"]'),
+]
+
+/** Opens as soon as it is constructed, so the hook's `connected` goes true —
+ *  the state that used to render "Live". */
+class OpeningEventSource {
+  static opens = 0
+  private readonly listeners = new Map<string, Set<(e: Event) => void>>()
+  constructor(readonly url: string) {
+    setTimeout(() => {
+      const fns = [...(this.listeners.get('open') ?? [])]
+      if (fns.length > 0) OpeningEventSource.opens++
+      for (const fn of fns) fn(new Event('open'))
+    }, 0)
+  }
+  addEventListener(type: string, fn: (e: Event) => void) {
+    const set = this.listeners.get(type) ?? new Set()
+    set.add(fn)
+    this.listeners.set(type, set)
+  }
+  removeEventListener() {}
+  close() {}
+}
+
+test('the header keeps the badge, title, details trigger and actions menu', async () => {
+  currentSession = session({ status: 'running' })
+  await mount()
+  const h = header()
+  expect(h.querySelectorAll('[data-slot="badge"]').length).toBe(1)
+  expect(h.querySelector('[data-slot="badge"]')?.textContent).toBe('sessions.status.running')
+  expect(h.querySelector('h1')?.textContent).toBe('A session')
+  expect(detailsTrigger().getAttribute('aria-label')).toBe('sessions.details')
+  const actions = [...h.querySelectorAll('button')].filter(
+    (b) => b.getAttribute('aria-label') === 'sessions.actionsFor',
+  )
+  expect(actions.length).toBe(1)
+})
+
+test("the header's only StatusDot is the one inside the status badge", async () => {
+  currentSession = session({ status: 'running' })
+  await mount()
+  const h = header()
+  const badge = h.querySelector('[data-slot="badge"]')
+  const dots = dotsIn(h)
+  expect(dots.length).toBe(1)
+  expect(badge?.contains(dots[0] ?? null)).toBe(true)
+})
+
+test('nothing between the title and the action group: the title is followed directly by the actions', async () => {
+  await mount()
+  const title = header().querySelector('h1')
+  const next = title?.nextElementSibling
+  // The action group (details trigger lives in it), not a status span.
+  expect(next?.contains(detailsTrigger())).toBe(true)
+  expect(dotsIn(next ?? document.createElement('div')).length).toBe(0)
+})
+
+test('with the stream actually open, the header still shows no live text and no extra dot', async () => {
+  ;(globalThis as { EventSource?: unknown }).EventSource = OpeningEventSource
+  OpeningEventSource.opens = 0
+  try {
+    currentSession = session({ status: 'running' })
+    await mount()
+    await settle()
+    // The page really did open a stream: this is the connected state.
+    expect(OpeningEventSource.opens).toBeGreaterThanOrEqual(1)
+    const text = header().textContent ?? ''
+    expect(text).not.toContain('sessions.live')
+    expect(text).not.toContain('sessions.reconnecting')
+    expect(dotsIn(header()).length).toBe(1)
+  } finally {
+    ;(globalThis as { EventSource?: unknown }).EventSource = InertEventSource
+  }
+})
+
+// --- 12. Docker / Editor links carry tooltips, and are still links ----------
+//
+// session-page.tsx wraps each isolated-session header link in a Base UI
+// Tooltip (`TooltipTrigger render={<Link …/>}`). Focus opens a Base UI
+// tooltip immediately (hover waits on the Root's default delay without the
+// app's TooltipProvider — see tests/composer-tooltips.test.tsx), so focus,
+// inside act(), is the trigger used here. Tooltips portal to <body>.
+
+const headerLink = (text: string) => {
+  const found = [...header().querySelectorAll('a')].filter((a) => a.textContent?.trim() === text)
+  if (found.length !== 1) throw new Error(`expected one "${text}" link, got ${found.length}`)
+  return found[0] as HTMLAnchorElement
+}
+const openTooltips = () =>
+  [...document.querySelectorAll('[data-slot="tooltip-content"][data-open]')].map(
+    (el) => el.textContent ?? '',
+  )
+async function focusIn(el: HTMLElement) {
+  await act(async () => {
+    el.focus()
+  })
+  await settle(1)
+}
+async function blurOut(el: HTMLElement) {
+  await act(async () => {
+    el.blur()
+  })
+  await settle(2)
+}
+
+test('an isolated session: Docker and Editor are still links, with their hrefs, Editor opening a new tab', async () => {
+  currentSession = session({ id: 's1', projectId: 'p1', isolated: true, worktreePath: '/srv/wt' })
+  await mount()
+  const docker = headerLink('sessions.docker')
+  const editor = headerLink('sessions.editor')
+  expect(docker.tagName).toBe('A')
+  expect(docker.getAttribute('href')).toBe('/projects/p1/sessions/s1/docker')
+  expect(docker.hasAttribute('target')).toBe(false)
+  expect(editor.tagName).toBe('A')
+  expect(editor.getAttribute('href')).toBe('/projects/p1/sessions/s1/editor')
+  expect(editor.getAttribute('target')).toBe('_blank')
+  expect(editor.getAttribute('rel')).toBe('noopener noreferrer')
+  // Not turned into <button>s, nor nested in one, by the tooltip wrapping.
+  for (const a of [docker, editor]) {
+    expect(a.closest('button')).toBeNull()
+    expect(a.querySelector('button')).toBeNull()
+  }
+})
+
+test('focusing the Docker link opens sessions.dockerTooltip; the Editor link sessions.editorTooltip', async () => {
+  currentSession = session({ isolated: true, worktreePath: '/srv/wt' })
+  await mount()
+  expect(openTooltips()).toEqual([])
+  const docker = headerLink('sessions.docker')
+  await focusIn(docker)
+  expect(openTooltips()).toEqual(['sessions.dockerTooltip'])
+  await blurOut(docker)
+  expect(openTooltips()).toEqual([])
+  await focusIn(headerLink('sessions.editor'))
+  expect(openTooltips()).toEqual(['sessions.editorTooltip'])
+})
+
+test('the link text, not the tooltip, is what the Docker and Editor links read as', async () => {
+  currentSession = session({ isolated: true, worktreePath: '/srv/wt' })
+  await mount()
+  await focusIn(headerLink('sessions.docker'))
+  // The tooltip portals out of the header, and the link text is unchanged.
+  expect(header().textContent ?? '').not.toContain('sessions.dockerTooltip')
+  expect(headerLink('sessions.docker').textContent).toBe('sessions.docker')
+})
+
+test('a non-isolated session renders neither link nor either tooltip', async () => {
+  currentSession = session({ isolated: false })
+  await mount()
+  const texts = [...header().querySelectorAll('a')].map((a) => a.textContent?.trim())
+  expect(texts).not.toContain('sessions.docker')
+  expect(texts).not.toContain('sessions.editor')
+  expect(document.body.textContent ?? '').not.toContain('sessions.dockerTooltip')
 })

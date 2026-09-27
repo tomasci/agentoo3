@@ -71,10 +71,17 @@ const mkFile = (name: string, type: string, size = 2048) =>
   new File([new Uint8Array(size)], name, { type })
 
 let uploadSeq = 0
+// `name`/`size`/`mimeType` default from `o.file` — the shape a real `attach()`
+// produces — so every existing call site here (all of which pass a `file`)
+// needs no change of its own; `o` can still override any of the three, the
+// same as it can `id`/`progress`/`status`.
 const upload = (o: Partial<AttachmentUpload> & { file: File }): AttachmentUpload => ({
   id: `u-${uploadSeq++}`,
   progress: 0,
   status: 'done',
+  name: o.file.name,
+  size: o.file.size,
+  mimeType: o.file.type,
   ...o,
 })
 
@@ -99,6 +106,7 @@ const attachments = (o: Partial<ComposerAttachments> = {}): ComposerAttachments 
 })
 
 const props = (o: Partial<ComposerProps> = {}): ComposerProps => ({
+  sessionId: 's1',
   value: '',
   onChange: (v) => calls.onChange.push(v),
   onSubmit: () => {
