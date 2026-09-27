@@ -1,5 +1,11 @@
 import type { InfiniteData } from '@tanstack/react-query'
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { getApiSessionsIdMessages } from '@/shared/api/generated/clients/getApiSessionsIdMessages'
 import { deleteApiSessionsIdMutationOptions } from '@/shared/api/generated/hooks/useDeleteApiSessionsId'
 import {
@@ -10,20 +16,35 @@ import {
   getApiSessionsIdQueryKey,
   getApiSessionsIdQueryOptions,
 } from '@/shared/api/generated/hooks/useGetApiSessionsId'
+import {
+  getApiSessionsOverviewQueryKey,
+  getApiSessionsOverviewQueryOptions,
+} from '@/shared/api/generated/hooks/useGetApiSessionsOverview'
 import { patchApiSessionsIdMutationOptions } from '@/shared/api/generated/hooks/usePatchApiSessionsId'
 import { postApiProjectsIdSessionsMutationOptions } from '@/shared/api/generated/hooks/usePostApiProjectsIdSessions'
 import { postApiSessionsIdInterruptMutationOptions } from '@/shared/api/generated/hooks/usePostApiSessionsIdInterrupt'
 import { postApiSessionsIdMessagesMutationOptions } from '@/shared/api/generated/hooks/usePostApiSessionsIdMessages'
+import { postApiSessionsIdSeenMutationOptions } from '@/shared/api/generated/hooks/usePostApiSessionsIdSeen'
 import type { GetApiProjectsIdSessionsStatus200 } from '@/shared/api/generated/types/GetApiProjectsIdSessions'
 import type {
   GetApiSessionsIdMessagesQuery,
   GetApiSessionsIdMessagesStatus200,
 } from '@/shared/api/generated/types/GetApiSessionsIdMessages'
+import type { GetApiSessionsOverviewWindowKey } from '@/shared/api/generated/types/GetApiSessionsOverview'
 import { getApiSessionsIdMessagesStatus200Schema } from '@/shared/api/generated/zod/getApiSessionsIdMessagesSchema'
 import { sessionMessagesKey } from '../lib/message-cache'
 
 // The 200 response is an array, so a session is its element type.
 export type Session = GetApiProjectsIdSessionsStatus200[number]
+
+// A session plus the name of the project it belongs to — what the dashboard's
+// three lists actually return (`OverviewSession` on the wire), re-exported
+// under this feature's own hook rather than importing the generated type
+// directly wherever a session's project name is needed.
+export type { OverviewSession } from '@/shared/api/generated/types/OverviewSession'
+
+/** `1d` | `3d` | `7d` — how far back the dashboard's Recent list looks. */
+export type OverviewWindow = GetApiSessionsOverviewWindowKey
 
 export function useSessions(projectId: string) {
   return useQuery(getApiProjectsIdSessionsQueryOptions({ path: { id: projectId } }))
@@ -195,5 +216,71 @@ export function useInterruptSession(sessionId: string) {
       queryClient.invalidateQueries({
         queryKey: getApiSessionsIdQueryKey({ path: { id: sessionId } }),
       }),
+  })
+}
+
+/**
+ * The System tab's Sessions dashboard (`SessionsDashboardPage`): running,
+ * unchecked and recent, across every project. Polled the same way `useSystem`
+ * (features/system/hooks/use-system.ts) polls host load — a dashboard left
+ * open needs to notice a session finishing on its own, not just whatever was
+ * true at page load — but a background tab stops polling for the same reason
+ * that hook does: a stale reading that then jumps on refocus reads worse than
+ * one extra request a few seconds late.
+ *
+ * `placeholderData: keepPreviousData` is what the window toggle actually
+ * relies on: switching between 1d/3d/7d keeps whatever the previous window
+ * last rendered on screen while the new one loads, rather than every section
+ * flashing back to `isPending` for a request that usually comes back looking
+ * almost the same.
+ */
+export function useSessionsOverview(window: OverviewWindow) {
+  return useQuery({
+    ...getApiSessionsOverviewQueryOptions({ query: { window } }),
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/**
+ * Marks a session's latest result as checked (`POST /sessions/{id}/seen`).
+ *
+ * Bookkeeping, not something the operator asked for: `SessionPage` is the one
+ * caller, and it fires this itself the moment a loaded session reads
+ * `unchecked: true` while the page is actually visible (see its own comment)
+ * — nothing here surfaces success *or* failure to the reader. No `onError` of
+ * its own for that reason: the shared client already logs every failed
+ * request once, centrally (shared/api/client.ts's interceptor), and a session
+ * that fails to be marked seen just stays in the dashboard's Unchecked list a
+ * little longer, which is a fact the dashboard's own next poll shows on its
+ * own rather than something worth a toast.
+ */
+export function useMarkSessionSeen() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    ...postApiSessionsIdSeenMutationOptions(),
+    onSuccess: async (data) => {
+      // Cancels whatever GET for this same session is still in flight,
+      // *before* writing the fresher DTO below — not in `onMutate`, which
+      // runs too early to catch it: a stream `status` event's own refetch
+      // (use-session-stream.ts) is independent of this mutation and is
+      // usually not even dispatched yet at the moment `onMutate` runs, only
+      // later while the POST is still pending. Safe to cancel rather than
+      // merely overwrite-and-hope: this response is a full DTO read *after*
+      // the seen write landed on the server, so it is at least as fresh as
+      // any GET already in flight for the same session when it arrives —
+      // cancelling one here can only ever discard a snapshot this response
+      // already supersedes, never a genuinely newer one.
+      const sessionKey = getApiSessionsIdQueryKey({ path: { id: data.id } })
+      await queryClient.cancelQueries({ queryKey: sessionKey })
+      // The updated DTO, straight into the cache the session page itself
+      // reads — no refetch needed to see `unchecked` flip back to false.
+      queryClient.setQueryData(sessionKey, data)
+      void queryClient.invalidateQueries({ queryKey: getApiSessionsOverviewQueryKey() })
+      void queryClient.invalidateQueries({
+        queryKey: getApiProjectsIdSessionsQueryKey({ path: { id: data.projectId } }),
+      })
+    },
   })
 }

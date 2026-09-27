@@ -135,18 +135,19 @@
     }
   },
   "nav": {
+    "systemSessions": "Сессии",
     "sshKeys": "SSH-ключи",
     "storage": "Хранилище",
     "project": "Проект",
     "sessions": "Сессии",
     "docker": "Docker",
-    "overview": "Обзор",
     "library": "Библиотека",
     "projectLibrary": "Агенты и навыки",
     "system": "Система",
     "configuration": "Настройки",
     "prompts": "Промпты",
-    "ideas": "Идеи"
+    "ideas": "Идеи",
+    "projectSettings": "Настройки"
   },
   "sshKeys": {
     "heading": "Ваши ключи",
@@ -184,6 +185,34 @@
   },
   "sessions": {
     "heading": "Сессии",
+    "dashboard": {
+      "heading": "Сессии",
+      "lead": "Все сессии по всем проектам — что выполняется сейчас, что завершилось без проверки и что происходило в последнее время.",
+      "loadFailed": "Не удалось загрузить обзор сессий",
+      "table": {
+        "project": "Проект",
+        "lastActivity": "Последняя активность",
+        "finished": "Завершено"
+      },
+      "running": {
+        "heading": "Выполняются ({{count}})",
+        "empty": "Сейчас ничего не выполняется."
+      },
+      "unchecked": {
+        "heading": "Непроверенные результаты ({{count}})",
+        "empty": "Нет результатов, ожидающих проверки."
+      },
+      "recent": {
+        "heading": "Недавние ({{count}})",
+        "empty": "За этот период ничего не происходило.",
+        "windowLabel": "Период",
+        "window": {
+          "1d": "1 день",
+          "3d": "3 дня",
+          "7d": "7 дней"
+        }
+      }
+    },
     "backToProjects": "Все проекты",
     "backToIdea": "Назад к идее",
     "docker": "Docker",

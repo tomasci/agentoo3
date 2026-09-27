@@ -1,6 +1,7 @@
 import { createRootRoute, createRoute, createRouter, Link, redirect } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { AgentEditorPage, LibraryPage, SkillEditorPage } from '@/features/library'
+import { SessionsDashboardPage } from '@/features/sessions'
 import { SettingsPage } from '@/features/settings'
 import { SshKeysPage } from '@/features/ssh-keys'
 import { StoragePage } from '@/features/storage'
@@ -15,8 +16,8 @@ import {
   ProjectDockerRoute,
   ProjectIdeasRoute,
   ProjectLibraryRoute,
-  ProjectOverviewRoute,
   ProjectSessionsRoute,
+  ProjectSettingsRoute,
   SessionDockerRoute,
   SessionEditorRoute,
   SessionRoute,
@@ -46,6 +47,16 @@ const newTabRoute = createRoute({
   component: NewTabRoute,
 })
 
+// The System tab's default page (`SYSTEM_HOME`, shared/store/tabs.ts):
+// everything running or waiting on the operator right now, across every
+// project — not scoped under `projectRoute` below, since it is precisely the
+// page for not having to already know which project to look in.
+const sessionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/sessions',
+  component: SessionsDashboardPage,
+})
+
 // A layout route, so /projects/$projectId/* shares the project lookup and the
 // current-project selection instead of repeating them per page.
 const projectRoute = createRoute({
@@ -54,10 +65,26 @@ const projectRoute = createRoute({
   component: ProjectLayout,
 })
 
-const projectOverviewRoute = createRoute({
+// `/projects/$projectId` is not a page of its own any more — Settings moved
+// to its own path below, so an old link or a tab path saved before that move
+// (localStorage's `agentoo:tabs`) has to land somewhere, and Sessions is that
+// project's default page (`projectHome`, shared/store/tabs.ts).
+const projectIndexRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: '/',
-  component: ProjectOverviewRoute,
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: '/projects/$projectId/sessions', params })
+  },
+})
+
+// The project's own page: details, SSH key, retry, delete. `ProjectOverview`
+// (features/projects) keeps its name — the page still shows an overview of
+// the project — but the route lives at /settings and the sidebar calls it
+// Settings, pinned to the bottom of the nav (sidebar.tsx).
+const projectSettingsRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/settings',
+  component: ProjectSettingsRoute,
 })
 
 const projectSessionsRoute = createRoute({
@@ -216,8 +243,9 @@ const promptRoute = createRoute({
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   newTabRoute,
+  sessionsRoute,
   projectRoute.addChildren([
-    projectOverviewRoute,
+    projectIndexRoute,
     projectSessionsRoute,
     sessionRoute,
     sessionDockerRoute,
@@ -226,6 +254,7 @@ export const routeTree = rootRoute.addChildren([
     projectLibraryRoute,
     projectIdeasRoute,
     ideaDetailRoute,
+    projectSettingsRoute,
   ]),
   // `new` before `$name`, or "new" would be read as a name.
   newAgentRoute,

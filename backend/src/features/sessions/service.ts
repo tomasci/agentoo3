@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gt, inArray, lt, sql } from 'drizzle-orm'
+import { and, count, desc, eq, getTableColumns, gt, gte, inArray, lt, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { sanitizeForDb } from '@/db/sanitize'
 import { ideas, messageFiles, messages, projects, sessionFiles, sessions } from '@/db/schema'
@@ -28,10 +28,13 @@ import { planBaseBranch } from './base-branch'
 import type {
   CreateSessionInput,
   MessageFileDto,
+  OverviewSessionDto,
   SessionDto,
   SessionExport,
   SessionMessageDto,
   SessionMessagePageDto,
+  SessionsOverviewDto,
+  SessionsOverviewWindow,
   UpdateSessionInput,
 } from './schema'
 
@@ -124,8 +127,31 @@ export async function messageDto(messageId: string): Promise<SessionMessageDto |
 
 type SessionRow = typeof sessions.$inferSelect
 
+/**
+ * What makes a session "unchecked", as one SQL expression: a turn left a
+ * result (settledAt set), the session isn't mid-turn, and the operator
+ * hasn't looked since (or never has). Defined once and reused two ways below
+ * — selected as the computed `unchecked` column everywhere a SessionDto is
+ * built (toDto just reads it off the row, never recomputes it), and reused
+ * verbatim as the WHERE clause for the overview's own "unchecked" list — so
+ * the two can never disagree about which sessions qualify.
+ */
+const uncheckedSql = sql<boolean>`(
+  ${sessions.settledAt} is not null
+  and ${sessions.status} not in ('queued', 'running')
+  and (${sessions.seenAt} is null or ${sessions.seenAt} < ${sessions.settledAt})
+)`
+
+/**
+ * Every column on `sessions`, plus the computed `unchecked` flag above. The
+ * one selection every query that builds a SessionDto uses (listSessions,
+ * getSession, and the overview's own three queries further down), so a row
+ * handed to toDto always carries exactly what it needs.
+ */
+const sessionColumns = { ...getTableColumns(sessions), unchecked: uncheckedSql }
+
 function toDto(
-  row: SessionRow,
+  row: SessionRow & { unchecked: boolean },
   repoPath: string,
   messageCount: number,
   ideaId: string | null,
@@ -152,6 +178,9 @@ function toDto(
     messageCount,
     totalCostUsd: row.totalCostUsd,
     pendingPrompts,
+    settledAt: row.settledAt ? row.settledAt.toISOString() : null,
+    seenAt: row.seenAt ? row.seenAt.toISOString() : null,
+    unchecked: row.unchecked,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }
@@ -209,7 +238,7 @@ async function ideaIdsFor(sessionIds: string[]): Promise<Map<string, string>> {
 export async function listSessions(projectId: string): Promise<SessionDto[]> {
   const project = await requireProject(projectId)
   const rows = await db
-    .select()
+    .select(sessionColumns)
     .from(sessions)
     .where(eq(sessions.projectId, projectId))
     .orderBy(desc(sessions.createdAt))
@@ -226,7 +255,7 @@ export async function listSessions(projectId: string): Promise<SessionDto[]> {
 }
 
 export async function getSession(id: string): Promise<SessionDto> {
-  const [row] = await db.select().from(sessions).where(eq(sessions.id, id)).limit(1)
+  const [row] = await db.select(sessionColumns).from(sessions).where(eq(sessions.id, id)).limit(1)
   if (!row) throw notFound('Session')
   const project = await requireProject(row.projectId)
   const [counts, pending, ideaIds] = await Promise.all([
@@ -241,6 +270,125 @@ export async function getSession(id: string): Promise<SessionDto> {
     ideaIds.get(row.id) ?? null,
     pending.get(row.id) ?? 0,
   )
+}
+
+/**
+ * Record that the operator opened this session. Idempotent (setting seenAt to
+ * "now" again changes nothing an unchecked reader cares about), and
+ * deliberately leaves updatedAt alone: that column is "last activity"
+ * elsewhere in this feature (the reconciler, the overview's own `recent`
+ * list), and opening a session to look at it is not activity.
+ */
+export async function markSessionSeen(id: string): Promise<SessionDto> {
+  const [row] = await db
+    .update(sessions)
+    .set({ seenAt: new Date() })
+    .where(eq(sessions.id, id))
+    .returning({ id: sessions.id })
+  if (!row) throw notFound('Session')
+  return getSession(id)
+}
+
+/** ms per overview window, keyed by the query param's own literal values. */
+const OVERVIEW_WINDOW_MS: Record<SessionsOverviewWindow, number> = {
+  '1d': 24 * 60 * 60 * 1000,
+  '3d': 3 * 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
+}
+
+/** `recent`'s own cap: `running` and `unchecked` are naturally small — sessions
+ * currently in flight, or with an unread result — but `recent` matches on
+ * time alone and could otherwise return the whole table on a busy install, so
+ * it gets its own bound. `running` and `unchecked` are not capped at all. */
+const OVERVIEW_RECENT_LIMIT = 200
+
+/** sessionColumns, plus which project a row belongs to: the overview spans
+ * every project at once, unlike every other session query in this file, which
+ * is always already scoped to one. */
+const overviewColumns = {
+  ...sessionColumns,
+  projectName: projects.name,
+  projectSlug: projects.slug,
+}
+
+type OverviewRow = SessionRow & { unchecked: boolean; projectName: string; projectSlug: string }
+
+function toOverviewDto(
+  row: OverviewRow,
+  messageCount: number,
+  ideaId: string | null,
+  pendingPrompts: number,
+): OverviewSessionDto {
+  return {
+    ...toDto(row, projectRepo(row.projectSlug), messageCount, ideaId, pendingPrompts),
+    projectName: row.projectName,
+  }
+}
+
+/**
+ * Sessions across every project, split into the three lists the System tab's
+ * dashboard shows: running now, unchecked results, and recent activity.
+ *
+ * Three independent queries, not one deduped set: `recent` is allowed, and
+ * expected, to repeat a session `running` or `unchecked` already listed — a
+ * running session is also recent activity. `running` and
+ * `unchecked` ignore `window` entirely; only `recent` is bounded by it, and
+ * separately capped at OVERVIEW_RECENT_LIMIT rows regardless of window.
+ *
+ * messageCount/pendingPrompts/ideaId are batched once across the union of
+ * every row from all three lists — the same countsFor/pendingFor/ideaIdsFor
+ * listSessions itself uses — so a dashboard spanning every project in the
+ * system never costs an N+1.
+ */
+export async function getSessionsOverview(
+  window: SessionsOverviewWindow,
+): Promise<SessionsOverviewDto> {
+  const since = new Date(Date.now() - OVERVIEW_WINDOW_MS[window])
+
+  const [runningRows, uncheckedRows, recentRows] = await Promise.all([
+    db
+      .select(overviewColumns)
+      .from(sessions)
+      .innerJoin(projects, eq(projects.id, sessions.projectId))
+      .where(inArray(sessions.status, ['running', 'queued']))
+      .orderBy(desc(sessions.updatedAt)),
+    db
+      .select(overviewColumns)
+      .from(sessions)
+      .innerJoin(projects, eq(projects.id, sessions.projectId))
+      .where(uncheckedSql)
+      .orderBy(desc(sessions.settledAt)),
+    db
+      .select(overviewColumns)
+      .from(sessions)
+      .innerJoin(projects, eq(projects.id, sessions.projectId))
+      .where(gte(sessions.updatedAt, since))
+      .orderBy(desc(sessions.updatedAt))
+      .limit(OVERVIEW_RECENT_LIMIT),
+  ])
+
+  const allRows = [...runningRows, ...uncheckedRows, ...recentRows]
+  const ids = [...new Set(allRows.map((r) => r.id))]
+  const [counts, pending, ideaIds] = await Promise.all([
+    countsFor(ids),
+    pendingFor(ids),
+    ideaIdsFor(ids),
+  ])
+
+  const dto = (row: OverviewRow) =>
+    toOverviewDto(
+      row,
+      counts.get(row.id) ?? 0,
+      ideaIds.get(row.id) ?? null,
+      pending.get(row.id) ?? 0,
+    )
+
+  return {
+    running: runningRows.map(dto),
+    unchecked: uncheckedRows.map(dto),
+    recent: recentRows.map(dto),
+    window,
+  }
 }
 
 /**

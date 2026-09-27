@@ -57,6 +57,13 @@
       "when": 1788801329541,
       "tag": "0007_nasty_jean_grey",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790502225992,
+      "tag": "0008_fearless_wallop",
+      "breakpoints": true
     }
   ]
 }

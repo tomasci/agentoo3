@@ -102,7 +102,7 @@ test('opening a project from the system tab appends a tab', () => {
   const result = openProject([systemTab()], 'abc', SYSTEM_TAB_ID)
   expect(ids(result.tabs)).toEqual([SYSTEM_TAB_ID, projectTabId('abc')])
   expect(result.activeId).toBe(projectTabId('abc'))
-  expect(result.tabs[1]?.path).toBe('/projects/abc')
+  expect(result.tabs[1]?.path).toBe('/projects/abc/sessions')
 })
 
 test('the picker becomes the project, keeping its place in the row', () => {
@@ -132,11 +132,11 @@ test('focusing an already-open project keeps the tab you asked from, if it holds
   expect(result.activeId).toBe(projectTabId('abc'))
 })
 
-test('a reopened project starts at its overview, not wherever it was last time', () => {
-  const stale = { ...projectTab('abc'), path: '/projects/abc/sessions/s1' }
+test('a reopened project starts at its default page (Sessions), not wherever it was last time', () => {
+  const stale = { ...projectTab('abc'), path: '/projects/abc/ideas' }
   const closed = closeTab([systemTab(), stale], projectTabId('abc'))
   const reopened = openProject(closed.tabs, 'abc', SYSTEM_TAB_ID)
-  expect(reopened.tabs[1]?.path).toBe('/projects/abc')
+  expect(reopened.tabs[1]?.path).toBe('/projects/abc/sessions')
 })
 
 // ── closing ──────────────────────────────────────────────────────────────────
@@ -265,7 +265,7 @@ test('a tab remembers where it was looking', () => {
 
 test('remembering the same place returns the same array, so nothing re-renders', () => {
   const tabs = [systemTab(), projectTab('abc')]
-  expect(rememberPath(tabs, projectTabId('abc'), '/projects/abc')).toBe(tabs)
+  expect(rememberPath(tabs, projectTabId('abc'), '/projects/abc/sessions')).toBe(tabs)
   expect(rememberPath(tabs, 'project-gone', '/projects/gone')).toBe(tabs)
 })
 

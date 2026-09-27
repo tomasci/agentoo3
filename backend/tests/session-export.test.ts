@@ -130,17 +130,21 @@ beforeEach(() => {
   transcript = storedMessages()
 })
 
-function rowsFor(table: string, aggregate: boolean, sortedBySeq: boolean): Row[] {
-  // ideaIdsFor's select also carries fields (so `aggregate` is true for it
-  // too, same as countsFor/pendingFor below), but it is keyed by table rather
-  // than by shape, so it has to be checked ahead of the aggregate branch.
-  // None of this file's fixtures link an idea to the session, so an empty
-  // result is the honest answer.
+function rowsFor(table: string, grouped: boolean, sortedBySeq: boolean): Row[] {
+  // ideaIdsFor's select also carries fields, same as countsFor/pendingFor
+  // below and getSession/listSessions's own now-computed `unchecked` column,
+  // but it is keyed by table rather than by shape, so it has to be checked
+  // ahead of the grouped branch. None of this file's fixtures link an idea to
+  // the session, so an empty result is the honest answer.
   if (table === 'ideas') return []
-  // countsFor and pendingFor are the only other projected selects and both
-  // group by session. One answer serves both: pendingPrompts is not part of
-  // the export, so nothing here depends on which of the two ran first.
-  if (aggregate) return sessionRow ? [{ sessionId: sessionRow.id, n: transcript.length }] : []
+  // countsFor and pendingFor are the only projected selects that group by
+  // session — `grouped` (set by the fake `groupBy` below) is what tells those
+  // two apart from an ordinary row select that merely also carries a computed
+  // column (getSession/listSessions's `unchecked`), which must still return
+  // the whole row. One answer serves both counts/pending: pendingPrompts is
+  // not part of the export, so nothing here depends on which of the two ran
+  // first.
+  if (grouped) return sessionRow ? [{ sessionId: sessionRow.id, n: transcript.length }] : []
   if (table === 'sessions') return sessionRow ? [sessionRow] : []
   if (table === 'projects') return projectRow ? [projectRow] : []
   if (table === 'messages') {
@@ -154,9 +158,10 @@ function rowsFor(table: string, aggregate: boolean, sortedBySeq: boolean): Row[]
   throw new Error(`fake db: unexpected table ${table}`)
 }
 
-function select(fields?: Record<string, unknown>) {
+function select(_fields?: Record<string, unknown>) {
   let table = ''
   let sortedBySeq = false
+  let grouped = false
   const builder = {
     from(t: unknown) {
       table = getTableName(t as Parameters<typeof getTableName>[0])
@@ -164,7 +169,10 @@ function select(fields?: Record<string, unknown>) {
     },
     where: () => builder,
     limit: () => builder,
-    groupBy: () => builder,
+    groupBy: () => {
+      grouped = true
+      return builder
+    },
     orderBy: (...columns: unknown[]) => {
       sortedBySeq = columns.some((c) => (c as { name?: string })?.name === 'seq')
       return builder
@@ -172,7 +180,7 @@ function select(fields?: Record<string, unknown>) {
     // Drizzle's builders are thenable, which is what makes `await db.select()...`
     // work without a .execute().
     then: (ok?: (rows: Row[]) => unknown, err?: (e: unknown) => unknown) =>
-      Promise.resolve(rowsFor(table, fields !== undefined, sortedBySeq)).then(ok, err),
+      Promise.resolve(rowsFor(table, grouped, sortedBySeq)).then(ok, err),
   }
   return builder
 }

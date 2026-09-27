@@ -29,13 +29,16 @@ export type Tab = {
 
 export const SYSTEM_TAB_ID = 'system'
 
-/** Opening the system tab with nothing remembered lands on the library. */
-export const SYSTEM_HOME = '/library'
+/** Opening the system tab with nothing remembered lands on the Sessions dashboard. */
+export const SYSTEM_HOME = '/sessions'
 
 export const systemTab = (): Tab => ({ id: SYSTEM_TAB_ID, kind: 'system', path: SYSTEM_HOME })
 
 export const projectTabId = (projectId: string) => `project-${projectId}`
-export const projectHome = (projectId: string) => `/projects/${projectId}`
+// Opening a project with nothing remembered lands on Sessions — the project's
+// own index redirects here too, so an old link or a stale tab path lands
+// somewhere sensible (see `projectIndexRoute` in app/router.tsx).
+export const projectHome = (projectId: string) => `/projects/${projectId}/sessions`
 
 export const projectTab = (projectId: string): Tab => ({
   id: projectTabId(projectId),

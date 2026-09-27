@@ -229,6 +229,23 @@ Deleting a session removes its worktree but **keeps the branch**: it holds
 whatever the session did, and deleting a session should not silently discard
 work.
 
+### Unchecked results
+
+Two nullable columns track what the System tab's sessions dashboard needs to
+show unread results: `settledAt`, set to now() by every write that moves a
+session's status to `completed`, `failed` or `interrupted` (never by a move to
+`idle`/`queued`/`running`), and `seenAt`, set to now() by `POST
+/sessions/{id}/seen` when the operator opens a session. A session is
+`unchecked` when it has settled, is not currently queued or running, and
+`seenAt` is null or older than `settledAt` — the same expression the API uses
+both to compute `SessionDto.unchecked` and to build the overview's `unchecked`
+list, so the two can never disagree.
+
+Both columns start null on every session that existed before they were added,
+and there is no backfill: guessing a historical `settledAt` from `updatedAt`
+would flag a pile of old, already-seen sessions as unchecked the moment this
+shipped, for no result anyone actually needs to look at.
+
 ### Running a turn
 
 A **turn** is the unit of work, not a session. `POST /sessions/{id}/messages`

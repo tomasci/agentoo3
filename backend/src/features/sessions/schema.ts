@@ -57,10 +57,76 @@ export const sessionSchema = z.object({
     .number()
     .int()
     .openapi({ description: 'Messages sent while a turn was running, waiting their turn' }),
+  settledAt: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        'When a turn last ended with a result for the operator to look at — set by every write ' +
+        "that moves status to 'completed', 'failed' or 'interrupted'. Null for a session that " +
+        'has never settled, including every session created before this field existed (no ' +
+        'backfill — see "Unchecked results" in backend/README.md).',
+    }),
+  seenAt: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        'When the operator last opened this session (POST /sessions/{id}/seen). Null if never ' +
+        'opened, including every session created before this field existed.',
+    }),
+  unchecked: z.boolean().openapi({
+    description:
+      'A result is waiting that the operator has not looked at: settledAt is set, status is ' +
+      'not queued or running, and seenAt is null or older than settledAt.',
+  }),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
 export type SessionDto = z.infer<typeof sessionSchema>
+
+/**
+ * A window the "recent" list of the sessions overview looks back over. Its
+ * own schema, not inlined at the route: getSessionsOverview (service.ts)
+ * takes this exact type, so the query-param validator and the service
+ * signature cannot drift apart on what counts as a legal window.
+ */
+export const sessionsOverviewWindowSchema = z.enum(['1d', '3d', '7d'])
+export type SessionsOverviewWindow = z.infer<typeof sessionsOverviewWindowSchema>
+
+/**
+ * A SessionDto plus which project it belongs to — the overview spans every
+ * project at once, unlike every other session endpoint, which is already
+ * scoped to one. Named via `.openapi('OverviewSession', ...)` (rather than
+ * left inline like the rest of this file's schemas) so kubb emits it as one
+ * shared type instead of three structurally-identical inline ones, one per
+ * list below.
+ */
+export const overviewSessionSchema = sessionSchema
+  .extend({ projectName: z.string() })
+  .openapi('OverviewSession', {
+    description: 'A session, plus the name of the project it belongs to.',
+  })
+export type OverviewSessionDto = z.infer<typeof overviewSessionSchema>
+
+export const sessionsOverviewSchema = z.object({
+  running: z.array(overviewSessionSchema).openapi({
+    description:
+      "status in ('running', 'queued'), across every project, newest activity first. Not " +
+      'limited by window.',
+  }),
+  unchecked: z.array(overviewSessionSchema).openapi({
+    description:
+      'unchecked === true (see SessionDto.unchecked), newest result first. Not limited by window.',
+  }),
+  recent: z.array(overviewSessionSchema).openapi({
+    description:
+      'updatedAt within window, every status, newest first, capped at 200 rows. May repeat a ' +
+      'session already listed under running or unchecked — that overlap is intended.',
+  }),
+  window: sessionsOverviewWindowSchema,
+})
+export type SessionsOverviewDto = z.infer<typeof sessionsOverviewSchema>
 
 /**
  * A role:orchestrator agent's name, shared between create and update.

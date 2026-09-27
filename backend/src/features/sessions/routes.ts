@@ -8,6 +8,8 @@ import {
   sendMessageSchema,
   sessionMessageSchema,
   sessionSchema,
+  sessionsOverviewSchema,
+  sessionsOverviewWindowSchema,
   updateSessionSchema,
 } from './schema'
 import {
@@ -15,10 +17,12 @@ import {
   deleteSession,
   exportSession,
   getSession,
+  getSessionsOverview,
   interruptSession,
   listMessagePage,
   listMessages,
   listSessions,
+  markSessionSeen,
   sendMessage,
   sessionExportFileName,
   updateSession,
@@ -100,6 +104,40 @@ sessionsRouter.openapi(
   async (c) => c.json(await createSession(c.req.valid('param').id, c.req.valid('json')), 201),
 )
 
+// Registered before /sessions/{id}: both are a single dynamic path segment
+// under /sessions, and {id} is validated as a uuid — 'overview' would 400
+// there instead of ever reaching this route if that one matched first.
+// backend/tests/sessions-overview.test.ts asserts this against the real
+// router ('/sessions/overview is not captured by /sessions/{id}'), so this
+// isn't assumed from registration order alone.
+sessionsRouter.openapi(
+  createRoute({
+    method: 'get',
+    path: '/sessions/overview',
+    tags: ['sessions'],
+    summary: 'Sessions dashboard: running, unchecked and recent, across every project',
+    description:
+      'Three lists, computed independently rather than one deduped set — `recent` may repeat ' +
+      'a session already listed under `running` or `unchecked`, since a running session is also ' +
+      'recent activity. `running` (status in running/queued) and `unchecked` (see ' +
+      'SessionDto.unchecked) are never limited by `window`; only `recent` is, and is additionally ' +
+      'capped at 200 rows regardless of window.',
+    request: {
+      query: z.object({
+        window: sessionsOverviewWindowSchema.default('1d').openapi({
+          param: { name: 'window', in: 'query' },
+          description: 'How far back `recent` looks. Does not limit `running` or `unchecked`.',
+        }),
+      }),
+    },
+    responses: {
+      200: json(sessionsOverviewSchema, 'Sessions overview'),
+      400: json(errorSchema, 'window was not one of 1d, 3d, 7d'),
+    },
+  }),
+  async (c) => c.json(await getSessionsOverview(c.req.valid('query').window), 200),
+)
+
 sessionsRouter.openapi(
   createRoute({
     method: 'get',
@@ -110,6 +148,26 @@ sessionsRouter.openapi(
     responses: { 200: json(sessionSchema, 'Session'), 404: json(errorSchema, 'Not found') },
   }),
   async (c) => c.json(await getSession(c.req.valid('param').id), 200),
+)
+
+sessionsRouter.openapi(
+  createRoute({
+    method: 'post',
+    path: '/sessions/{id}/seen',
+    tags: ['sessions'],
+    summary: 'Mark a session as opened',
+    description:
+      'Sets seenAt to now; idempotent. Deliberately does not touch updatedAt — that column is ' +
+      '"last activity" elsewhere in this feature, and opening a session to look at it is not ' +
+      "activity. This is what clears a session from the System tab's unchecked list once seenAt " +
+      'catches up to settledAt.',
+    request: { params: idParam },
+    responses: {
+      200: json(sessionSchema, 'Marked seen'),
+      404: json(errorSchema, 'Not found'),
+    },
+  }),
+  async (c) => c.json(await markSessionSeen(c.req.valid('param').id), 200),
 )
 
 sessionsRouter.openapi(

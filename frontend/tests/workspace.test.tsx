@@ -72,6 +72,15 @@ async function mount(path: string, projects = PROJECTS) {
   for (const p of projects) {
     client.setQueryData([{ url: '/api/projects/:id/sessions', params: { id: p.id } }], [])
   }
+  // SYSTEM_HOME (shared/store/tabs.ts) is `/sessions` now, so the shell's own
+  // fallbacks (a first visit, a deleted project's tab) can land on
+  // `SessionsDashboardPage` in a test that never meant to exercise it —
+  // seeded here for the same reason as every other query above, not because
+  // this file has anything of its own to say about that page.
+  client.setQueryData(
+    [{ url: '/api/sessions/overview' }, { window: '1d' }],
+    { running: [], unchecked: [], recent: [], window: '1d' },
+  )
 
   const root = createRoot(container)
   roots.push(root)
@@ -207,9 +216,12 @@ test('the workspace opens as one system tab, showing system navigation only', as
 
   expect(tabs()).toEqual(['System'])
   expect(activeTab()).toBe('System')
-  // Library, ssh keys, storage, prompts, configuration — and nothing about any project.
+  // Sessions, library, ssh keys, storage, prompts, configuration — and
+  // nothing about any project. The brand heading link and the Sessions item
+  // both point at `/sessions` now — see shared/store/tabs.ts's `SYSTEM_HOME`.
   expect(navLinks()).toEqual([
-    '/library',
+    '/sessions',
+    '/sessions',
     '/library',
     '/ssh-keys',
     '/storage',
@@ -246,13 +258,13 @@ test('picking a project fills in that same tab, and turns on project navigation'
 
   expect(tabs()).toEqual(['System', 'Alpha'])
   expect(activeTab()).toBe('Alpha')
-  expect(at()).toBe('/projects/p1')
+  expect(at()).toBe('/projects/p1/sessions')
   expect(navLinks()).toEqual([
-    '/projects/p1',
     '/projects/p1/sessions',
     '/projects/p1/docker',
     '/projects/p1/ideas',
     '/projects/p1/library',
+    '/projects/p1/settings',
   ])
   // No system pages in a project tab.
   expect(navLinks().includes('/settings')).toBe(false)
@@ -268,7 +280,7 @@ test('as many tabs as you like, each holding its own project', async () => {
 
   expect(tabs()).toEqual(['System', 'Alpha', 'Beta'])
   expect(activeTab()).toBe('Beta')
-  expect(at()).toBe('/projects/p2')
+  expect(at()).toBe('/projects/p2/sessions')
   expect(problems).toEqual([])
 })
 
@@ -322,13 +334,13 @@ test('closing a tab you are not in leaves you where you are', async () => {
   await click(byText('button', 'Alpha'))
   await click(newTabButton())
   await click(byText('button', 'Beta'))
-  expect(at()).toBe('/projects/p2')
+  expect(at()).toBe('/projects/p2/sessions')
 
   await click(closeButtonFor('Alpha'), 'close Alpha')
 
   expect(tabs()).toEqual(['System', 'Beta'])
   expect(activeTab()).toBe('Beta')
-  expect(at()).toBe('/projects/p2')
+  expect(at()).toBe('/projects/p2/sessions')
   expect(problems).toEqual([])
 })
 
@@ -438,7 +450,7 @@ test('a project already open is focused, not opened twice', async () => {
   // Focused the tab holding it, and retired the picker that asked.
   expect(tabs()).toEqual(['System', 'Alpha'])
   expect(activeTab()).toBe('Alpha')
-  expect(at()).toBe('/projects/p1')
+  expect(at()).toBe('/projects/p1/sessions')
   expect(problems).toEqual([])
 })
 
@@ -466,7 +478,7 @@ test('the workspace comes back after a reload', async () => {
 
   // Remount without clearing storage, the way a refresh does.
   document.body.innerHTML = ''
-  await mount('/projects/p1')
+  await mount('/projects/p1/sessions')
 
   expect(tabs()).toEqual(['System', 'Alpha'])
   expect(activeTab()).toBe('Alpha')
@@ -477,7 +489,7 @@ test('a project deleted elsewhere loses its tab, and takes you off its page', as
   await mount('/library')
   await click(newTabButton())
   await click(byText('button', 'Alpha'))
-  expect(at()).toBe('/projects/p1')
+  expect(at()).toBe('/projects/p1/sessions')
 
   // The server no longer has it — deleted from another tab, or another browser.
   await act(async () => {
@@ -486,7 +498,8 @@ test('a project deleted elsewhere loses its tab, and takes you off its page', as
   await settle()
 
   expect(tabs()).toEqual(['System'])
-  expect(at()).toBe('/library')
+  // Falls back to SYSTEM_HOME (shared/store/tabs.ts), which is `/sessions` now.
+  expect(at()).toBe('/sessions')
   expect(problems).toEqual([])
 })
 
@@ -599,7 +612,7 @@ test('a project opened here survives another window disagreeing about the row', 
   await mount('/library')
   await click(newTabButton())
   await click(byText('button', 'Alpha'))
-  expect(at()).toBe('/projects/p1')
+  expect(at()).toBe('/projects/p1/sessions')
 
   const written = await otherWindowWrites([systemTab()])
 

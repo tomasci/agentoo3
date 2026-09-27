@@ -96,12 +96,19 @@ export async function appendMessage(
 }
 
 async function setStatus(sessionId: string, status: string, lastError?: string | null) {
+  // A move to one of these three is a turn ending with something for the
+  // operator to look at — see "Unchecked results" in backend/README.md.
+  // idle/queued/running are not: idle is nothing new, queued/running are
+  // still in flight. This is the only place session-run.worker.ts changes
+  // status, so it is also the only place that needs to know that.
+  const settles = status === 'completed' || status === 'failed' || status === 'interrupted'
   await db
     .update(sessions)
     .set({
       status: status as 'idle' | 'queued' | 'running' | 'interrupted' | 'completed' | 'failed',
       // Usually a process's stderr, verbatim.
       ...(lastError !== undefined && { lastError: sanitizeForDb(lastError) }),
+      ...(settles && { settledAt: new Date() }),
       updatedAt: new Date(),
     })
     .where(eq(sessions.id, sessionId))

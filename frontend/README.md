@@ -271,11 +271,27 @@ TanStack Router, defined in code rather than by file convention
 
 | URL | Page |
 |---|---|
-| `/` | redirects to `/projects` |
+| `/` | redirects to `/sessions` |
+| `/sessions` | Sessions dashboard: running, unchecked and recent, across every project — the System tab's default page |
 | `/projects` | project list |
-| `/projects/$projectId` | project overview: details, SSH key, retry, delete |
+| `/projects/$projectId` | redirects to `/projects/$projectId/sessions` |
 | `/projects/$projectId/sessions` | that project's sessions |
+| `/projects/$projectId/settings` | project settings: details, SSH key, retry, delete |
 | `/ssh-keys` | SSH keys |
+
+`/sessions` (`features/sessions/components/sessions-dashboard-page.tsx`) is
+three lists, not one: **Running** (status `running` or `queued`, right now,
+across every project), **Unchecked results** (a turn settled since the
+operator last opened that session — the backend's own `unchecked` flag on the
+Session DTO), and **Recent** (any activity within a 1d/3d/7d window, switched
+with a `ToggleGroup`, and free to repeat a session already listed above it —
+that overlap is the backend's own contract, not a bug here). A session drops
+out of Unchecked the moment the operator actually opens it while the tab is
+visible: `SessionPage` posts `/sessions/{id}/seen` itself the instant a loaded
+session reads `unchecked: true` while `document.visibilityState === 'visible'`,
+and again on `visibilitychange` if the turn settled while the tab was hidden
+behind another — never on a click of the operator's own, since checking a
+result is something reading the page already does.
 
 Code-based rather than file-based because file-based needs a Vite plugin and a
 generated `routeTree.gen.ts`, and this project already generates its API client
