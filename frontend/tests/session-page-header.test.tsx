@@ -36,6 +36,7 @@ import {
   RouterProvider,
 } from '@tanstack/react-router'
 import i18next from 'i18next'
+import { createStore, Provider as JotaiProvider } from 'jotai'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
@@ -163,6 +164,11 @@ const { Toaster, toast } = await import('../src/shared/ui/toast')
 let container: HTMLDivElement
 let client: QueryClient
 let root: Root
+// A fresh store per test — see tests/session-page-scroll.test.tsx's own
+// comment on the same wrapping, for the same reason: `useAttachmentUploads`'s
+// tray (use-session-files.ts) is a module-level per-session atom keyed by session
+// id, and every test in this file mounts session id 's1'.
+let store: ReturnType<typeof createStore>
 
 async function settle(ticks = 10) {
   for (let i = 0; i < ticks; i++) {
@@ -190,10 +196,12 @@ async function mount() {
   await act(async () => {
     root.render(
       <I18nextProvider i18n={testI18n}>
-        <QueryClientProvider client={client}>
-          <Toaster />
-          <RouterProvider router={router} />
-        </QueryClientProvider>
+        <JotaiProvider store={store}>
+          <QueryClientProvider client={client}>
+            <Toaster />
+            <RouterProvider router={router} />
+          </QueryClientProvider>
+        </JotaiProvider>
       </I18nextProvider>,
     )
   })
@@ -210,6 +218,11 @@ beforeEach(() => {
   interruptReject = null
   interruptGate = null
   sends = []
+  store = createStore()
+  // The composer's draft (use-session-draft.ts) persists to localStorage
+  // keyed by session id — see tests/session-page-scroll.test.tsx's own
+  // comment on the same clear, for the same reason.
+  localStorage.clear()
 })
 
 afterEach(async () => {
@@ -594,4 +607,84 @@ test('with the stream actually open, the header still shows no live text and no 
   } finally {
     ;(globalThis as { EventSource?: unknown }).EventSource = InertEventSource
   }
+})
+
+// --- 12. Docker / Editor links carry tooltips, and are still links ----------
+//
+// session-page.tsx wraps each isolated-session header link in a Base UI
+// Tooltip (`TooltipTrigger render={<Link …/>}`). Focus opens a Base UI
+// tooltip immediately (hover waits on the Root's default delay without the
+// app's TooltipProvider — see tests/composer-tooltips.test.tsx), so focus,
+// inside act(), is the trigger used here. Tooltips portal to <body>.
+
+const headerLink = (text: string) => {
+  const found = [...header().querySelectorAll('a')].filter((a) => a.textContent?.trim() === text)
+  if (found.length !== 1) throw new Error(`expected one "${text}" link, got ${found.length}`)
+  return found[0] as HTMLAnchorElement
+}
+const openTooltips = () =>
+  [...document.querySelectorAll('[data-slot="tooltip-content"][data-open]')].map(
+    (el) => el.textContent ?? '',
+  )
+async function focusIn(el: HTMLElement) {
+  await act(async () => {
+    el.focus()
+  })
+  await settle(1)
+}
+async function blurOut(el: HTMLElement) {
+  await act(async () => {
+    el.blur()
+  })
+  await settle(2)
+}
+
+test('an isolated session: Docker and Editor are still links, with their hrefs, Editor opening a new tab', async () => {
+  currentSession = session({ id: 's1', projectId: 'p1', isolated: true, worktreePath: '/srv/wt' })
+  await mount()
+  const docker = headerLink('sessions.docker')
+  const editor = headerLink('sessions.editor')
+  expect(docker.tagName).toBe('A')
+  expect(docker.getAttribute('href')).toBe('/projects/p1/sessions/s1/docker')
+  expect(docker.hasAttribute('target')).toBe(false)
+  expect(editor.tagName).toBe('A')
+  expect(editor.getAttribute('href')).toBe('/projects/p1/sessions/s1/editor')
+  expect(editor.getAttribute('target')).toBe('_blank')
+  expect(editor.getAttribute('rel')).toBe('noopener noreferrer')
+  // Not turned into <button>s, nor nested in one, by the tooltip wrapping.
+  for (const a of [docker, editor]) {
+    expect(a.closest('button')).toBeNull()
+    expect(a.querySelector('button')).toBeNull()
+  }
+})
+
+test('focusing the Docker link opens sessions.dockerTooltip; the Editor link sessions.editorTooltip', async () => {
+  currentSession = session({ isolated: true, worktreePath: '/srv/wt' })
+  await mount()
+  expect(openTooltips()).toEqual([])
+  const docker = headerLink('sessions.docker')
+  await focusIn(docker)
+  expect(openTooltips()).toEqual(['sessions.dockerTooltip'])
+  await blurOut(docker)
+  expect(openTooltips()).toEqual([])
+  await focusIn(headerLink('sessions.editor'))
+  expect(openTooltips()).toEqual(['sessions.editorTooltip'])
+})
+
+test('the link text, not the tooltip, is what the Docker and Editor links read as', async () => {
+  currentSession = session({ isolated: true, worktreePath: '/srv/wt' })
+  await mount()
+  await focusIn(headerLink('sessions.docker'))
+  // The tooltip portals out of the header, and the link text is unchanged.
+  expect(header().textContent ?? '').not.toContain('sessions.dockerTooltip')
+  expect(headerLink('sessions.docker').textContent).toBe('sessions.docker')
+})
+
+test('a non-isolated session renders neither link nor either tooltip', async () => {
+  currentSession = session({ isolated: false })
+  await mount()
+  const texts = [...header().querySelectorAll('a')].map((a) => a.textContent?.trim())
+  expect(texts).not.toContain('sessions.docker')
+  expect(texts).not.toContain('sessions.editor')
+  expect(document.body.textContent ?? '').not.toContain('sessions.dockerTooltip')
 })

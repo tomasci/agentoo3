@@ -4,7 +4,8 @@ import { useProjects } from '@/features/projects'
 import type { Tab, TabKind } from '@/shared/store/tabs'
 import { Button } from '@/shared/ui/button'
 import { ButtonGroup } from '@/shared/ui/button-group'
-import { SidebarTrigger } from '@/shared/ui/sidebar'
+import { SidebarTrigger, useSidebar } from '@/shared/ui/sidebar'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { TabSwitcher } from './tab-switcher'
 import { useTabs } from './use-tabs'
 
@@ -63,6 +64,11 @@ export function TabBar({ mode }: { mode: TabKind }) {
   const { t } = useTranslation()
   const { tabs, activeId, addTab, selectTab, closeTab } = useTabs()
   const labelFor = useTabLabel()
+  // Desktop `open` only: below `md` the trigger opens the sidebar's Sheet
+  // instead, where there is no hover to show a tooltip on anyway, so the
+  // mobile drawer's own open/closed state isn't worth reading here too.
+  const { open: sidebarOpen } = useSidebar()
+  const sidebarToggleLabel = sidebarOpen ? t('shell.hideSidebar') : t('shell.showSidebar')
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-1 px-2">
@@ -70,8 +76,27 @@ export function TabBar({ mode }: { mode: TabKind }) {
           closed and empty in this mode) — a trigger with nothing behind it
           would be a control that does nothing. `icon`, not the default
           `icon-sm`, so it's the same 32px as a tab pill and the [+], and
-          shares their vertical centerline in the 48px header. */}
-      {mode !== 'new' && <SidebarTrigger size="icon" aria-label={t('shell.toggleSidebar')} />}
+          shares their vertical centerline in the 48px header. The `aria-label`
+          and the tooltip say the same state-aware thing — "Hide sidebar" or
+          "Show sidebar" — so a screen reader hears what the click will do,
+          not a static "toggle". */}
+      {mode !== 'new' && (
+        <Tooltip>
+          {/* `shared/ui/tooltip.tsx`'s own `TooltipTrigger` stamps a literal
+              `data-slot="tooltip-trigger"` on whatever it clones its `render`
+              element into, which lands *after* the wrapped control's own
+              `data-slot` in prop order and so wins — silently renaming
+              `SidebarTrigger`'s `data-slot="sidebar-trigger"` (shell.test.tsx
+              finds the trigger by exactly that slot) unless restated here.
+              Every control wrapped below needs the same restatement, with
+              its own original slot value ("button" for a shadcn `Button`). */}
+          <TooltipTrigger
+            data-slot="sidebar-trigger"
+            render={<SidebarTrigger size="icon" aria-label={sidebarToggleLabel} />}
+          />
+          <TooltipContent>{sidebarToggleLabel}</TooltipContent>
+        </Tooltip>
+      )}
 
       <nav
         aria-label={t('tabs.label')}
@@ -112,19 +137,27 @@ export function TabBar({ mode }: { mode: TabKind }) {
                   </Button>
 
                   {tab.kind !== 'system' && (
-                    // `icon`, not `icon-xs`: it has to match the label button's own
-                    // (default-size) height, or the pair reads as two mismatched
-                    // controls rather than one pill — same height as the system tab
-                    // and the [+] button (also `icon`) so the whole row lines up.
-                    <Button
-                      type="button"
-                      variant={variant}
-                      size="icon"
-                      aria-label={t('tabs.close', { name: labelFor(tab) })}
-                      onClick={() => closeTab(tab.id)}
-                    >
-                      <X />
-                    </Button>
+                    <Tooltip>
+                      {/* `icon`, not `icon-xs`: it has to match the label button's own
+                          (default-size) height, or the pair reads as two mismatched
+                          controls rather than one pill — same height as the system tab
+                          and the [+] button (also `icon`) so the whole row lines up. */}
+                      <TooltipTrigger
+                        data-slot="button"
+                        render={
+                          <Button
+                            type="button"
+                            variant={variant}
+                            size="icon"
+                            aria-label={t('tabs.close', { name: labelFor(tab) })}
+                            onClick={() => closeTab(tab.id)}
+                          >
+                            <X />
+                          </Button>
+                        }
+                      />
+                      <TooltipContent>{t('tabs.close', { name: labelFor(tab) })}</TooltipContent>
+                    </Tooltip>
                   )}
                 </ButtonGroup>
               </li>
@@ -132,16 +165,24 @@ export function TabBar({ mode }: { mode: TabKind }) {
           })}
         </ul>
 
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="shrink-0 self-center"
-          aria-label={t('tabs.add')}
-          onClick={addTab}
-        >
-          <Plus />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            data-slot="button"
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="shrink-0 self-center"
+                aria-label={t('tabs.add')}
+                onClick={addTab}
+              >
+                <Plus />
+              </Button>
+            }
+          />
+          <TooltipContent>{t('tabs.addTooltip')}</TooltipContent>
+        </Tooltip>
       </nav>
 
       <nav aria-label={t('tabs.label')} className="flex min-w-0 flex-1 md:hidden">

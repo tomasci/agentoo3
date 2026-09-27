@@ -176,6 +176,14 @@ const click = async (el: Element | null | undefined, what = 'element') => {
   await settle()
 }
 const clickTab = (text: string) => click(tabNamed(text), `tab ${text}`)
+/** Focus, inside `act()` like `click` above: every control in the tab row is
+ *  a Base UI tooltip trigger now (app/tab-bar.tsx), and Base UI opens a
+ *  tooltip on focus — a React state update that, outside `act()`, lands in
+ *  `problems` as an act warning. */
+const focus = async (el: Element | null | undefined, what = 'element') => {
+  if (!el) throw new Error(`no ${what} to focus`)
+  await act(async () => { (el as HTMLElement).focus() })
+}
 // The [+] at the end of the row; the empty tab it creates is labelled, not
 // aria-labelled, so this stays unambiguous however many are open.
 const newTabButton = () => tabBar()?.querySelector('[aria-label="New tab"]')
@@ -346,7 +354,7 @@ test('every tab and every close button is reachable with the keyboard', async ()
     expect(el.tagName).toBe('BUTTON')
     expect(el.hasAttribute('disabled')).toBe(false)
     expect(el.getAttribute('tabindex')).not.toBe('-1')
-    el.focus()
+    await focus(el)
     expect(ref(document.activeElement)).toBe(ref(el))
   }
 
@@ -354,7 +362,7 @@ test('every tab and every close button is reachable with the keyboard', async ()
   // Space does to a focused <button>. (happy-dom does not synthesise the click
   // a real browser fires for those keys, so the activation itself is clicked.)
   const system = tabNamed('System') as HTMLElement
-  system.focus()
+  await focus(system, 'tab System')
   expect(ref(document.activeElement)).toBe(ref(system))
   await click(system, 'tab System')
   expect(activeTab()).toBe('System')
@@ -362,7 +370,7 @@ test('every tab and every close button is reachable with the keyboard', async ()
 
   // And closing from the keyboard reaches the same close button.
   const close = closeButtonFor('Beta')
-  close?.focus()
+  await focus(close, 'close Beta')
   expect(ref(document.activeElement)).toBe(ref(close))
   await click(close, 'close Beta')
   expect(tabs()).toEqual(['System', 'Alpha'])

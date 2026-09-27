@@ -29,8 +29,9 @@ import {
   InputGroupTextarea,
 } from '@/shared/ui/input-group'
 import { Spinner } from '@/shared/ui/spinner'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import type { AttachmentUpload, SessionFilesUsage } from '../hooks/use-session-files'
-import { attachmentDescription, isInlineImage } from '../lib/attachments'
+import { attachmentDescription, isInlineImage, sessionFileUrl } from '../lib/attachments'
 import { AttachmentLightbox } from './attachment-lightbox'
 
 export interface ComposerAttachments {
@@ -50,18 +51,25 @@ export interface ComposerAttachments {
 /**
  * One tray tile — uploading, failed or done, image or not — as the same
  * vertical `Attachment` the transcript's own tiles use. An image gets a
- * client-side preview: `URL.createObjectURL` needs nothing from the network,
- * so the thumbnail is there the instant a file is picked rather than only
- * once the upload finishes. The object URL is created here, in an effect
- * keyed on the file itself, and revoked in that same effect's cleanup — on
- * removal, on unmount, and on StrictMode's throwaway extra mount alike — so
- * nothing outlives the tile that made it.
+ * preview from whichever source the tile actually has: a fresh `File` (an
+ * upload started in this tab) gets a client-side `URL.createObjectURL` —
+ * needs nothing from the network, so the thumbnail is there the instant a
+ * file is picked rather than only once the upload finishes — created here in
+ * an effect keyed on the file itself and revoked in that same effect's
+ * cleanup, on removal, on unmount, and on StrictMode's throwaway extra mount
+ * alike, so nothing outlives the tile that made it. A tile rehydrated from a
+ * server file id (`use-session-files.ts`'s `rehydrate`, after a reload) has
+ * no `File` to hand `createObjectURL`, only a `serverFile` — its preview is
+ * the same `/api/sessions/:id/files/:fileId` URL the transcript's own
+ * attachments use, needing no object URL or cleanup of its own at all.
  */
 function AttachmentTile({
+  sessionId,
   upload,
   onCancel,
   onRemove,
 }: {
+  sessionId: string
   upload: AttachmentUpload
   onCancel: (id: string) => void
   onRemove: (upload: AttachmentUpload) => void
@@ -69,21 +77,26 @@ function AttachmentTile({
   const { t } = useTranslation()
   const state =
     upload.status === 'uploading' ? 'uploading' : upload.status === 'error' ? 'error' : 'done'
-  const isImage = isInlineImage(upload.file.type)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const isImage = isInlineImage(upload.mimeType)
+  const [objectUrl, setObjectUrl] = useState<string | null>(null)
   // Flips true only if the browser itself fails to decode the preview —
   // never trusted as the sole signal of anything about the upload itself,
   // same as the transcript's own broken-thumbnail guard.
   const [broken, setBroken] = useState(false)
 
   useEffect(() => {
-    if (!isImage) return
+    if (!isImage || !upload.file) return
     const url = URL.createObjectURL(upload.file)
-    setPreviewUrl(url)
+    setObjectUrl(url)
     return () => URL.revokeObjectURL(url)
   }, [isImage, upload.file])
 
-  const showImage = isImage && previewUrl !== null && !broken
+  const previewSrc = upload.file
+    ? objectUrl
+    : upload.serverFile
+      ? sessionFileUrl(sessionId, upload.serverFile.id)
+      : null
+  const showImage = isImage && previewSrc !== null && !broken
 
   const description =
     upload.status === 'error'
@@ -91,14 +104,14 @@ function AttachmentTile({
         ? t('sessions.attachments.tooLargeForSession')
         : apiErrorMessage(upload.error, t('sessions.attachments.uploadFailed'))
       : upload.status === 'uploading'
-        ? attachmentDescription(upload.file.name, `${upload.progress}%`)
-        : attachmentDescription(upload.file.name, formatBytes(upload.file.size))
+        ? attachmentDescription(upload.name, `${upload.progress}%`)
+        : attachmentDescription(upload.name, formatBytes(upload.size))
 
   return (
     <Attachment orientation="vertical" state={state}>
       <AttachmentMedia variant={showImage ? 'image' : 'icon'}>
         {showImage ? (
-          <img src={previewUrl} alt={upload.file.name} onError={() => setBroken(true)} />
+          <img src={previewSrc} alt={upload.name} onError={() => setBroken(true)} />
         ) : upload.status === 'uploading' ? (
           <Spinner />
         ) : (
@@ -106,7 +119,7 @@ function AttachmentTile({
         )}
       </AttachmentMedia>
       <AttachmentContent>
-        <AttachmentTitle title={upload.file.name}>{upload.file.name}</AttachmentTitle>
+        <AttachmentTitle title={upload.name}>{upload.name}</AttachmentTitle>
         {/* The vertical tile truncates this line, so the failure a reader
             most needs the full text of is the one case this carries a
             `title` of its own — every other description is short enough
@@ -119,8 +132,8 @@ function AttachmentTile({
         <AttachmentAction
           aria-label={
             upload.status === 'uploading'
-              ? t('sessions.attachments.cancel', { name: upload.file.name })
-              : t('sessions.attachments.remove', { name: upload.file.name })
+              ? t('sessions.attachments.cancel', { name: upload.name })
+              : t('sessions.attachments.remove', { name: upload.name })
           }
           onClick={() => (upload.status === 'uploading' ? onCancel(upload.id) : onRemove(upload))}
         >
@@ -132,9 +145,9 @@ function AttachmentTile({
           lightbox never opens onto a broken image. */}
       {showImage && (
         <AttachmentLightbox
-          filename={upload.file.name}
-          src={previewUrl}
-          triggerLabel={t('sessions.attachments.preview', { name: upload.file.name })}
+          filename={upload.name}
+          src={previewSrc}
+          triggerLabel={t('sessions.attachments.preview', { name: upload.name })}
         />
       )}
     </Attachment>
@@ -158,6 +171,7 @@ function AttachmentTile({
  * component only renders them and the attachment tray built on top.
  */
 export function Composer({
+  sessionId,
   value,
   onChange,
   onSubmit,
@@ -172,6 +186,10 @@ export function Composer({
   error,
   attachments,
 }: {
+  /** Only ever read to build a rehydrated tile's preview URL
+   * (`sessionFileUrl`, in `AttachmentTile` above) — a fresh upload's preview
+   * comes from its own `File` instead, needing no session id at all. */
+  sessionId: string
   value: string
   onChange: (value: string) => void
   onSubmit: () => void
@@ -250,39 +268,76 @@ export function Composer({
 
   const showSend = value.trim().length > 0 || sending
 
+  // Each tray/send/stop control is a Tooltip wrapping the button rather than
+  // the button carrying a `title=` — same reason the status bar's own host
+  // metrics use one (app/status-bar.tsx): a `title` attribute never reaches a
+  // keyboard user, and Base UI's Tooltip already knows to open on focus, not
+  // only on hover. `TooltipTrigger`'s own props (aria-label, onClick,
+  // disabled) merge onto the `render` element the same way `PopoverTrigger`
+  // does for the details button below in session-page.tsx, so the click
+  // handler and the icon-only button both stay exactly as they were.
+  //
+  // `data-slot="button"` is restated on every `TooltipTrigger` below: it
+  // stamps its own literal `data-slot="tooltip-trigger"` onto whatever it
+  // clones its `render` element into, which lands after `InputGroupButton`'s
+  // own (inherited from `Button`) in prop order and so wins — silently
+  // renaming it unless restated here, the same fix `app/tab-bar.tsx` uses for
+  // its own Tooltip-wrapped controls.
   const attachButton = (
-    <InputGroupButton
-      size="icon-xs"
-      aria-label={t('sessions.attachments.attach')}
-      onClick={() => fileInput.current?.click()}
-    >
-      <PlusIcon />
-    </InputGroupButton>
+    <Tooltip>
+      <TooltipTrigger
+        data-slot="button"
+        aria-label={t('sessions.attachments.attach')}
+        onClick={() => fileInput.current?.click()}
+        render={<InputGroupButton size="icon-xs" />}
+      >
+        <PlusIcon />
+      </TooltipTrigger>
+      <TooltipContent>{t('sessions.attachments.attachTooltip')}</TooltipContent>
+    </Tooltip>
   )
 
   const sendButton = showSend && (
-    <InputGroupButton
-      size="icon-xs"
-      aria-label={sending ? t('sessions.sending') : t('sessions.send')}
-      disabled={!canSend}
-      onClick={onSubmit}
-    >
-      {sending ? <Spinner /> : <CornerDownLeftIcon />}
-    </InputGroupButton>
+    <Tooltip>
+      {/* `disabled` goes on the rendered button itself, not (only) on
+          `TooltipTrigger`: the trigger only ever reads its own `disabled` to
+          decide whether hover/focus should be allowed to open the tooltip —
+          it does not forward it to the element `render` points at, so the
+          native `disabled` attribute the composer's own click-does-nothing
+          contract depends on has to be set here too. */}
+      <TooltipTrigger
+        data-slot="button"
+        aria-label={sending ? t('sessions.sending') : t('sessions.send')}
+        disabled={!canSend}
+        onClick={onSubmit}
+        render={<InputGroupButton size="icon-xs" disabled={!canSend} />}
+      >
+        {sending ? <Spinner /> : <CornerDownLeftIcon />}
+      </TooltipTrigger>
+      {/* A disabled trigger never opens its tooltip (Base UI, and
+          `disabled:pointer-events-none` on the button itself besides) — fine
+          here: there is nothing to add to "why can't I send" that the queue
+          line/blocking text above the box does not already say. */}
+      <TooltipContent>{t('sessions.sendTooltip')}</TooltipContent>
+    </Tooltip>
   )
 
   // Sits immediately before send, in whichever addon holds it — compact or
   // expanded never affects whether this shows, only send's own emptiness
   // check does that.
   const stopButton = canStop && (
-    <InputGroupButton
-      size="icon-xs"
-      aria-label={t('sessions.stop')}
-      disabled={stopping}
-      onClick={onStop}
-    >
-      <SquareIcon className="fill-current" />
-    </InputGroupButton>
+    <Tooltip>
+      <TooltipTrigger
+        data-slot="button"
+        aria-label={t('sessions.stop')}
+        disabled={stopping}
+        onClick={onStop}
+        render={<InputGroupButton size="icon-xs" disabled={stopping} />}
+      >
+        <SquareIcon className="fill-current" />
+      </TooltipTrigger>
+      <TooltipContent>{t('sessions.stopTooltip')}</TooltipContent>
+    </Tooltip>
   )
 
   return (
@@ -296,6 +351,7 @@ export function Composer({
             {uploads.map((upload) => (
               <AttachmentTile
                 key={upload.id}
+                sessionId={sessionId}
                 upload={upload}
                 onCancel={onCancel}
                 onRemove={onRemove}
