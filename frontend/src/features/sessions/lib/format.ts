@@ -4,6 +4,11 @@ const TIME = new Intl.DateTimeFormat(undefined, {
   hour12: false,
 })
 
+const DATE_TIME = new Intl.DateTimeFormat(undefined, {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+})
+
 /** `createdAt` parsed, or `null` for anything that isn't a real instant. */
 function parse(createdAt: string): Date | null {
   if (!createdAt) return null
@@ -25,4 +30,14 @@ export function formatTime(createdAt: string): string | null {
 export function formatFullTime(createdAt: string): string | null {
   const date = parse(createdAt)
   return date?.toLocaleString() ?? null
+}
+
+/**
+ * A session's `createdAt` as the reader's own locale date and time — the
+ * sessions table's Date column. Falls back to an empty cell rather than the
+ * literal "Invalid Date" for the same reason `formatTime` does.
+ */
+export function formatDateTime(createdAt: string): string {
+  const date = parse(createdAt)
+  return date ? DATE_TIME.format(date) : ''
 }

@@ -38,21 +38,11 @@ import {
   useSession,
   useSessionMessages,
 } from '../hooks/use-sessions'
+import { STATUS_TONE } from '../lib/status'
 import { Composer } from './composer'
 import { Transcript } from './transcript'
 
 const BUSY = ['queued', 'running']
-
-// A pill's tone for each session status. 'idle'/'queued' get the untoned
-// default: nothing to flag yet.
-const STATUS_TONE = {
-  idle: 'neutral',
-  queued: 'neutral',
-  running: 'accent',
-  interrupted: 'warning',
-  completed: 'success',
-  failed: 'danger',
-} as const
 
 /**
  * A row's position relative to the *viewport*, not its `offsetTop` in the
@@ -681,6 +671,28 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
           },
         ]
       : []),
+    // The list view no longer shows either of these (SessionsTable has no
+    // room for them), so the popover is now the only place they surface.
+    ...(data.baseBranch
+      ? [
+          {
+            id: 'baseBranch',
+            term: t('sessions.meta.baseBranch'),
+            description: <Code>{data.baseBranch}</Code>,
+          },
+        ]
+      : []),
+    ...(data.baseSha
+      ? [
+          {
+            id: 'baseSha',
+            // Convention, not this session's choice: 7 characters is what git
+            // itself abbreviates a sha to.
+            term: t('sessions.meta.baseSha'),
+            description: <Code>{data.baseSha.slice(0, 7)}</Code>,
+          },
+        ]
+      : []),
     // Only an isolated session has a worktree of its own — the same gate the
     // Docker/Editor links above use.
     ...(data.isolated && data.worktreePath
@@ -824,6 +836,15 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
                 <PopoverTitle>{t('sessions.details')}</PopoverTitle>
               </PopoverHeader>
               <DefinitionList layout="stacked" items={detailItems} />
+              {/* The one case this field exists for: the worktree could not
+                  be refreshed before the session started, so it may be
+                  behind. The list view no longer has anywhere to show it —
+                  this popover is now the only place it surfaces. */}
+              {data.baseNote && (
+                <Alert role="status" className="mt-3">
+                  <AlertDescription>{data.baseNote}</AlertDescription>
+                </Alert>
+              )}
             </PopoverContent>
           </Popover>
           <ActionsMenu

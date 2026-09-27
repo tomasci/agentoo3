@@ -192,7 +192,9 @@
     "editorTooltip": "Open a code editor on this session's worktree, in a new browser tab",
     "stopEditor": "Stop editor",
     "editorStopped": "Editor stopped",
-    "empty": "No sessions yet. Create one above — it gets its own git worktree and branch, so it will not collide with anything else running on this project.",
+    "empty": "No sessions yet. Use the New session button above — it gets its own git worktree and branch, so it will not collide with anything else running on this project.",
+    "searchPlaceholder": "Search sessions…",
+    "noMatches": "No sessions match your search.",
     "loadFailed": "Could not load the session",
     "createFailed": "Could not create the session",
     "deleteFailed": "Could not delete the session",
@@ -241,6 +243,11 @@
     "deleteTitle": "Delete session?",
     "actionsFor": "Actions for {{name}}",
     "open": "Open",
+    "table": {
+      "title": "Title",
+      "date": "Date",
+      "status": "Status"
+    },
     "details": "Session details",
     "stop": "Stop",
     "stopTooltip": "Stop the current turn",
