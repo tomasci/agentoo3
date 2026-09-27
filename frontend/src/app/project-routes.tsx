@@ -9,7 +9,9 @@ import { projectTabId } from '@/shared/store/tabs'
 import { useTabs } from './use-tabs'
 
 /** Thin adapters: the route supplies the id, the feature supplies the page. */
-export function ProjectOverviewRoute() {
+// The project's Settings page — `ProjectOverview` keeps its component name,
+// but it now lives at /projects/$projectId/settings rather than the index.
+export function ProjectSettingsRoute() {
   const { projectId } = useParams({ from: '/projects/$projectId' })
   const { data: projects } = useProjects()
   const { closeTab } = useTabs()

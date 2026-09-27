@@ -135,18 +135,19 @@
     }
   },
   "nav": {
+    "systemSessions": "Sessions",
     "sshKeys": "SSH keys",
     "storage": "Storage",
     "project": "Project",
     "sessions": "Sessions",
     "docker": "Docker",
-    "overview": "Overview",
     "library": "Library",
     "projectLibrary": "Agents & skills",
     "system": "System",
     "configuration": "Configuration",
     "prompts": "Prompts",
-    "ideas": "Ideas"
+    "ideas": "Ideas",
+    "projectSettings": "Settings"
   },
   "sshKeys": {
     "heading": "Your keys",
@@ -184,6 +185,34 @@
   },
   "sessions": {
     "heading": "Sessions",
+    "dashboard": {
+      "heading": "Sessions",
+      "lead": "Every session across every project — what's running now, what finished without you checking it, and what's happened lately.",
+      "loadFailed": "Could not load the sessions overview",
+      "table": {
+        "project": "Project",
+        "lastActivity": "Last activity",
+        "finished": "Finished"
+      },
+      "running": {
+        "heading": "Running ({{count}})",
+        "empty": "Nothing running right now."
+      },
+      "unchecked": {
+        "heading": "Unchecked results ({{count}})",
+        "empty": "Nothing waiting on you."
+      },
+      "recent": {
+        "heading": "Recent ({{count}})",
+        "empty": "No activity in this window.",
+        "windowLabel": "Time window",
+        "window": {
+          "1d": "1 day",
+          "3d": "3 days",
+          "7d": "7 days"
+        }
+      }
+    },
     "backToProjects": "All projects",
     "backToIdea": "Back to Idea",
     "docker": "Docker",

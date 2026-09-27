@@ -38,6 +38,7 @@ import { useSessionStream } from '../hooks/use-session-stream'
 import {
   useDeleteSession,
   useInterruptSession,
+  useMarkSessionSeen,
   useSendMessage,
   useSession,
   useSessionMessages,
@@ -134,6 +135,65 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // replays the entire transcript down the stream on top of the REST fetch
   // that just did the same thing.
   useSessionStream(sessionId, messages.isSuccess)
+
+  const markSeen = useMarkSessionSeen()
+  // Guards a duplicate POST while one is actually in flight — cleared the
+  // instant that POST settles, so it says nothing about whether the *result*
+  // it was for has already been marked (see `markedSettledAtRef` below,
+  // which is the guard that actually closes this race).
+  const markingSeenRef = useRef(false)
+  // The `settledAt` this page has already marked seen for this session —
+  // `undefined` until the first success. `markingSeenRef` alone is not
+  // enough: a stream `status` event (use-session-stream.ts) can refetch this
+  // row while the seen POST is still pending, reading the server's
+  // pre-write state (still `unchecked: true`, same `settledAt`); query-core
+  // does not guarantee that GET's response lands *before* the POST's own, so
+  // it can arrive after `markingSeenRef` has already been reset by the
+  // POST's `onSettled`, reinstating `unchecked: true` in the cache with
+  // nothing new to say. Keying on `settledAt` rather than a boolean is what
+  // lets a *later* turn — a genuinely new `settledAt` — still get marked.
+  const markedSettledAtRef = useRef<string | null | undefined>(undefined)
+  const unchecked = session.data?.unchecked ?? false
+  const settledAt = session.data?.settledAt ?? null
+  // `SessionRoute` renders this component with no key (see the session-switch
+  // layout effect above, same reasoning), so both guards have to be reset by
+  // hand on a session switch — left alone, a session opened right after one
+  // whose result happened to share a `settledAt` (or simply mid-POST) would
+  // read as "already marked" from a result that was never its own.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId is the trigger, not a value read inside
+  useEffect(() => {
+    markingSeenRef.current = false
+    markedSettledAtRef.current = undefined
+  }, [sessionId])
+  // Bookkeeping, not something the operator asked for: a settled turn reads
+  // as "checked" the instant the operator can actually see it on this page.
+  // Fires once now — covering a session that was already unchecked when this
+  // page mounted, or one a stream `status` event just flipped while the tab
+  // was already visible — and again on every `visibilitychange` while
+  // `unchecked` is still true, covering a turn that settled while this tab
+  // sat hidden behind another.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: markSeen.mutate is a fresh function identity every render; only sessionId/unchecked/settledAt should retrigger this
+  useEffect(() => {
+    if (!unchecked || settledAt === markedSettledAtRef.current) return
+    const attempt = () => {
+      if (markingSeenRef.current || document.visibilityState !== 'visible') return
+      markingSeenRef.current = true
+      markSeen.mutate(
+        { path: { id: sessionId } },
+        {
+          onSuccess: (data) => {
+            markedSettledAtRef.current = data.settledAt
+          },
+          onSettled: () => {
+            markingSeenRef.current = false
+          },
+        },
+      )
+    }
+    attempt()
+    document.addEventListener('visibilitychange', attempt)
+    return () => document.removeEventListener('visibilitychange', attempt)
+  }, [unchecked, settledAt, sessionId])
 
   const files = useSessionFiles(sessionId)
   // Attachment ids are rehydrated and kept in sync with the tray entirely

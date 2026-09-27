@@ -757,7 +757,7 @@ const bareShellRoute = createRoute({
   path: '/projects/p1/sessions/s1/editor',
   component: () => <div>bare child</div>,
 })
-// Not `/library` — that is the system tab's own default `path`
+// Not `/sessions` — that is the system tab's own default `path`
 // (shared/store/tabs.ts's `SYSTEM_HOME`), so `rememberPath` would see no
 // actual change and never call `setTabs`, leaving `localStorage` untouched
 // for a reason that has nothing to do with this test's own claim.

@@ -172,6 +172,18 @@ export const sessions = pgTable(
     // are otherwise indistinguishable from the row alone.
     heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
 
+    // When a turn last ended with a result for the operator to look at — set
+    // to now() by every write that moves status to 'completed', 'failed' or
+    // 'interrupted' (session-run.worker.ts's setStatus, turn-reconcile's own
+    // direct write), and left untouched by a move to 'idle'/'queued'/'running'.
+    // Null on every session that predates this column: there is no backfill,
+    // deliberately, so an upgrade does not retroactively declare a pile of old
+    // sessions "unchecked" (see "Unchecked results" in backend/README.md).
+    settledAt: timestamp('settled_at', { withTimezone: true }),
+    // When the operator last opened this session (POST /sessions/{id}/seen).
+    // Same no-backfill reasoning as settledAt above.
+    seenAt: timestamp('seen_at', { withTimezone: true }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

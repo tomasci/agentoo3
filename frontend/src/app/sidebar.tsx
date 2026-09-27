@@ -4,7 +4,6 @@ import {
   Container,
   HardDrive,
   KeyRound,
-  LayoutDashboard,
   Library,
   Lightbulb,
   MessageSquareText,
@@ -14,10 +13,11 @@ import {
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useProjects } from '@/features/projects'
-import type { TabKind } from '@/shared/store/tabs'
+import { SYSTEM_HOME, type TabKind } from '@/shared/store/tabs'
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarHeader,
   SidebarMenu,
@@ -76,7 +76,7 @@ function SystemNav() {
         tagline={t('app.subtitle')}
         render={(content) => (
           <Link
-            to="/library"
+            to={SYSTEM_HOME}
             className="block rounded-md outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
           >
             {content}
@@ -86,6 +86,19 @@ function SystemNav() {
       <SidebarContent>
         <SidebarGroup>
           <SidebarMenu className="gap-1">
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                render={
+                  <Link
+                    to="/sessions"
+                    activeProps={{ 'aria-current': 'page', 'data-active': '' }}
+                  />
+                }
+              >
+                <MessagesSquare />
+                <span>{t('nav.systemSessions')}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton
                 render={
@@ -186,21 +199,9 @@ function ProjectNav({ projectId }: { projectId: string }) {
       <SidebarContent>
         <SidebarGroup>
           <SidebarMenu className="gap-1">
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                render={
-                  <Link
-                    to="/projects/$projectId"
-                    params={{ projectId }}
-                    activeProps={{ 'aria-current': 'page', 'data-active': '' }}
-                    activeOptions={{ exact: true }}
-                  />
-                }
-              >
-                <LayoutDashboard />
-                <span>{t('nav.overview')}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
+            {/* Not exact: the session detail route (`/sessions/$sessionId`) is a
+                child page of the same section, and should keep this item
+                current rather than going dark once a session is opened. */}
             <SidebarMenuItem>
               <SidebarMenuButton
                 render={
@@ -264,6 +265,27 @@ function ProjectNav({ projectId }: { projectId: string }) {
           </SidebarMenu>
         </SidebarGroup>
       </SidebarContent>
+      {/* Pinned to the bottom edge: `SidebarContent` above takes `flex-1` of the
+          column, so this footer sits below whatever content there is rather
+          than trailing directly after it. */}
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              render={
+                <Link
+                  to="/projects/$projectId/settings"
+                  params={{ projectId }}
+                  activeProps={{ 'aria-current': 'page', 'data-active': '' }}
+                />
+              }
+            >
+              <Settings />
+              <span>{t('nav.projectSettings')}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
     </>
   )
 }

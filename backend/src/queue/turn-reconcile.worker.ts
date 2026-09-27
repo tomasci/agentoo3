@@ -109,7 +109,17 @@ export async function reconcileStrandedTurns(now: Date = new Date()): Promise<nu
     if (!rendered) continue
     await db
       .update(sessions)
-      .set({ status: 'failed', lastError: sanitizeForDb(detail), updatedAt: new Date() })
+      .set({
+        status: 'failed',
+        // A move to 'failed' is a turn ending with a result for the operator
+        // to look at (see setStatus's own comment, session-run.worker.ts, and
+        // "Unchecked results" in backend/README.md) — this writes the status
+        // directly rather than through that helper, so it has to set
+        // settledAt itself too.
+        settledAt: new Date(),
+        lastError: sanitizeForDb(detail),
+        updatedAt: new Date(),
+      })
       .where(eq(sessions.id, row.sessionId))
     recovered++
   }
