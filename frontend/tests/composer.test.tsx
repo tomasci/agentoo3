@@ -115,7 +115,6 @@ const props = (o: Partial<ComposerProps> = {}): ComposerProps => ({
   onKeyDown: () => {},
   sending: false,
   canSend: true,
-  orchestratorMissing: false,
   queueLine: '',
   error: null,
   attachments: attachments(),
@@ -205,11 +204,10 @@ const SENDING = 'sessions.sending'
 
 // --- 1. footer layout -------------------------------------------------------
 
-test('root is a <footer> ordering queue line, tray, input box, then the two alerts', () => {
+test('root is a <footer> ordering queue line, tray, input box, then the alert', () => {
   mount(
     props({
       queueLine: 'QUEUE-LINE',
-      orchestratorMissing: true,
       error: 'SEND-FAILED',
       attachments: attachments({ uploads: [upload({ file: mkFile('a.txt', 'text/plain') })] }),
     }),
@@ -221,28 +219,23 @@ test('root is a <footer> ordering queue line, tray, input box, then the two aler
   const queue = Array.from(f.querySelectorAll('span')).find((s) => s.textContent === 'QUEUE-LINE')
   const tray = q('[data-slot="attachment-group"]')
   const group = inputGroup()
-  const status = q('[role="status"]', f)
   const alerts = qa('[data-slot="alert"], [role="alert"]', f)
   const destructive = alerts.find((a) => a.textContent?.includes('SEND-FAILED'))
 
   expect(queue).toBeDefined()
   expect(tray).not.toBeNull()
-  expect(status?.textContent).toContain('sessions.needsOrchestrator')
   expect(destructive).toBeDefined()
-  if (!queue || !tray || !status || !destructive) throw new Error('missing a region')
+  if (!queue || !tray || !destructive) throw new Error('missing a region')
 
   expect(before(queue, tray)).toBe(true)
   expect(before(tray, group)).toBe(true)
-  expect(before(group, status)).toBe(true)
-  expect(before(status, destructive)).toBe(true)
-  // Neither alert lives inside the input box.
-  expect(group.contains(status)).toBe(false)
+  expect(before(group, destructive)).toBe(true)
+  // The alert does not live inside the input box.
   expect(group.contains(destructive)).toBe(false)
 })
 
-test('an empty queueLine renders no queue line, and no alerts without their flags', () => {
+test('an empty queueLine renders no queue line, and no alert without its flag', () => {
   mount(props())
-  expect(q('[role="status"]')).toBeNull()
   expect(qa('[data-slot="alert"]').length).toBe(0)
   // The footer holds only the hidden file input and the input group.
   const kids = Array.from(footer().children)

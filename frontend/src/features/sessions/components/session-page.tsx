@@ -1,12 +1,15 @@
-import { Link } from '@tanstack/react-router'
+import { useQueryClient } from '@tanstack/react-query'
+import { Link, useNavigate } from '@tanstack/react-router'
 import { InfoIcon, OctagonXIcon } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useEditorStop } from '@/features/editor'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
+import { getApiSessionsIdQueryKey } from '@/shared/api/generated/hooks/useGetApiSessionsId'
 import {
   ActionsMenu,
   Code,
+  ConfirmDialog,
   type DefinitionItem,
   DefinitionList,
   Loading,
@@ -33,11 +36,13 @@ import {
 } from '../hooks/use-session-files'
 import { useSessionStream } from '../hooks/use-session-stream'
 import {
+  useDeleteSession,
   useInterruptSession,
   useSendMessage,
   useSession,
   useSessionMessages,
 } from '../hooks/use-sessions'
+import { sessionMessagesKey } from '../lib/message-cache'
 import { STATUS_TONE } from '../lib/status'
 import { Composer } from './composer'
 import { Transcript } from './transcript'
@@ -105,6 +110,8 @@ function inLoadZone(sentinel: HTMLElement, scroller: HTMLElement): boolean {
 // longer destructured: the only thing that read it was the back-to-list button.
 export function SessionPage({ sessionId }: { projectId: string; sessionId: string }) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const session = useSession(sessionId)
   const messages = useSessionMessages(sessionId)
   const send = useSendMessage(sessionId)
@@ -116,6 +123,11 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // `session.data` — and so this hook's real `projectId` — is guaranteed to
   // be in.
   const stopEditor = useEditorStop(session.data?.projectId ?? '', sessionId)
+  // Same fallback reasoning as `stopEditor` above: the Delete menu item can
+  // only ever be selected once `session.data` is in, but the hook itself has
+  // to be called on every render regardless.
+  const remove = useDeleteSession(session.data?.projectId ?? '')
+  const [confirmDelete, setConfirmDelete] = useState(false)
   // Gated on the messages query's own success, not just mount: opening the
   // stream before that first page has landed leaves nothing in the cache to
   // seed `lastSeq` from, so the backend treats it as a brand new reader and
@@ -739,6 +751,43 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
     }
   }
 
+  const onDeleteConfirm = () => {
+    remove.mutate(
+      { path: { id: sessionId } },
+      {
+        onSuccess: () => {
+          // `navigate()` is async — TanStack Router has not yet swapped the
+          // route match, so this component and its `useSession`/
+          // `useSessionMessages` observers are still mounted and still
+          // subscribed the instant this callback runs. Removing the queries
+          // now, rather than after the navigation settles, would notify
+          // those still-live observers that their query is gone, and an
+          // active observer with nothing left in the cache refetches
+          // immediately — a request that 404s against a session that no
+          // longer exists. Not merely invalidating either: once this page
+          // *is* unmounted, removing (rather than leaving invalidated data
+          // sitting there) is what keeps a later revisit from refetching a
+          // session id that no longer exists. `void`, not `await`, so this
+          // does not delay `onSettled` below — the confirm dialog closes as
+          // soon as the mutation itself settles, not once navigation has
+          // too.
+          void navigate({
+            to: '/projects/$projectId/sessions',
+            params: { projectId: data.projectId },
+          }).then(() => {
+            queryClient.removeQueries({
+              queryKey: getApiSessionsIdQueryKey({ path: { id: sessionId } }),
+            })
+            queryClient.removeQueries({ queryKey: sessionMessagesKey(sessionId) })
+          })
+        },
+        onError: (e) =>
+          toast.add({ type: 'error', title: apiErrorMessage(e, t('sessions.deleteFailed')) }),
+        onSettled: () => setConfirmDelete(false),
+      },
+    )
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 p-4 lg:p-6">
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b pb-2">
@@ -895,10 +944,25 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
                     },
                   ]
                 : []),
+              {
+                id: 'delete',
+                label: t('common.delete'),
+                destructive: true,
+                onSelect: () => setConfirmDelete(true),
+              },
             ]}
           />
         </div>
       </header>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title={t('sessions.deleteTitle')}
+        description={t('sessions.deleteConfirm')}
+        busy={remove.isPending}
+        onConfirm={onDeleteConfirm}
+      />
 
       {data.lastError && (
         <Alert variant="destructive" className="shrink-0">
@@ -990,7 +1054,6 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
             },
           )
         }
-        orchestratorMissing={!data.orchestrator}
         queueLine={queueLine}
         error={error}
         attachments={{

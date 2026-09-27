@@ -161,12 +161,31 @@ async function claimSelectedIdeas(): Promise<number> {
 
 async function resolveSession(idea: IdeaRow, prompt: IdeaPromptRow): Promise<string> {
   if (idea.sessionId) return idea.sessionId
+
+  // createSession's own orchestrator is required now (schema.ts), so
+  // idea.orchestrator — nullable, since ideas never had that requirement (see
+  // this feature's own create/patch schemas) — has to be checked here rather
+  // than the ternary spread this used to be. In the ordinary sweep this is
+  // unreachable: createIdeaPrompt already refuses to generate a prompt for an
+  // orchestrator-less idea (features/ideas/service.ts), so a run never gets
+  // this far without one. It is reachable via a race dispatchRun's own docblock
+  // already names as a real gap: the idea is patched to clear its orchestrator
+  // (PATCH /ideas/{id} allows null) after this run's prompt already turned
+  // ready, and before the sweep dispatches it. Thrown, not asserted, so the
+  // catch around this call (dispatchRun) closes the run needs_attention with a
+  // lastError that names the missing orchestrator, instead of the type system
+  // being satisfied by silently coercing null into something createSession
+  // would reject anyway.
+  if (!idea.orchestrator) {
+    throw new Error(`Idea ${idea.id} has no orchestrator; cannot create a session for it`)
+  }
+
   const session = await createSession(idea.projectId, {
     // generatedTitle is only ever null before a prompt reaches 'ready', which
     // dispatchRun's own caller already checked — but the fallback keeps this
     // honest instead of asserting it.
     ...(prompt.generatedTitle ? { title: prompt.generatedTitle } : {}),
-    ...(idea.orchestrator ? { orchestrator: idea.orchestrator } : {}),
+    orchestrator: idea.orchestrator,
     ...(idea.baseBranch ? { baseBranch: idea.baseBranch } : {}),
     ...(idea.maxBudgetUsd !== null ? { maxBudgetUsd: idea.maxBudgetUsd } : {}),
   })

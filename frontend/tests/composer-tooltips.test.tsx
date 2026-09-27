@@ -48,7 +48,6 @@ const props = (o: Partial<ComposerProps> = {}): ComposerProps => ({
   onKeyDown: () => {},
   sending: false,
   canSend: true,
-  orchestratorMissing: false,
   queueLine: '',
   error: null,
   attachments: {

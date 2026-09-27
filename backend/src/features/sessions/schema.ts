@@ -62,14 +62,29 @@ export const sessionSchema = z.object({
 })
 export type SessionDto = z.infer<typeof sessionSchema>
 
+/**
+ * A role:orchestrator agent's name, shared between create and update.
+ *
+ * `.trim()` runs before `.min(1)`, so a whitespace-only value ("   ", or a
+ * stray "\t\n ") fails the length check the same as an empty string instead
+ * of slipping through as "non-empty" — sendMessage's own guard further down
+ * this feature only checks truthiness, so a session that reached this schema
+ * with an orchestrator that is technically a non-empty string but entirely
+ * whitespace would never be caught there, and would run with a blank one.
+ * The trim is also what makes a value like "  lead  " persist as "lead"
+ * rather than whatever whitespace the client happened to send.
+ */
+const orchestratorName = z.string().trim().min(1).max(64)
+
 export const createSessionSchema = z.object({
   title: z.string().min(1).max(200).optional(),
-  orchestrator: z
-    .string()
-    .min(1)
-    .max(64)
-    .optional()
-    .openapi({ description: 'Name of a role:orchestrator agent from the library' }),
+  // Required, not optional: a session with no orchestrator can never run a
+  // turn (sendMessage's own guard, service.ts), so refusing to create one is
+  // cheaper than creating a session that can only ever 400 on its first
+  // message.
+  orchestrator: orchestratorName.openapi({
+    description: 'Name of a role:orchestrator agent from the library',
+  }),
   maxBudgetUsd: z
     .number()
     .int()
@@ -102,7 +117,10 @@ export type CreateSessionInput = z.infer<typeof createSessionSchema>
 export const updateSessionSchema = z
   .object({
     title: z.string().min(1).max(200).optional(),
-    orchestrator: z.string().min(1).max(64).nullable().optional(),
+    // Optional (may be left unchanged) but, unlike create, not nullable: a
+    // session that already has an orchestrator must not be able to lose it
+    // through an update, only swap it for another one.
+    orchestrator: orchestratorName.optional(),
     maxBudgetUsd: z.number().int().positive().max(1000).nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update' })
