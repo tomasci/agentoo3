@@ -41,6 +41,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
 import type { GetApiSessionsIdStatus200 as SessionDto } from '../src/shared/api/generated/types/GetApiSessionsId'
+import { composerModeAtom } from '../src/shared/store/ui'
 import { mockModule } from './mock-module'
 
 // Never `.use(initReactI18next)` — see tests/session-page-scroll.test.tsx.
@@ -223,6 +224,11 @@ beforeEach(() => {
   // keyed by session id — see tests/session-page-scroll.test.tsx's own
   // comment on the same clear, for the same reason.
   localStorage.clear()
+  // Pinned *after* the clear above — see tests/session-page-scroll.test.tsx's
+  // own comment on why the order matters (`composerModeAtom`'s `onMount`
+  // re-reads from storage on first mount, discarding an earlier `store.set`
+  // if storage was cleared in between).
+  store.set(composerModeAtom, 'raw')
 })
 
 afterEach(async () => {

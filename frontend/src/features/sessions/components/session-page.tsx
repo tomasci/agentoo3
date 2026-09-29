@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate } from '@tanstack/react-router'
+import { useAtom } from 'jotai'
 import { InfoIcon, OctagonXIcon } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -16,6 +17,7 @@ import {
   StatusBadge,
   toast,
 } from '@/shared/components'
+import { composerModeAtom } from '@/shared/store/ui'
 import { Alert, AlertDescription } from '@/shared/ui/alert'
 import { Button, buttonVariants } from '@/shared/ui/button'
 import {
@@ -203,6 +205,10 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // The composer's own text for this session — see use-session-draft.ts's
   // own comment on why this is `useSyncExternalStore`, not a `useState`.
   const draft = useSessionDraft(sessionId)
+  // Per-browser, not per-session — a reader who prefers editing raw
+  // markdown expects every session's composer to open that way, not just
+  // the one they were last on.
+  const [composerMode, setComposerMode] = useAtom(composerModeAtom)
 
   const [error, setError] = useState<string | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
@@ -1093,14 +1099,8 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
         value={draft.text}
         onChange={draft.setText}
         onSubmit={submit}
-        onKeyDown={(e) => {
-          // Enter sends; Shift+Enter is a newline. A prompt is usually one
-          // line, and reaching for the mouse for every send is worse.
-          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-            e.preventDefault()
-            submit()
-          }
-        }}
+        mode={composerMode}
+        onModeChange={setComposerMode}
         sending={send.isPending}
         canSend={!send.isPending && draft.text.trim().length > 0 && uploads.pendingCount === 0}
         canStop={busy}

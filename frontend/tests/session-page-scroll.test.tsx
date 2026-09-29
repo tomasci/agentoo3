@@ -67,6 +67,7 @@ import { createStore, Provider as JotaiProvider } from 'jotai'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
+import { composerModeAtom } from '../src/shared/store/ui'
 import { mockModule } from './mock-module'
 
 // Every label this file finds a control or a state by is a raw key
@@ -509,6 +510,14 @@ beforeEach(() => {
   // test leaves mid-typed without ever sending) would still be sitting in
   // storage for the next test's fresh `mount()` to pick up.
   localStorage.clear()
+  // Every test here is written against the raw textarea. Pinned *after* the
+  // clear above, not before: `composerModeAtom`'s `onMount` (jotai's
+  // `atomWithStorage`) re-reads from storage the instant something first
+  // subscribes to it — SessionPage's own `useAtom`, the first time this
+  // `store` actually renders — discarding whatever `store.set` wrote here if
+  // a `localStorage.clear()` still ran in between. Real, not a happy-dom
+  // quirk: the same clear-after-set would lose the pin in a real browser too.
+  store.set(composerModeAtom, 'raw')
 })
 
 /**
