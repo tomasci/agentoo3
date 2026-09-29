@@ -8,6 +8,7 @@ come next.
 | Concern | Choice |
 |---|---|
 | UI | React 19, shadcn/ui (style `base-nova`) on Base UI primitives, default neutral theme |
+| Markdown editing | CodeMirror 6, with a repo-owned Obsidian-style live-preview layer (`shared/lib/markdown-live-preview.ts`) — the session composer's visual mode; see "Styling" below, and that file's own comment for why not a rich-text editor |
 | Build | Vite 8, Bun as runtime and package manager |
 | Styling | Tailwind v4 (`@tailwindcss/vite`) + shadcn's own generated CSS variables — see "Styling" below |
 | Icons | lucide-react |
@@ -122,6 +123,20 @@ one. The rule that keeps it that way:
   variables onto the shadcn variables with arbitrary-property classes
   (`features/ideas/canvas/idea-flow-canvas.tsx`), so the canvas follows
   `.dark` with no second light/dark signal of its own.
+- The markdown editor (`shared/components/markdown-editor.tsx`) is a
+  different kind of exception — it adds no stylesheet of its own, but
+  CodeMirror injects its own base one at runtime as a plain, unlayered
+  `<style>` tag, while Tailwind v4 wraps every utility in `@layer utilities`;
+  an unlayered rule beats a layered one regardless of source order or
+  specificity, so anything CM sets (its monospace `.cm-scroller` font, the
+  padding baked into `.cm-content`/`.cm-line`, its own focus outline) has to
+  be overridden with Tailwind's `!` modifier to win at all, from a wrapper
+  `className` — still literal utility classes, still following `.dark`, never
+  a colour literal. The live-preview layer built on top
+  (`shared/lib/markdown-live-preview.ts`) follows the same semantic-colour
+  rule as everywhere else in its own decoration classes, which live as
+  literal strings in that file rather than here, since Tailwind's scanner
+  never sees a class name assembled at runtime.
 
 ### Adding a shadcn component
 

@@ -33,6 +33,7 @@
 // tests/session-page-header.test.tsx on why.
 
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
+import { EditorView } from '@codemirror/view'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import i18next from 'i18next'
 import { createStore, Provider as JotaiProvider } from 'jotai'
@@ -42,6 +43,7 @@ import { I18nextProvider } from 'react-i18next'
 import type { SessionFile } from '../src/features/sessions/hooks/use-session-files'
 import { updateDraft } from '../src/features/sessions/lib/drafts'
 import type { GetApiSessionsIdStatus200 as SessionDto } from '../src/shared/api/generated/types/GetApiSessionsId'
+import { composerModeAtom } from '../src/shared/store/ui'
 import { mockModule } from './mock-module'
 import { type StorageWrite, swapLocalStorage } from './storage-spy'
 
@@ -225,6 +227,9 @@ async function reload() {
   client.clear()
   client = newClient()
   store = createStore()
+  // Every test here is written against the raw textarea; a reload must not
+  // hand it a fresh visual-mode editor instead.
+  store.set(composerModeAtom, 'raw')
 }
 
 let seq = 0
@@ -292,6 +297,8 @@ beforeEach(() => {
   localStorage.clear()
   client = newClient()
   store = createStore()
+  // Pinned to raw — see `reload`'s own comment above.
+  store.set(composerModeAtom, 'raw')
 })
 
 afterEach(async () => {
@@ -558,4 +565,88 @@ test('a failed send keeps the tiles and their stored ids for the retry', async (
   await clickSend()
   expect(tiles()).toEqual(['r1.txt:done'])
   expect(stored(S)).toEqual({ text: 'retry me', fileIds: ['r1'] })
+})
+
+// --- D9. visual mode: the same drafting contract, through CodeMirror ---------
+//
+// Everything above is written against the raw textarea (`store.set` in
+// `beforeEach`/`reload` pins it there). This section overrides that per test
+// to check the same claims hold for the visual surface `MarkdownEditor`
+// renders instead — no textarea, no `use-session-draft.ts`/`lib/drafts.ts`
+// change of any kind, so the same storage spy from D7 is reused verbatim.
+
+const cmView = () => {
+  const el = container?.querySelector('.cm-editor')
+  if (!el) throw new Error('no CodeMirror editor mounted')
+  const view = EditorView.findFromDOM(el as HTMLElement)
+  if (!view) throw new Error('no CodeMirror view for the mounted editor')
+  return view
+}
+async function typeInEditor(value: string) {
+  await act(async () => {
+    cmView().dispatch({
+      changes: { from: 0, to: cmView().state.doc.length, insert: value },
+      userEvent: 'input.type',
+    })
+  })
+}
+
+test('visual mode: A -> B session switch on one mounted page writes nothing to storage', async () => {
+  store.set(composerModeAtom, 'visual')
+  await show('s-a')
+  await typeInEditor('alpha text')
+  expect(stored('s-a')).toEqual({ text: 'alpha text', fileIds: [] })
+
+  restoreStorage = swapLocalStorage({ onWrite: (w) => writes.push(w) })
+  await show('s-b')
+  await settle()
+  restoreStorage()
+
+  expect(cmView().state.doc.toString()).toBe('')
+  expect(writes).toEqual([])
+})
+
+test('visual mode: typing after the switch lands only in the new session', async () => {
+  store.set(composerModeAtom, 'visual')
+  await show('s-a')
+  await typeInEditor('alpha text')
+  await show('s-b')
+  expect(cmView().state.doc.toString()).toBe('')
+  await typeInEditor('beta text')
+  await show('s-a')
+  expect(cmView().state.doc.toString()).toBe('alpha text')
+  expect(stored('s-a')).toEqual({ text: 'alpha text', fileIds: [] })
+  expect(stored('s-b')).toEqual({ text: 'beta text', fileIds: [] })
+})
+
+test('visual mode: a successful send clears the editor and the stored text', async () => {
+  store.set(composerModeAtom, 'visual')
+  await show('s-a')
+  await typeInEditor('hello there')
+  await clickSend()
+  expect(sends).toEqual([{ sessionId: 's-a', body: { text: 'hello there' } }])
+  expect(cmView().state.doc.toString()).toBe('')
+  expect(localStorage.getItem(key('s-a'))).toBeNull()
+})
+
+test('visual mode: a failed send restores the text into what send had just emptied', async () => {
+  sendReject = { response: { status: 500, data: { error: 'boom' } } }
+  store.set(composerModeAtom, 'visual')
+  await show('s-a')
+  await typeInEditor('please work')
+  await clickSend()
+  expect(cmView().state.doc.toString()).toBe('please work')
+  expect(stored('s-a')).toEqual({ text: 'please work', fileIds: [] })
+})
+
+test('visual mode: a reload restores the text into the editor', async () => {
+  store.set(composerModeAtom, 'visual')
+  await show('s-a')
+  await typeInEditor('survives reload')
+  await reload()
+  // `reload()` pins a fresh store back to raw (every other test in this file
+  // wants that) — this test is the one exception.
+  store.set(composerModeAtom, 'visual')
+  await show('s-a')
+  expect(cmView().state.doc.toString()).toBe('survives reload')
 })

@@ -1,9 +1,14 @@
-import { CornerDownLeftIcon, FileIcon, PlusIcon, SquareIcon, XIcon } from 'lucide-react'
-import type { DragEvent, KeyboardEvent } from 'react'
+import { CodeIcon, CornerDownLeftIcon, FileIcon, PlusIcon, SquareIcon, XIcon } from 'lucide-react'
+import type { DragEvent } from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import { formatBytes } from '@/features/system'
+import {
+  MarkdownEditor,
+  type MarkdownEditorHandle,
+  type MarkdownEditorSelection,
+} from '@/shared/components'
 import { Alert, AlertDescription } from '@/shared/ui/alert'
 import {
   Attachment,
@@ -22,6 +27,7 @@ import {
   InputGroupTextarea,
 } from '@/shared/ui/input-group'
 import { Spinner } from '@/shared/ui/spinner'
+import { Toggle } from '@/shared/ui/toggle'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import type { AttachmentUpload, SessionFilesUsage } from '../hooks/use-session-files'
 import { attachmentDescription, isInlineImage, sessionFileUrl } from '../lib/attachments'
@@ -147,6 +153,53 @@ function AttachmentTile({
   )
 }
 
+/** What the surface being left behind had — its selection and whether it was
+ * actually focused — captured so the surface taking over can put the caret
+ * back in the same place instead of always landing at the end. Neither
+ * surface reads this reactively: the raw textarea gets it applied
+ * imperatively (`setSelectionRange`, native — there is no "initial selection"
+ * prop for a `<textarea>`), the editor gets it as `initialSelection`, a prop
+ * `MarkdownEditor` only ever reads once, at its own mount. */
+interface CaretHandoff {
+  anchor: number
+  head: number
+  focused: boolean
+}
+
+/**
+ * Whether a surface's measured height indicates the text has actually
+ * wrapped past one line, given a `baseline` captured while it was empty. A
+ * plain function of numbers, not DOM — so it is unit-testable without a
+ * layout engine, which happy-dom does not have (see this repo's other
+ * composer tests on why the wrap-by-width path itself stays untested there).
+ *
+ * The raw textarea signals a wrap two ways, depending on whether the browser
+ * supports CSS `field-sizing: content` (`shared/ui/textarea.tsx`): where it
+ * does, the element grows with its content and never overflows, so a wrap
+ * only shows up as `clientHeight` growing past the baseline; where it does
+ * not, the element stays fixed at the baseline and a wrap instead overflows
+ * it (`scrollHeight > clientHeight`). Either signal is exact for a plain
+ * textarea — nothing else changes a single line's own height.
+ *
+ * The visual surface's `clientHeight` is not that clean: inline code's own
+ * padding, a heading's larger line-height, or simply crossing the `md`
+ * breakpoint between the baseline being captured and this check each grow
+ * one *unwrapped* line by a few pixels — enough to clear `baseline + 1`
+ * without a second line ever existing (found by an operator testing the
+ * real thing in a browser, not by anything happy-dom could have caught). A
+ * genuine wrap roughly doubles the line box, so a coarser cutoff — over one
+ * and a half lines — is what actually tells "still one line, just taller"
+ * from "there are now two" apart.
+ */
+export function hasWrapped(
+  surface: 'raw' | 'visual',
+  measurements: { clientHeight: number; scrollHeight: number; baseline: number },
+): boolean {
+  const { clientHeight, scrollHeight, baseline } = measurements
+  if (surface === 'raw') return scrollHeight > clientHeight || clientHeight > baseline + 1
+  return clientHeight > baseline * 1.5
+}
+
 /**
  * The message composer: text, attachments, send. Extracted from
  * `session-page.tsx` once attachments gave it enough of its own concerns
@@ -159,6 +212,19 @@ function AttachmentTile({
  * line — see the `expanded` state below for how that switch is detected and
  * why it is one-way once tripped.
  *
+ * Two text surfaces share the same box: `mode === 'visual'` renders
+ * `MarkdownEditor` (CodeMirror plus `shared/lib/markdown-live-preview.ts`),
+ * showing markdown formatting inline as it is typed; `mode === 'raw'` is
+ * today's plain `InputGroupTextarea`, unchanged. Either way `value` stays a
+ * plain markdown string — this component (and `SessionPage` above it) never
+ * knows which surface is currently showing it. CodeMirror rather than a
+ * rich-text editor (Tiptap, Lexical, …) for exactly that reason: a rich-text
+ * model parses markdown in and re-serializes it back out, escaping literal
+ * markup on the way (`snake_case` grows a backslash, a stray `<tag>` in the
+ * prompt gets entity-escaped) — fine for prose, not for text that is itself
+ * an agent prompt or a shell-glob-laden file path. CodeMirror's document
+ * *is* the markdown string; nothing here ever re-parses or reserializes it.
+ *
  * `submit`/`text` stay owned by `SessionPage` — see its own comment on why
  * `text` clears the moment Enter is pressed rather than in `onSuccess` — this
  * component only renders them and the attachment tray built on top.
@@ -168,7 +234,8 @@ export function Composer({
   value,
   onChange,
   onSubmit,
-  onKeyDown,
+  mode,
+  onModeChange,
   sending,
   canSend,
   canStop,
@@ -185,7 +252,11 @@ export function Composer({
   value: string
   onChange: (value: string) => void
   onSubmit: () => void
-  onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void
+  /** Anything other than the literal `'raw'` renders as `'visual'` — the
+   * same rule `composerModeAtom` documents for a corrupted or pre-this-
+   * feature stored value. */
+  mode: 'visual' | 'raw'
+  onModeChange: (mode: 'visual' | 'raw') => void
   sending: boolean
   canSend: boolean
   /** Whether the session can currently be stopped — renders the stop button
@@ -200,44 +271,47 @@ export function Composer({
   attachments: ComposerAttachments
 }) {
   const { t } = useTranslation()
+  const isRaw = mode === 'raw'
   const fileInput = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const editorRef = useRef<MarkdownEditorHandle>(null)
   const { uploads, usage, usagePending, usageError, pendingCount, onAttach, onCancel, onRemove } =
     attachments
 
   // Whether the box has grown past one line — a literal newline, or wrapped
-  // text — and switched to the expanded layout (full-width textarea, +/send
-  // moved to a row underneath). `singleLineHeight` is the one-line baseline
-  // this compares against, captured (and recaptured, every time the box goes
-  // back to empty) from the textarea's own `clientHeight`.
+  // text — and switched to the expanded layout (full-width text surface,
+  // +/send moved to a row underneath). `singleLineHeight` is the one-line
+  // baseline this compares against, captured (and recaptured, every time the
+  // box goes back to empty) from the active surface's own `clientHeight` —
+  // one baseline per surface, since the textarea and the editor's own
+  // contenteditable are not the same height for the same one line of text.
   const [expanded, setExpanded] = useState(false)
-  const singleLineHeight = useRef<number | null>(null)
+  const singleLineHeight = useRef<{ raw: number | null; visual: number | null }>({
+    raw: null,
+    visual: null,
+  })
 
-  // Keyed on `value` rather than checked inside the textarea's own
+  // Keyed on `value`/`mode` rather than checked inside the surface's own
   // `onChange`: by the time this effect runs the DOM node's layout already
   // reflects the just-committed value on every browser, which a raw event
   // handler reading the same node mid-event cannot promise.
   //
-  // Two independent signs of "wrapped", not one, because which one fires
-  // depends on the browser: where CSS `field-sizing: content` is supported
-  // (`shared/ui/textarea.tsx`) the element grows to fit its content and never
-  // overflows, so a real wrap only ever shows up as `clientHeight` growing
-  // past the one-line baseline; where it is not supported, the element stays
-  // fixed at that baseline and a real wrap instead overflows it, which
-  // `scrollHeight > clientHeight` catches. Neither is ever true for one
-  // ordinary line, in either browser.
+  // What actually counts as "wrapped" is `hasWrapped`, above — different
+  // per surface, and worth its own comment rather than repeating it here.
   //
-  // Sticky once true — checked before either measurement fires, and cleared
+  // Sticky once true — checked before `hasWrapped` ever runs, and cleared
   // only by the `value === ''` branch above it — because expanding widens
-  // the textarea, which can make the very same text fit back on one line.
+  // the box, which can make the very same text fit back on one line.
   // Without this, that would immediately collapse it again: a resize loop
   // the reader would see as the box breathing in and out while they type.
+  // Switching surfaces alone never trips it either way — only re-baselines
+  // whichever surface just became active.
   useLayoutEffect(() => {
-    const el = textareaRef.current
+    const el = mode === 'raw' ? textareaRef.current : (editorRef.current?.contentElement ?? null)
     if (!el) return
     if (value === '') {
       setExpanded(false)
-      singleLineHeight.current = el.clientHeight
+      singleLineHeight.current[mode] = el.clientHeight
       return
     }
     if (expanded) return
@@ -245,11 +319,58 @@ export function Composer({
       setExpanded(true)
       return
     }
-    if (singleLineHeight.current === null) singleLineHeight.current = el.clientHeight
-    if (el.scrollHeight > el.clientHeight || el.clientHeight > singleLineHeight.current + 1) {
+    if (singleLineHeight.current[mode] === null) singleLineHeight.current[mode] = el.clientHeight
+    const baseline = singleLineHeight.current[mode] ?? 0
+    if (
+      hasWrapped(mode, { clientHeight: el.clientHeight, scrollHeight: el.scrollHeight, baseline })
+    ) {
       setExpanded(true)
     }
-  }, [value, expanded])
+  }, [value, expanded, mode])
+
+  // Set by the toggle's own handler, below, at the instant it fires — the
+  // surface being left behind is still mounted then, so its selection is
+  // still there to read. `null` once there is nothing left to hand over.
+  const [handoff, setHandoff] = useState<CaretHandoff | null>(null)
+
+  // Applies a pending handoff to the raw textarea, which (unlike the editor)
+  // has no "initial selection" prop of its own to read it through instead.
+  // Runs once per mode change; a no-op on the initial mount (nothing has
+  // toggled yet, so `handoff` is still null) and a no-op switching *into*
+  // visual mode (the editor already consumed the same `handoff` as
+  // `initialSelection`/`autoFocus` props at its own mount, in this same
+  // commit — this effect only has to forget it afterwards).
+  useLayoutEffect(() => {
+    if (!handoff) return
+    if (mode === 'raw') {
+      const el = textareaRef.current
+      if (el) {
+        const from = Math.min(handoff.anchor, handoff.head)
+        const to = Math.max(handoff.anchor, handoff.head)
+        el.setSelectionRange(from, to, handoff.anchor <= handoff.head ? 'forward' : 'backward')
+        if (handoff.focused) el.focus()
+      }
+    }
+    setHandoff(null)
+  }, [mode, handoff])
+
+  const captureHandoff = (): CaretHandoff | null => {
+    if (mode === 'raw') {
+      const el = textareaRef.current
+      if (!el) return null
+      const focused = document.activeElement === el
+      const start = el.selectionStart ?? 0
+      const end = el.selectionEnd ?? 0
+      return el.selectionDirection === 'backward'
+        ? { anchor: end, head: start, focused }
+        : { anchor: start, head: end, focused }
+    }
+    const editor = editorRef.current
+    if (!editor) return null
+    const focused = document.activeElement === editor.contentElement
+    const selection: MarkdownEditorSelection = editor.getSelection()
+    return { ...selection, focused }
+  }
 
   const onDrop = (e: DragEvent<HTMLElement>) => {
     e.preventDefault()
@@ -258,6 +379,22 @@ export function Composer({
   }
 
   const showSend = value.trim().length > 0 || sending
+
+  // Enter sends; Shift+Enter is a newline. A prompt is usually one line, and
+  // reaching for the mouse for every send is worse. One rule for both
+  // surfaces (moved here, from `session-page.tsx`, once the raw textarea
+  // stopped being the only text surface): sends in either mode, including
+  // inside a list item or a fence — there is no markdown-aware exception,
+  // and no separate check for composing IME input either, since `!isComposing`
+  // already covers it. `onSubmit` itself already refuses an empty or
+  // whitespace-only `text`/a pending upload (`SessionPage`'s own `submit`),
+  // so this never needs to check either.
+  const sendOnEnter = (e: KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault()
+      onSubmit()
+    }
+  }
 
   // Each tray/send/stop control is a Tooltip wrapping the button rather than
   // the button carrying a `title=` — same reason the status bar's own host
@@ -331,6 +468,103 @@ export function Composer({
     </Tooltip>
   )
 
+  // The formatted/source switch, always present (compact or expanded, empty
+  // or not) — unlike attach/stop/send it is never conditional on the text,
+  // so a reader who prefers raw markdown can always get to it. `aria-label`
+  // is the constant `sessions.composerMode.source`, never the direction
+  // it currently switches to — that lives in the tooltip instead, the same
+  // split `sending`'s label/tooltip pair uses above. `onMouseDown` prevents
+  // the default focus-follows-mousedown behaviour: without it, clicking the
+  // toggle would move focus onto the button itself, and `captureHandoff`'s
+  // own `focused` check (`document.activeElement === …`) would then see the
+  // text as unfocused even though the reader's caret was there a moment
+  // ago. Preventing that default keeps focus in the text surface through a
+  // mouse click the same way it already stays there through a keyboard
+  // activation, so the handoff's `focused` flag — and so whether the new
+  // surface gets `autoFocus`/a refocused textarea — reflects reality either
+  // way.
+  const toggleButton = (
+    <Tooltip>
+      <TooltipTrigger
+        data-slot="toggle"
+        aria-label={t('sessions.composerMode.source')}
+        onMouseDown={(e) => e.preventDefault()}
+        render={
+          <Toggle
+            size="sm"
+            className="size-6 min-w-6 px-0"
+            pressed={isRaw}
+            onPressedChange={(pressed) => {
+              setHandoff(captureHandoff())
+              onModeChange(pressed ? 'raw' : 'visual')
+            }}
+          />
+        }
+      >
+        <CodeIcon />
+      </TooltipTrigger>
+      <TooltipContent>
+        {isRaw ? t('sessions.composerMode.showFormatted') : t('sessions.composerMode.showSource')}
+      </TooltipContent>
+    </Tooltip>
+  )
+
+  const textSurface = isRaw ? (
+    <InputGroupTextarea
+      ref={textareaRef}
+      value={value}
+      // Only load-bearing where `field-sizing: content` is unsupported:
+      // otherwise the textarea's own default of 2 rows would render the
+      // compact box two lines tall and delay the `scrollHeight >
+      // clientHeight` wrap check above until a *third* line. Where
+      // content-sizing does apply, it overrides this and the box still
+      // grows with the text as usual.
+      rows={expanded ? 3 : 1}
+      className="min-h-0 max-h-48"
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(e) => sendOnEnter(e.nativeEvent)}
+      onPaste={(e) => {
+        const files = Array.from(e.clipboardData.files)
+        if (files.length > 0) {
+          // A pasted screenshot carries no text representation at
+          // all, so there is no typed content here to preserve —
+          // this only ever pre-empts the no-op paste the browser
+          // would otherwise do.
+          e.preventDefault()
+          onAttach(files, usage)
+        }
+      }}
+      placeholder={t('sessions.composerPlaceholder')}
+    />
+  ) : (
+    <MarkdownEditor
+      ref={editorRef}
+      value={value}
+      onChange={onChange}
+      onKeyDown={sendOnEnter}
+      onPasteFiles={(files) => onAttach(files, usage)}
+      placeholder={t('sessions.composerPlaceholder')}
+      aria-label={t('sessions.composerPlaceholder')}
+      data-slot="input-group-control"
+      initialSelection={handoff ? { anchor: handoff.anchor, head: handoff.head } : undefined}
+      autoFocus={handoff?.focused ?? false}
+      // `w-full`: `InputGroup`'s own `items-center` (`input-group.tsx`) is
+      // unconditional, not just for the compact row — once `block-end`/
+      // `block-start` flips it to `flex-col` for the expanded layout,
+      // `items-center` centers cross-axis too, which is now horizontal, and
+      // a bare `<div>` (unlike the raw `<textarea>`, which has its own
+      // intrinsic sizing) shrinks to its content's width and centers in the
+      // column. `w-full` gives it an explicit width, which flexbox honours
+      // over `align-items` regardless of layout, in both directions.
+      // `pl-1`: lines up the first glyph with raw mode's — the raw
+      // textarea's own `px-2.5` (`shared/ui/textarea.tsx`) puts it 10px in
+      // from the group's inner edge; CodeMirror's `.cm-line` already
+      // contributes 6px of that on its own, so 4px (`pl-1`) here makes up
+      // the rest.
+      className="w-full min-w-0 flex-1 py-2 pl-1 [&_.cm-editor]:max-h-48 [&_.cm-scroller]:overflow-y-auto"
+    />
+  )
+
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: a drop target, not a control — the file input and its own button below are the operable, keyboard-reachable way to attach a file; dropping anywhere onto the composer is a mouse-only convenience layered on top, same as every other drag-and-drop surface.
     <footer className="flex flex-col gap-2" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
@@ -391,36 +625,12 @@ export function Composer({
         }}
       />
 
-      <InputGroup>
+      <InputGroup className="h-auto">
         {!expanded && <InputGroupAddon align="inline-start">{attachButton}</InputGroupAddon>}
-        <InputGroupTextarea
-          ref={textareaRef}
-          value={value}
-          // Only load-bearing where `field-sizing: content` is unsupported:
-          // otherwise the textarea's own default of 2 rows would render the
-          // compact box two lines tall and delay the `scrollHeight >
-          // clientHeight` wrap check above until a *third* line. Where
-          // content-sizing does apply, it overrides this and the box still
-          // grows with the text as usual.
-          rows={expanded ? 3 : 1}
-          className="min-h-0 max-h-48"
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={onKeyDown}
-          onPaste={(e) => {
-            const files = Array.from(e.clipboardData.files)
-            if (files.length > 0) {
-              // A pasted screenshot carries no text representation at
-              // all, so there is no typed content here to preserve —
-              // this only ever pre-empts the no-op paste the browser
-              // would otherwise do.
-              e.preventDefault()
-              onAttach(files, usage)
-            }
-          }}
-          placeholder={t('sessions.composerPlaceholder')}
-        />
-        {!expanded && (showSend || canStop) && (
+        {textSurface}
+        {!expanded && (
           <InputGroupAddon align="inline-end">
+            {toggleButton}
             {stopButton}
             {sendButton}
           </InputGroupAddon>
@@ -429,6 +639,7 @@ export function Composer({
           <InputGroupAddon align="block-end" className="justify-between">
             {attachButton}
             <span className="flex items-center gap-1">
+              {toggleButton}
               {stopButton}
               {sendButton}
             </span>

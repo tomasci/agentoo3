@@ -8,3 +8,20 @@ export const themeAtom = atomWithStorage<'light' | 'dark'>('agentoo:theme', 'dar
 // Forced closed for the 'new' tab mode regardless of this value (root-layout.tsx)
 // — that is a per-render decision, not a preference, so it is never written here.
 export const sidebarOpenAtom = atomWithStorage('agentoo:sidebar-open', true)
+
+// Persisted per browser, same as the theme and the sidebar. `getOnInit`
+// reads localStorage synchronously at atom creation instead of the jotai
+// default (start at the initial value, correct on the first effect after
+// mount) — without it, a reader who left the composer in raw mode would
+// briefly get a freshly-mounted `MarkdownEditor` on every page load before
+// this atom's own effect tore it back down again, which is exactly the
+// mount-then-destroy churn this option exists to avoid. Any stored value
+// other than the literal string `'raw'` reads as `'visual'`, so a bad or
+// pre-this-feature value in storage falls back to the default rather than
+// failing closed.
+export const composerModeAtom = atomWithStorage<'visual' | 'raw'>(
+  'agentoo:composer-mode',
+  'visual',
+  undefined,
+  { getOnInit: true },
+)

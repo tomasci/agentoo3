@@ -230,6 +230,11 @@ async function mount(path = '/projects/p1/sessions/s1') {
 
 beforeEach(() => {
   localStorage.clear()
+  // This file has no Jotai store of its own (plain `<JotaiProvider>`, no
+  // `store` prop) — pinning composerModeAtom means writing what it reads
+  // straight into storage, the same shape atomWithStorage itself writes.
+  // Every test here is written against the raw textarea.
+  localStorage.setItem('agentoo:composer-mode', '"raw"')
   sessions = [session()]
   deleted = new Set()
   sessionGets = 0

@@ -11,13 +11,22 @@
 // Only the literal-newline path into expanded mode is exercised here: the
 // wrap-by-width path compares real layout heights, and happy-dom reports 0
 // for all of them.
+//
+// Every test above the "mode toggle" section (14) is pinned to `mode: 'raw'`
+// — written against the plain textarea before the visual/raw toggle existed,
+// and still the composer's only surface as far as they are concerned. Section
+// 14 is the toggle's own coverage, including visual mode's CodeMirror surface
+// — see tests/markdown-editor.test.tsx for that editor's own contract on its
+// own; this file only checks what composer.tsx does with it (which surface
+// renders, the shared Enter rule, the caret handover on toggle).
 
 import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { EditorView } from '@codemirror/view'
 import i18next, { type i18n } from 'i18next'
-import { act } from 'react'
+import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
-import { Composer, type ComposerAttachments } from '../src/features/sessions/components/composer'
+import { Composer, type ComposerAttachments, hasWrapped } from '../src/features/sessions/components/composer'
 import type {
   AttachmentUpload,
   SessionFilesUsage,
@@ -112,7 +121,11 @@ const props = (o: Partial<ComposerProps> = {}): ComposerProps => ({
   onSubmit: () => {
     calls.onSubmit++
   },
-  onKeyDown: () => {},
+  // Pinned to raw so every existing test here — written against the plain
+  // textarea, before the visual/raw toggle existed — still finds one. Visual
+  // mode gets its own tests, below.
+  mode: 'raw',
+  onModeChange: () => {},
   sending: false,
   canSend: true,
   queueLine: '',
@@ -201,6 +214,10 @@ const before = (a: Node, b: Node) =>
 const ATTACH = 'sessions.attachments.attach'
 const SEND = 'sessions.send'
 const SENDING = 'sessions.sending'
+// The formatted/source toggle — present in every layout regardless of
+// canStop/value, unlike attach/stop/send, so it shows up in every addon
+// assertion below that pins an exact list of labels.
+const TOGGLE = 'sessions.composerMode.source'
 
 // --- 1. footer layout -------------------------------------------------------
 
@@ -344,14 +361,14 @@ test('pendingCount 0 with uploads shows no blocking line', () => {
 
 // --- 3. empty value ---------------------------------------------------------
 
-test('empty value: attach button at the start of the box and no send button', () => {
+test('empty value: attach button at the start, inline-end holds only the toggle', () => {
   mount(props({ value: '' }))
   const attach = byLabel(ATTACH)
   expect(attach).not.toBeNull()
   expect(addon('inline-start')?.contains(attach)).toBe(true)
   expect(byLabel(SEND)).toBeNull()
   expect(byLabel(SENDING)).toBeNull()
-  expect(addon('inline-end')).toBeNull()
+  expect(labelsIn(addon('inline-end'))).toEqual([TOGGLE])
   expect(addon('block-end')).toBeNull()
 })
 
@@ -436,14 +453,14 @@ test('typing calls onChange with the new value', async () => {
 
 // --- 5/6/7. expanded mode ---------------------------------------------------
 
-test('a newline moves both buttons into one block-end addon, attach first, send last', () => {
+test('a newline moves attach, the toggle and send into one block-end addon, attach first, send last', () => {
   mount(props({ value: 'line one\nline two' }))
   const block = addon('block-end')
   expect(block).not.toBeNull()
   expect(addon('inline-start')).toBeNull()
   expect(addon('inline-end')).toBeNull()
   const buttons = qa<HTMLButtonElement>('button', block ?? container)
-  expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual([ATTACH, SEND])
+  expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual([ATTACH, TOGGLE, SEND])
 })
 
 test('expanded is sticky until the value is emptied; rows follow it; the textarea node never remounts', () => {
@@ -499,7 +516,7 @@ test('expanded with empty value but sending shows attach and the sending button 
   render(props({ value: 'a\nb', sending: true }))
   const block = addon('block-end')
   const labels = qa('button', block ?? container).map((b) => b.getAttribute('aria-label'))
-  expect(labels).toEqual([ATTACH, SENDING])
+  expect(labels).toEqual([ATTACH, TOGGLE, SENDING])
 })
 
 // --- 8. paste / drop --------------------------------------------------------
@@ -890,11 +907,11 @@ test('canStop renders an icon-only stop button with an svg; absent or false rend
   }
 })
 
-test('compact with text: inline-end holds stop then send, in that DOM order', () => {
+test('compact with text: inline-end holds the toggle, then stop, then send, in that DOM order', () => {
   mount(stopProps({ value: 'hello', canStop: true }))
   const end = addon('inline-end')
   expect(end).not.toBeNull()
-  expect(labelsIn(end)).toEqual([STOP, SEND])
+  expect(labelsIn(end)).toEqual([TOGGLE, STOP, SEND])
   // Attach is untouched, still on its own at the start.
   expect(labelsIn(addon('inline-start'))).toEqual([ATTACH])
   expect(addon('block-end')).toBeNull()
@@ -902,46 +919,48 @@ test('compact with text: inline-end holds stop then send, in that DOM order', ()
 
 test('compact while sending with an empty value: stop precedes the sending button', () => {
   mount(stopProps({ value: '', sending: true, canSend: false, canStop: true }))
-  expect(labelsIn(addon('inline-end'))).toEqual([STOP, SENDING])
+  expect(labelsIn(addon('inline-end'))).toEqual([TOGGLE, STOP, SENDING])
 })
 
-test('empty value with canStop: an inline-end addon exists holding only stop', () => {
+test('empty value with canStop: an inline-end addon exists holding the toggle then stop', () => {
   mount(stopProps({ value: '', canStop: true }))
   const end = addon('inline-end')
   expect(end).not.toBeNull()
-  expect(labelsIn(end)).toEqual([STOP])
+  expect(labelsIn(end)).toEqual([TOGGLE, STOP])
   expect(byLabel(SEND)).toBeNull()
   expect(addon('block-end')).toBeNull()
 })
 
-test('empty value, no canStop, not sending: still no inline-end addon at all', () => {
+test('empty value, no canStop, not sending: inline-end still exists, holding only the toggle', () => {
   mount(stopProps({ value: '', canStop: false }))
-  expect(addon('inline-end')).toBeNull()
+  expect(labelsIn(addon('inline-end'))).toEqual([TOGGLE])
 })
 
-test('expanded: one block-end addon, attach first, then stop, then send, stop and send grouped at the end', () => {
+test('expanded: one block-end addon, attach first, then the toggle, stop and send grouped at the end', () => {
   mount(stopProps({ value: 'line one\nline two', canStop: true }))
   const blocks = qa('[data-slot="input-group-addon"][data-align="block-end"]', inputGroup())
   expect(blocks.length).toBe(1)
   const block = blocks[0] ?? null
   expect(addon('inline-start')).toBeNull()
   expect(addon('inline-end')).toBeNull()
-  expect(labelsIn(block)).toEqual([ATTACH, STOP, SEND])
+  expect(labelsIn(block)).toEqual([ATTACH, TOGGLE, STOP, SEND])
 
+  const toggle = byLabel(TOGGLE, block ?? container)
   const stop = byLabel(STOP, block ?? container)
   const send = byLabel(SEND, block ?? container)
-  if (!stop || !send) throw new Error('stop or send missing')
-  // "Together at the end": stop and send share one parent, which is the last
-  // child of the addon, and attach is not in it.
+  if (!toggle || !stop || !send) throw new Error('toggle, stop or send missing')
+  // "Together at the end": toggle, stop and send share one parent, which is
+  // the last child of the addon, and attach is not in it.
+  expect(toggle.parentElement).toBe(stop.parentElement)
   expect(stop.parentElement).toBe(send.parentElement)
   expect(block?.lastElementChild).toBe(stop.parentElement)
   expect(stop.parentElement?.contains(byLabel(ATTACH))).toBe(false)
 })
 
-test('expanded with an emptied-but-whitespace value: attach then stop, no send', () => {
+test('expanded with an emptied-but-whitespace value: attach then the toggle then stop, no send', () => {
   mount(stopProps({ value: 'a\nb', canStop: true }))
   render(stopProps({ value: ' ', canStop: true }))
-  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, STOP])
+  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, TOGGLE, STOP])
 })
 
 test('stopping disables stop, and a click on it then calls nothing', () => {
@@ -997,16 +1016,17 @@ test('toggling canStop never changes compact/expanded mode and never remounts th
   expect(textarea()).toBe(ta)
   expect(addon('block-end')).toBeNull()
 
-  // Empty value: the inline-end addon appears and disappears with canStop —
-  // the textarea it sits beside must not be rebuilt either way.
+  // Empty value: the inline-end addon is always there now (it holds the
+  // toggle regardless), but stop still comes and goes with canStop — the
+  // textarea it sits beside must not be rebuilt either way.
   render(stopProps({ value: '', canStop: false }))
-  expect(addon('inline-end')).toBeNull()
+  expect(labelsIn(addon('inline-end'))).toEqual([TOGGLE])
   render(stopProps({ value: '', canStop: true }))
   expect(textarea()).toBe(ta)
-  expect(addon('inline-end')).not.toBeNull()
+  expect(labelsIn(addon('inline-end'))).toEqual([TOGGLE, STOP])
   render(stopProps({ value: '', canStop: false }))
   expect(textarea()).toBe(ta)
-  expect(addon('inline-end')).toBeNull()
+  expect(labelsIn(addon('inline-end'))).toEqual([TOGGLE])
 
   // Expanded stays expanded across a toggle.
   render(stopProps({ value: 'a\nb', canStop: false }))
@@ -1019,7 +1039,7 @@ test('toggling canStop never changes compact/expanded mode and never remounts th
   render(stopProps({ value: 'a\nb', canStop: false }))
   expect(textarea()).toBe(ta)
   expect(addon('block-end')).not.toBeNull()
-  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, SEND])
+  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, TOGGLE, SEND])
 })
 
 test('focus survives canStop toggling on and off', () => {
@@ -1030,4 +1050,219 @@ test('focus survives canStop toggling on and off', () => {
   expect(document.activeElement).toBe(ta)
   render(stopProps({ value: '', canStop: false }))
   expect(document.activeElement).toBe(ta)
+})
+
+// --- 14. mode toggle / visual surface ---------------------------------------
+
+const MODE_TOGGLE = 'sessions.composerMode.source'
+
+function cmEditorEl(scope: ParentNode = container) {
+  return q('.cm-editor', scope)
+}
+function cmContentEl(scope: ParentNode = container) {
+  return q('.cm-content', scope)
+}
+/** The live `EditorView` behind whichever `.cm-editor` is currently mounted
+ * — see tests/markdown-editor.test.tsx's own header comment on why a real
+ * transaction, not a DOM input event, is how this suite drives it. */
+function cmView() {
+  const el = cmEditorEl()
+  if (!el) throw new Error('no CodeMirror editor mounted')
+  const view = EditorView.findFromDOM(el)
+  if (!view) throw new Error('no CodeMirror view for the mounted editor')
+  return view
+}
+
+test('visual mode renders no textarea, and mounts a CodeMirror editor showing the same text instead', () => {
+  mount(props({ mode: 'visual', value: 'hello' }))
+  expect(q('textarea')).toBeNull()
+  expect(cmEditorEl()).not.toBeNull()
+  expect(cmContentEl()?.textContent).toBe('hello')
+})
+
+test('raw mode: Enter calls onSubmit; Shift+Enter and a still-composing Enter do not', () => {
+  mount(props({ value: 'hi', mode: 'raw' }))
+  const ta = textarea()
+  const key = (init: KeyboardEventInit) =>
+    act(() => {
+      ta.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }))
+    })
+  key({ key: 'Enter' })
+  expect(calls.onSubmit).toBe(1)
+  key({ key: 'Enter', shiftKey: true })
+  expect(calls.onSubmit).toBe(1)
+  key({ key: 'Enter', isComposing: true })
+  expect(calls.onSubmit).toBe(1)
+})
+
+test('visual mode: Enter calls onSubmit; Shift+Enter falls through to CodeMirror and a still-composing Enter does neither', async () => {
+  mount(props({ value: 'hi', mode: 'visual' }))
+  const content = cmContentEl()
+  if (!content) throw new Error('no editor content')
+  const key = (init: KeyboardEventInit) =>
+    act(async () => {
+      content.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }))
+    })
+  await key({ key: 'Enter' })
+  expect(calls.onSubmit).toBe(1)
+
+  await act(async () => {
+    cmView().dispatch({ selection: { anchor: cmView().state.doc.length } })
+  })
+  await key({ key: 'Enter', shiftKey: true })
+  expect(calls.onSubmit).toBe(1)
+  // Not claimed, so CodeMirror's own Shift+Enter handling ran: a real newline.
+  expect(cmView().state.doc.toString()).toBe('hi\n')
+
+  await key({ key: 'Enter', isComposing: true })
+  expect(calls.onSubmit).toBe(1)
+})
+
+test('visual mode: pasting a file reaches onAttach with the usage, and inserts nothing', async () => {
+  mount(props({ mode: 'visual', attachments: attachments({ usage }) }))
+  const content = cmContentEl()
+  if (!content) throw new Error('no editor content')
+  const files = [mkFile('shot.png', 'image/png')]
+  const ev = eventWith('paste', 'clipboardData', files)
+  await act(async () => {
+    content.dispatchEvent(ev)
+  })
+  expect(calls.onAttach.length).toBe(1)
+  expect(calls.onAttach[0]?.files).toEqual(files)
+  expect(calls.onAttach[0]?.usage).toBe(usage)
+  expect(cmView().state.doc.toString()).toBe('')
+})
+
+test('the toggle sits first in the compact inline-end addon, and aria-pressed reflects mode', () => {
+  mount(props({ mode: 'raw', value: 'hi' }))
+  const toggle = byLabel(MODE_TOGGLE)
+  expect(toggle).not.toBeNull()
+  expect(addon('inline-end')?.firstElementChild).toBe(toggle)
+  expect(toggle?.getAttribute('aria-pressed')).toBe('true')
+
+  render(props({ mode: 'visual', value: 'hi' }))
+  expect(byLabel(MODE_TOGGLE)?.getAttribute('aria-pressed')).toBe('false')
+})
+
+test('expanded: no block-start addon exists; the toggle sits in block-end, immediately before send', () => {
+  mount(props({ mode: 'raw', value: 'line one\nline two' }))
+  expect(addon('block-start')).toBeNull()
+  const block = addon('block-end')
+  expect(block).not.toBeNull()
+  expect(labelsIn(block)).toEqual([ATTACH, MODE_TOGGLE, SEND])
+  const toggle = byLabel(MODE_TOGGLE, block ?? container)
+  const send = byLabel(SEND, block ?? container)
+  // Grouped with send, the same right-hand cluster stop shares when present
+  // (see the block-end tests above), not off on its own row any more.
+  expect(toggle?.parentElement).toBe(send?.parentElement)
+  expect(block?.lastElementChild).toBe(toggle?.parentElement)
+})
+
+test('clicking the toggle calls onModeChange with the other mode', () => {
+  const changedTo: ('visual' | 'raw')[] = []
+  mount(props({ mode: 'raw', onModeChange: (m) => changedTo.push(m) }))
+  act(() => {
+    byLabel(MODE_TOGGLE)?.click()
+  })
+  expect(changedTo).toEqual(['visual'])
+})
+
+// A stateful wrapper the way `SessionPage` actually drives `mode` — through
+// `onModeChange` and back down as a prop — since `Composer` itself is
+// deliberately presentational and never changes `mode` on its own.
+function StatefulComposer(
+  p: Omit<ComposerProps, 'mode' | 'onModeChange'> & { initialMode: 'visual' | 'raw' },
+) {
+  const [mode, setMode] = useState<'visual' | 'raw'>(p.initialMode)
+  return <Composer {...p} mode={mode} onModeChange={setMode} />
+}
+
+function mountStateful(
+  p: Omit<ComposerProps, 'mode' | 'onModeChange'>,
+  initialMode: 'visual' | 'raw',
+) {
+  container = document.createElement('div')
+  document.body.append(container)
+  root = createRoot(container)
+  mounted = true
+  act(() => {
+    root?.render(
+      <I18nextProvider i18n={cimode}>
+        <StatefulComposer {...p} initialMode={initialMode} />
+      </I18nextProvider>,
+    )
+  })
+}
+
+test('caret carries over raw -> visual, focus included when the textarea was focused', async () => {
+  mountStateful(props({ value: 'hello world' }), 'raw')
+  const ta = textarea()
+  ta.focus()
+  ta.setSelectionRange(2, 5)
+  await act(async () => {
+    byLabel(MODE_TOGGLE)?.click()
+  })
+  const content = cmContentEl()
+  if (!content) throw new Error('no editor content')
+  expect(q('textarea')).toBeNull()
+  expect(document.activeElement).toBe(content)
+  const sel = cmView().state.selection.main
+  expect([sel.anchor, sel.head].sort()).toEqual([2, 5])
+})
+
+test('caret carries over visual -> raw, and focus does not follow when the editor was never focused', async () => {
+  mountStateful(props({ value: 'hello world' }), 'visual')
+  await act(async () => {
+    cmView().dispatch({ selection: { anchor: 2, head: 5 } })
+  })
+  // Never focused the editor — the toggle click below is a keyboard-style
+  // activation with the text itself unfocused.
+  await act(async () => {
+    byLabel(MODE_TOGGLE)?.click()
+  })
+  const ta = textarea()
+  expect(ta.selectionStart).toBe(2)
+  expect(ta.selectionEnd).toBe(5)
+  expect(document.activeElement).not.toBe(ta)
+})
+
+// --- 15. hasWrapped: the expand-detection threshold, as pure numbers --------
+//
+// happy-dom has no layout engine, so none of the composer's own
+// `clientHeight`/`scrollHeight` measurements are exercisable here — this
+// pins the function itself against the exact numbers an operator measured
+// in real Chromium (a 736px-wide box) that used to false-trip the visual
+// surface into expanded on a single short line.
+
+test('raw: unchanged — scrollHeight over clientHeight, or clientHeight over baseline+1, still counts as wrapped', () => {
+  expect(hasWrapped('raw', { clientHeight: 20, scrollHeight: 20, baseline: 20 })).toBe(false)
+  expect(hasWrapped('raw', { clientHeight: 20, scrollHeight: 40, baseline: 20 })).toBe(true)
+  expect(hasWrapped('raw', { clientHeight: 22, scrollHeight: 22, baseline: 20 })).toBe(true)
+  // Exactly baseline+1: the tolerance the `+ 1` was already there for, not
+  // enough on its own to count as wrapped.
+  expect(hasWrapped('raw', { clientHeight: 21, scrollHeight: 21, baseline: 20 })).toBe(false)
+})
+
+test('visual: inline code and a heading grow one line a few px without wrapping — no false expand', () => {
+  // Inline code's own mono font and padding: ~21-22px against a 20px empty
+  // line, measured in real Chromium.
+  expect(hasWrapped('visual', { clientHeight: 22, scrollHeight: 22, baseline: 20 })).toBe(false)
+  // A `# heading` line: ~28px against the same 20px baseline.
+  expect(hasWrapped('visual', { clientHeight: 28, scrollHeight: 28, baseline: 20 })).toBe(false)
+  // Crossing the `md` breakpoint after the baseline was captured the other
+  // side of it (16px/24px mobile vs 14px/20px desktop) — neither direction
+  // trips it on its own.
+  expect(hasWrapped('visual', { clientHeight: 20, scrollHeight: 20, baseline: 24 })).toBe(false)
+  expect(hasWrapped('visual', { clientHeight: 24, scrollHeight: 24, baseline: 20 })).toBe(false)
+})
+
+test('visual: a genuine two-line wrap (roughly double the baseline) does expand', () => {
+  expect(hasWrapped('visual', { clientHeight: 40, scrollHeight: 40, baseline: 20 })).toBe(true)
+  // Exactly at the boundary: strictly greater than baseline*1.5, not equal.
+  expect(hasWrapped('visual', { clientHeight: 30, scrollHeight: 30, baseline: 20 })).toBe(false)
+  expect(hasWrapped('visual', { clientHeight: 31, scrollHeight: 31, baseline: 20 })).toBe(true)
+})
+
+test('visual: scrollHeight alone never trips it — the visual surface never internally overflows itself', () => {
+  expect(hasWrapped('visual', { clientHeight: 20, scrollHeight: 100, baseline: 20 })).toBe(false)
 })

@@ -288,6 +288,11 @@
     "willQueueRunning": "This session is mid-turn — this will be sent as soon as it finishes",
     "willQueueQueued": "This session's turn is starting — this will join it",
     "composerPlaceholder": "Tell the orchestrator what to do…",
+    "composerMode": {
+      "source": "Markdown source",
+      "showSource": "Edit the markdown source",
+      "showFormatted": "Back to formatted view"
+    },
     "sendFailed": "Could not send the message",
     "stopFailed": "Could not stop the session",
     "pendingPrompts_one": "{{count}} message waiting",

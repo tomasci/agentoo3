@@ -33,7 +33,7 @@ await cimode.init({ lng: 'cimode', fallbackLng: 'cimode' })
 
 type ComposerProps = Parameters<typeof Composer>[0]
 
-let calls: { onSubmit: number; onStop: number; onChange: string[] }
+let calls: { onSubmit: number; onStop: number; onChange: string[]; onModeChange: ('visual' | 'raw')[] }
 
 const props = (o: Partial<ComposerProps> = {}): ComposerProps => ({
   sessionId: 's1',
@@ -45,7 +45,8 @@ const props = (o: Partial<ComposerProps> = {}): ComposerProps => ({
   onStop: () => {
     calls.onStop++
   },
-  onKeyDown: () => {},
+  mode: 'raw',
+  onModeChange: (m) => calls.onModeChange.push(m),
   sending: false,
   canSend: true,
   queueLine: '',
@@ -77,7 +78,7 @@ function mount(p: ComposerProps, wrap: (n: ReactNode) => ReactNode = (n) => n) {
 const withProvider = (n: ReactNode) => <TooltipProvider>{n}</TooltipProvider>
 
 beforeEach(() => {
-  calls = { onSubmit: 0, onStop: 0, onChange: [] }
+  calls = { onSubmit: 0, onStop: 0, onChange: [], onModeChange: [] }
 })
 
 afterEach(() => {
@@ -91,6 +92,7 @@ afterEach(() => {
 const ATTACH = 'sessions.attachments.attach'
 const SEND = 'sessions.send'
 const STOP = 'sessions.stop'
+const TOGGLE = 'sessions.composerMode.source'
 
 const byLabel = (label: string) => {
   const found = [...container.querySelectorAll<HTMLButtonElement>('button')].filter(
@@ -137,6 +139,9 @@ const CONTROLS = [
   { what: 'attach', label: ATTACH, tip: 'sessions.attachments.attachTooltip', p: {} },
   { what: 'send', label: SEND, tip: 'sessions.sendTooltip', p: { value: 'hello' } },
   { what: 'stop', label: STOP, tip: 'sessions.stopTooltip', p: { canStop: true } },
+  // `props()` defaults to raw mode, so the tooltip offers to go back to
+  // formatted view — the opposite of what it would say in visual mode.
+  { what: 'toggle', label: TOGGLE, tip: 'sessions.composerMode.showFormatted', p: {} },
 ] as const
 
 // --- T1 ---------------------------------------------------------------------
@@ -243,6 +248,16 @@ test('none of the three is a submit button', () => {
   }
 })
 
+test('clicking the toggle calls onModeChange with the other mode, and never onSubmit/onStop', async () => {
+  mount(props({ value: 'hello', canStop: true }))
+  await act(async () => {
+    byLabel(TOGGLE).click()
+  })
+  expect(calls.onModeChange).toEqual(['visual'])
+  expect(calls.onSubmit).toBe(0)
+  expect(calls.onStop).toBe(0)
+})
+
 // --- T3 ---------------------------------------------------------------------
 
 test('attach, send and stop each keep data-slot="button", not the tooltip trigger\'s slot', () => {
@@ -251,4 +266,9 @@ test('attach, send and stop each keep data-slot="button", not the tooltip trigge
     expect(byLabel(label).getAttribute('data-slot')).toBe('button')
   }
   expect(container.querySelectorAll('[data-slot="tooltip-trigger"]').length).toBe(0)
+})
+
+test('the toggle keeps data-slot="toggle", not the tooltip trigger\'s slot', () => {
+  mount(props({ value: 'hello', canStop: true }))
+  expect(byLabel(TOGGLE).getAttribute('data-slot')).toBe('toggle')
 })
