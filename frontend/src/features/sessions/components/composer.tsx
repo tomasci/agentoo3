@@ -636,14 +636,10 @@ export function Composer({
           </InputGroupAddon>
         )}
         {expanded && (
-          <InputGroupAddon align="block-start" className="justify-end">
-            {toggleButton}
-          </InputGroupAddon>
-        )}
-        {expanded && (
           <InputGroupAddon align="block-end" className="justify-between">
             {attachButton}
             <span className="flex items-center gap-1">
+              {toggleButton}
               {stopButton}
               {sendButton}
             </span>

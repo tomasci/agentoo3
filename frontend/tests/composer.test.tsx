@@ -453,14 +453,14 @@ test('typing calls onChange with the new value', async () => {
 
 // --- 5/6/7. expanded mode ---------------------------------------------------
 
-test('a newline moves both buttons into one block-end addon, attach first, send last', () => {
+test('a newline moves attach, the toggle and send into one block-end addon, attach first, send last', () => {
   mount(props({ value: 'line one\nline two' }))
   const block = addon('block-end')
   expect(block).not.toBeNull()
   expect(addon('inline-start')).toBeNull()
   expect(addon('inline-end')).toBeNull()
   const buttons = qa<HTMLButtonElement>('button', block ?? container)
-  expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual([ATTACH, SEND])
+  expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual([ATTACH, TOGGLE, SEND])
 })
 
 test('expanded is sticky until the value is emptied; rows follow it; the textarea node never remounts', () => {
@@ -516,7 +516,7 @@ test('expanded with empty value but sending shows attach and the sending button 
   render(props({ value: 'a\nb', sending: true }))
   const block = addon('block-end')
   const labels = qa('button', block ?? container).map((b) => b.getAttribute('aria-label'))
-  expect(labels).toEqual([ATTACH, SENDING])
+  expect(labels).toEqual([ATTACH, TOGGLE, SENDING])
 })
 
 // --- 8. paste / drop --------------------------------------------------------
@@ -936,29 +936,31 @@ test('empty value, no canStop, not sending: inline-end still exists, holding onl
   expect(labelsIn(addon('inline-end'))).toEqual([TOGGLE])
 })
 
-test('expanded: one block-end addon, attach first, then stop, then send, stop and send grouped at the end', () => {
+test('expanded: one block-end addon, attach first, then the toggle, stop and send grouped at the end', () => {
   mount(stopProps({ value: 'line one\nline two', canStop: true }))
   const blocks = qa('[data-slot="input-group-addon"][data-align="block-end"]', inputGroup())
   expect(blocks.length).toBe(1)
   const block = blocks[0] ?? null
   expect(addon('inline-start')).toBeNull()
   expect(addon('inline-end')).toBeNull()
-  expect(labelsIn(block)).toEqual([ATTACH, STOP, SEND])
+  expect(labelsIn(block)).toEqual([ATTACH, TOGGLE, STOP, SEND])
 
+  const toggle = byLabel(TOGGLE, block ?? container)
   const stop = byLabel(STOP, block ?? container)
   const send = byLabel(SEND, block ?? container)
-  if (!stop || !send) throw new Error('stop or send missing')
-  // "Together at the end": stop and send share one parent, which is the last
-  // child of the addon, and attach is not in it.
+  if (!toggle || !stop || !send) throw new Error('toggle, stop or send missing')
+  // "Together at the end": toggle, stop and send share one parent, which is
+  // the last child of the addon, and attach is not in it.
+  expect(toggle.parentElement).toBe(stop.parentElement)
   expect(stop.parentElement).toBe(send.parentElement)
   expect(block?.lastElementChild).toBe(stop.parentElement)
   expect(stop.parentElement?.contains(byLabel(ATTACH))).toBe(false)
 })
 
-test('expanded with an emptied-but-whitespace value: attach then stop, no send', () => {
+test('expanded with an emptied-but-whitespace value: attach then the toggle then stop, no send', () => {
   mount(stopProps({ value: 'a\nb', canStop: true }))
   render(stopProps({ value: ' ', canStop: true }))
-  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, STOP])
+  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, TOGGLE, STOP])
 })
 
 test('stopping disables stop, and a click on it then calls nothing', () => {
@@ -1037,7 +1039,7 @@ test('toggling canStop never changes compact/expanded mode and never remounts th
   render(stopProps({ value: 'a\nb', canStop: false }))
   expect(textarea()).toBe(ta)
   expect(addon('block-end')).not.toBeNull()
-  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, SEND])
+  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, TOGGLE, SEND])
 })
 
 test('focus survives canStop toggling on and off', () => {
@@ -1142,12 +1144,18 @@ test('the toggle sits first in the compact inline-end addon, and aria-pressed re
   expect(byLabel(MODE_TOGGLE)?.getAttribute('aria-pressed')).toBe('false')
 })
 
-test('expanded: the toggle sits alone in its own block-start row, above the text; block-end is unchanged', () => {
+test('expanded: no block-start addon exists; the toggle sits in block-end, immediately before send', () => {
   mount(props({ mode: 'raw', value: 'line one\nline two' }))
-  const start = addon('block-start')
-  expect(start).not.toBeNull()
-  expect(labelsIn(start)).toEqual([MODE_TOGGLE])
-  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, SEND])
+  expect(addon('block-start')).toBeNull()
+  const block = addon('block-end')
+  expect(block).not.toBeNull()
+  expect(labelsIn(block)).toEqual([ATTACH, MODE_TOGGLE, SEND])
+  const toggle = byLabel(MODE_TOGGLE, block ?? container)
+  const send = byLabel(SEND, block ?? container)
+  // Grouped with send, the same right-hand cluster stop shares when present
+  // (see the block-end tests above), not off on its own row any more.
+  expect(toggle?.parentElement).toBe(send?.parentElement)
+  expect(block?.lastElementChild).toBe(toggle?.parentElement)
 })
 
 test('clicking the toggle calls onModeChange with the other mode', () => {
