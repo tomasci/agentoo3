@@ -171,3 +171,230 @@ export const portsResponseSchema = z.object({
   ports: z.array(portEntrySchema),
 })
 export type PortsResponseDto = z.infer<typeof portsResponseSchema>
+
+// --- the usage page, mirroring features/system/usage.ts's UsageResult ------
+//
+// Everything here describes the WIRE shape only. The SDK's own get_usage
+// response and the messages table's rate_limit_event payload are both
+// snake_case and use different units (see usage.ts's header comment on the
+// unit mismatch between a live probe and an observed event) — usage.ts
+// normalises both into exactly this shape before it ever reaches c.json(),
+// so nothing below needs to describe two ways of saying the same field.
+
+export const usageWindowKeySchema = z
+  .enum([
+    'five_hour',
+    'seven_day',
+    'seven_day_opus',
+    'seven_day_sonnet',
+    'seven_day_oauth_apps',
+    'model',
+  ])
+  .openapi({
+    description:
+      "Which rate-limit window this row describes. 'model' is a per-model weekly window " +
+      "(the SDK's own `model_scoped` list) — there can be more than one row with this key, " +
+      'distinguished by `label`; every other key appears at most once.',
+  })
+export type UsageWindowKey = z.infer<typeof usageWindowKeySchema>
+
+// Shared between limits.status and limits.overage.status — both are the same
+// claude.ai rate-limit verdict, just about a different scope (the window
+// overall vs. its overage extension).
+export const usageLimitStatusSchema = z.enum(['allowed', 'allowed_warning', 'rejected'])
+export type UsageLimitStatus = z.infer<typeof usageLimitStatusSchema>
+
+export const usageLimitsSourceSchema = z.enum(['live', 'observed', 'none']).openapi({
+  description:
+    "'live' when this box's Claude Code just answered Query.usage_EXPERIMENTAL_MAY_CHANGE_" +
+    'DO_NOT_RELY_ON_THIS_API_YET() with real rate_limits (needs profile-scope auth, e.g. ' +
+    "`claude login` — a `claude setup-token` credential never gets these). 'observed' falls " +
+    'back to the most recent rate-limit report Claude attached to any session turn on this ' +
+    "box, read from the messages table, when a live probe is unavailable. 'none' means " +
+    'neither exists yet and `windows` is empty.',
+})
+export type UsageLimitsSource = z.infer<typeof usageLimitsSourceSchema>
+
+export const usageWindowSchema = z
+  .object({
+    key: usageWindowKeySchema,
+    label: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "Server-supplied display name for a 'model' row (e.g. 'Fable'); null for " +
+          'every other key.',
+      }),
+    utilization: z.number().nullable().openapi({
+      description: 'Percent of the window used, 0-100. Null when the source reported no value.',
+    }),
+    resetsAt: z.string().nullable().openapi({ description: 'ISO timestamp, or null if unknown.' }),
+  })
+  .openapi('UsageWindow', {
+    description:
+      'One rate-limit window. `windows` on the parent object omits a window the source did ' +
+      'not report at all — this never appears as an all-null placeholder row.',
+  })
+export type UsageWindowDto = z.infer<typeof usageWindowSchema>
+
+export const usageOverageSchema = z
+  .object({
+    status: usageLimitStatusSchema.nullable(),
+    disabledReason: z.string().nullable().openapi({
+      description: "The SDK/event's own reason code, e.g. 'org_level_disabled_until', verbatim.",
+    }),
+    inUse: z.boolean().nullable(),
+  })
+  .nullable()
+  .openapi('UsageOverage', {
+    description:
+      "Overage-credit status. Only ever populated for `limits.source === 'observed'` — the " +
+      'live SDK path carries no overage fields — and null even there when the event reported ' +
+      'none of overageStatus/overageDisabledReason/isUsingOverage/overageInUse.',
+  })
+export type UsageOverageDto = z.infer<typeof usageOverageSchema>
+
+export const usageExtraUsageSchema = z
+  .object({
+    isEnabled: z.boolean(),
+    monthlyLimit: z
+      .number()
+      .nullable()
+      .openapi({ description: 'Minor units of currency (cents).' }),
+    usedCredits: z.number().nullable().openapi({ description: 'Minor units of currency (cents).' }),
+    utilization: z.number().nullable().openapi({ description: 'Percent, 0-100.' }),
+    currency: z.string().nullable(),
+  })
+  .nullable()
+  .openapi('UsageExtraUsage', {
+    description:
+      "Pay-as-you-go overage spend, from the live SDK's rate_limits.extra_usage. Null when " +
+      "`limits.source` is not 'live', or when the probe answered with no extra_usage block.",
+  })
+export type UsageExtraUsageDto = z.infer<typeof usageExtraUsageSchema>
+
+export const usageLimitsSchema = z
+  .object({
+    source: usageLimitsSourceSchema,
+    asOf: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          "ISO timestamp this came from: the probe time for 'live', the rate_limit_event row's " +
+          "own createdAt for 'observed' — so an 'observed' reading is only as fresh as `asOf` " +
+          "says, not as fresh as `fetchedAt` above it — and null for 'none'.",
+      }),
+    status: usageLimitStatusSchema.nullable().openapi({
+      description:
+        "The observed event's own verdict for the window it reported. Null for " +
+        "'live' and 'none' — the live SDK response carries no equivalent field.",
+    }),
+    windows: z.array(usageWindowSchema).openapi({
+      description:
+        'Ordered five_hour, seven_day, seven_day_opus, seven_day_sonnet, seven_day_oauth_apps, ' +
+        'then any model rows in the order the source listed them. A window absent from the ' +
+        'source is omitted here rather than included with null fields.',
+    }),
+    overage: usageOverageSchema,
+    extraUsage: usageExtraUsageSchema,
+  })
+  .openapi('UsageLimits', { description: "This box's claude.ai plan rate limits, however known." })
+export type UsageLimitsDto = z.infer<typeof usageLimitsSchema>
+
+export const usageAccountSchema = z
+  .object({
+    subscriptionType: z.string().nullable().openapi({
+      description:
+        "e.g. 'pro', 'max', 'team', 'enterprise'; null for an API-key/3P-provider session.",
+    }),
+    email: z.string().nullable(),
+    organization: z.string().nullable(),
+    tokenSource: z.string().nullable().openapi({
+      description: "e.g. 'CLAUDE_CODE_OAUTH_TOKEN', or the literal string 'none'.",
+      example: 'CLAUDE_CODE_OAUTH_TOKEN',
+    }),
+    apiKeySource: z.string().nullable(),
+    apiProvider: z.string().nullable().openapi({
+      description: "e.g. 'firstParty', 'bedrock', 'vertex', 'gateway'.",
+    }),
+  })
+  .nullable()
+  .openapi('UsageAccount', {
+    description: "Who this box's Claude Code is authenticated as. Null when accountInfo() failed.",
+  })
+export type UsageAccountDto = z.infer<typeof usageAccountSchema>
+
+// Shared by breakdown.{day,week}.{agents,skills,plugins,mcpServers} — all four
+// are the same "name plus its share of weighted local usage" shape.
+export const usageNamedShareSchema = z
+  .object({ name: z.string(), pct: z.number().openapi({ description: 'Percent, 0-100.' }) })
+  .openapi('UsageNamedShare', {
+    description: 'Share of weighted local usage attributed to one name.',
+  })
+export type UsageNamedShareDto = z.infer<typeof usageNamedShareSchema>
+
+export const usageBehaviorEntrySchema = z
+  .object({
+    // A string, not an enum: the SDK's current vocabulary (cache_miss,
+    // long_context, subagent_heavy, high_parallel, cron) is documented on
+    // SDKControlGetUsageResponse, but an enum here would drop a row outright
+    // the day the SDK adds a new one, rather than passing it through unlabeled.
+    key: z.string(),
+    pct: z
+      .number()
+      .openapi({ description: 'Percent, 0-100. Categories overlap, so these do not sum to 100.' }),
+    count: z.number().openapi({ description: 'Requests in this window exhibiting the behavior.' }),
+  })
+  .openapi('UsageBehaviorEntry')
+export type UsageBehaviorEntryDto = z.infer<typeof usageBehaviorEntrySchema>
+
+export const usagePeriodSchema = z
+  .object({
+    requestCount: z.number(),
+    sessionCount: z.number(),
+    behaviors: z.array(usageBehaviorEntrySchema),
+    agents: z.array(usageNamedShareSchema),
+    skills: z.array(usageNamedShareSchema),
+    plugins: z.array(usageNamedShareSchema),
+    mcpServers: z.array(usageNamedShareSchema),
+  })
+  .openapi('UsagePeriod', {
+    description: 'What contributed to local usage over one window (day or week).',
+  })
+export type UsagePeriodDto = z.infer<typeof usagePeriodSchema>
+
+export const usageBreakdownSchema = z
+  .object({ day: usagePeriodSchema, week: usagePeriodSchema })
+  .nullable()
+  .openapi('UsageBreakdown', {
+    description:
+      "From the SDK's own scan of local transcripts (a few seconds of I/O — see usage.ts). Null " +
+      'when that scan failed, timed out, or the account has no claude.ai subscription to attribute ' +
+      'usage against.',
+  })
+export type UsageBreakdownDto = z.infer<typeof usageBreakdownSchema>
+
+export const usageResponseSchema = z
+  .object({
+    fetchedAt: z
+      .string()
+      .openapi({ description: 'ISO timestamp: when this response was assembled.' }),
+    account: usageAccountSchema,
+    limits: usageLimitsSchema,
+    breakdown: usageBreakdownSchema,
+    probeError: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'A readable sentence describing whatever part of the CLI probe failed or timed out — ' +
+          'accountInfo(), the rate-limit call, or the behaviors scan, joined if more than one did. ' +
+          'Null only when every part of the probe succeeded. Never gates the response to a non-200: ' +
+          'the fields the failed part would have filled are null (or, for `limits`, whatever the ' +
+          'database still has) instead.',
+      }),
+  })
+  .openapi('UsageResponse')
+export type UsageResponseDto = z.infer<typeof usageResponseSchema>

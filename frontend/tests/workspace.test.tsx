@@ -216,7 +216,7 @@ test('the workspace opens as one system tab, showing system navigation only', as
 
   expect(tabs()).toEqual(['System'])
   expect(activeTab()).toBe('System')
-  // Sessions, docker, library, ssh keys, storage, ports, prompts, configuration —
+  // Sessions, docker, library, ssh keys, storage, ports, usage, prompts, configuration —
   // and nothing about any project. The brand heading link and the Sessions
   // item both point at `/sessions` now — see shared/store/tabs.ts's
   // `SYSTEM_HOME`.
@@ -228,6 +228,7 @@ test('the workspace opens as one system tab, showing system navigation only', as
     '/ssh-keys',
     '/storage',
     '/ports',
+    '/usage',
     '/prompts/idea-to-prompt',
     '/settings',
   ])

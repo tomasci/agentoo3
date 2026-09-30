@@ -9,8 +9,10 @@ import {
   portsResponseSchema,
   promptSchema,
   updatePromptSchema,
+  usageResponseSchema,
 } from './schema'
 import { systemStats } from './service'
+import { getUsage } from './usage'
 
 const systemSchema = z.object({
   cpu: z.object({
@@ -87,6 +89,35 @@ systemRouter.openapi(
     },
   }),
   async (c) => c.json(await getModels(), 200),
+)
+
+// --- the usage page --------------------------------------------------------
+//
+// See features/system/usage.ts's header for the two sources this reconciles
+// (a live SDK probe, and the newest rate_limit_event row) and why they need
+// unit conversion to agree.
+
+systemRouter.openapi(
+  createRoute({
+    method: 'get',
+    path: '/system/usage',
+    tags: ['system'],
+    summary: "This box's Claude subscription plan limits, account, and what has been consuming it",
+    description:
+      'Always 200, never an error response — this endpoint itself. `limits.source` explains ' +
+      "where the reported limits came from: 'live' when this box's Claude Code just answered " +
+      'with real rate_limits (needs profile-scope auth, e.g. `claude login`; a `claude ' +
+      "setup-token` credential never gets these); 'observed' is the most recent rate-limit " +
+      "report Claude attached to any session's turn on this box, so it is as old as " +
+      "`limits.asOf`, not as fresh as `fetchedAt`; 'none' means neither exists yet. A failed or " +
+      'timed-out probe is not itself a failure of this endpoint: `probeError` carries a readable ' +
+      'sentence, the fields the probe would have filled are null, and the database-observed ' +
+      'limits (if any) are still reported.',
+    responses: {
+      200: json(usageResponseSchema, "This box's plan limits, account, and usage breakdown"),
+    },
+  }),
+  async (c) => c.json(await getUsage(), 200),
 )
 
 // --- operator-editable prompts -------------------------------------------------

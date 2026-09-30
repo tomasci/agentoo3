@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 import {
   BookOpen,
   Container,
+  Gauge,
   HardDrive,
   KeyRound,
   Library,
@@ -155,6 +156,16 @@ function SystemNav() {
               >
                 <Network />
                 <span>{t('nav.ports')}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                render={
+                  <Link to="/usage" activeProps={{ 'aria-current': 'page', 'data-active': '' }} />
+                }
+              >
+                <Gauge />
+                <span>{t('nav.usage')}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
             {/* The one known prompt today (KNOWN_PROMPTS, features/system/prompts.ts

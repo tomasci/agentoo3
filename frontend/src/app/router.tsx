@@ -6,7 +6,7 @@ import { SessionsDashboardPage } from '@/features/sessions'
 import { SettingsPage } from '@/features/settings'
 import { SshKeysPage } from '@/features/ssh-keys'
 import { StoragePage } from '@/features/storage'
-import { PortsPage, PromptEditorPage } from '@/features/system'
+import { PortsPage, PromptEditorPage, UsagePage } from '@/features/system'
 import { SYSTEM_HOME } from '@/shared/store/tabs'
 import { buttonVariants } from '@/shared/ui/button'
 import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
@@ -245,6 +245,15 @@ const portsRoute = createRoute({
   component: PortsPage,
 })
 
+// The System tab's Usage page: the Claude subscription's plan limits, the
+// account Claude Code is authenticated as, and what has been consuming that
+// usage — see backend/src/features/system/usage.ts for the full contract.
+const usageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/usage',
+  component: UsagePage,
+})
+
 // An operator-editable instruction, addressed by the backend's own fixed name
 // for it (KNOWN_PROMPTS in features/system/prompts.ts) rather than by
 // anything a user picks — there is no "new prompt" route, unlike the library's
@@ -288,6 +297,7 @@ export const routeTree = rootRoute.addChildren([
   settingsRoute,
   storageRoute,
   portsRoute,
+  usageRoute,
   promptRoute,
 ])
 
