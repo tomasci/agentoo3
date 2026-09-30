@@ -140,6 +140,7 @@
     "sshKeys": "SSH keys",
     "storage": "Storage",
     "ports": "Ports",
+    "usage": "Usage",
     "project": "Project",
     "sessions": "Sessions",
     "docker": "Docker",
@@ -612,6 +613,104 @@
     "source": {
       "ss": "ss",
       "proc": "/proc"
+    }
+  },
+  "usage": {
+    "heading": "Usage",
+    "lead": "Plan limits, the account Claude Code is authenticated as, and what's been consuming them.",
+    "loadFailed": "Could not load usage",
+    "refresh": "Refresh",
+    "updated": "Updated {{time}}",
+    "limits": {
+      "heading": "Plan limits",
+      "status": {
+        "warning": "Approaching limit",
+        "rejected": "Limit reached"
+      },
+      "source": {
+        "live": "Live from claude.ai",
+        "observed": "From the last rate-limit report, {{relative}}",
+        "observedNote": "This box authenticates with a setup-token credential, which can't query plan limits directly. These numbers come from the rate-limit report attached to the last session turn instead, so they are only as fresh as that report.",
+        "none": "No limit data yet — it appears after a session runs its first turn on this box."
+      },
+      "overage": {
+        "line": "Extra usage: {{status}}",
+        "linePrefix": "Extra usage:",
+        "allowed": "allowed",
+        "notAvailable": "not available",
+        "inUse": "in use",
+        "reason": {
+          "org_level_disabled": "Disabled for your organization",
+          "org_level_disabled_until": "Disabled for your organization until further notice",
+          "out_of_credits": "Out of credits",
+          "overage_not_provisioned": "Not set up for this account",
+          "member_level_disabled": "Disabled for your account",
+          "seat_tier_level_disabled": "Disabled for your seat tier"
+        }
+      },
+      "extraUsage": {
+        "heading": "Extra usage spend",
+        "disabled": "Disabled",
+        "amount": "{{used}} of {{limit}} used"
+      }
+    },
+    "window": {
+      "five_hour": "5-hour session",
+      "seven_day": "Weekly · all models",
+      "seven_day_opus": "Weekly · Opus",
+      "seven_day_sonnet": "Weekly · Sonnet",
+      "seven_day_oauth_apps": "Weekly · OAuth apps",
+      "model": "Weekly · {{label}}",
+      "modelFallback": "model",
+      "resetsIn": "Resets in {{duration}}",
+      "resetSinceReport": "Reset since this report",
+      "duration": {
+        "daysHours": "{{days}}d {{hours}}h",
+        "hoursMinutes": "{{hours}}h {{minutes}}m",
+        "minutesOnly": "{{minutes}}m",
+        "lessThanMinute": "<1m"
+      }
+    },
+    "account": {
+      "heading": "Account",
+      "unavailable": "Account details unavailable",
+      "plan": "Plan",
+      "unknownPlan": "Unknown",
+      "authentication": "Authentication",
+      "authOAuth": "OAuth token ({{source}})",
+      "authApiKey": "API key",
+      "provider": "Provider",
+      "providerAnthropic": "Anthropic",
+      "email": "Email",
+      "organization": "Organization"
+    },
+    "breakdown": {
+      "heading": "What's using your limits",
+      "unavailable": "Breakdown unavailable",
+      "period": {
+        "label": "Window",
+        "day": "24 hours",
+        "week": "7 days"
+      },
+      "requests": "{{requests}} across {{sessions}}",
+      "requestsCount_one": "{{count}} request",
+      "requestsCount_other": "{{count}} requests",
+      "sessionsCount_one": "{{count}} session",
+      "sessionsCount_other": "{{count}} sessions",
+      "behaviors": {
+        "heading": "Behaviors",
+        "note": "Categories overlap, so these don't add up to 100%.",
+        "cache_miss": "Prompt cache misses",
+        "long_context": "Long context",
+        "subagent_heavy": "Subagent-heavy",
+        "high_parallel": "Many parallel sessions",
+        "cron": "Scheduled runs"
+      },
+      "agents": "Agents",
+      "skills": "Skills",
+      "plugins": "Plugins",
+      "mcpServers": "MCP servers",
+      "footnote": "Approximate — from transcripts on this machine only."
     }
   },
   "docker": {

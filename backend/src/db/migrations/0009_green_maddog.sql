@@ -1,0 +1,1 @@
+CREATE INDEX "messages_rate_limit_idx" ON "messages" USING btree ("created_at") WHERE "messages"."type" = 'rate_limit_event';

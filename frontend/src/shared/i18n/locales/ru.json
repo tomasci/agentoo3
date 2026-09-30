@@ -140,6 +140,7 @@
     "sshKeys": "SSH-ключи",
     "storage": "Хранилище",
     "ports": "Порты",
+    "usage": "Использование",
     "project": "Проект",
     "sessions": "Сессии",
     "docker": "Docker",
@@ -616,6 +617,106 @@
     "source": {
       "ss": "ss",
       "proc": "/proc"
+    }
+  },
+  "usage": {
+    "heading": "Использование",
+    "lead": "Лимиты тарифного плана, аккаунт, под которым авторизован Claude Code, и что расходует эти лимиты.",
+    "loadFailed": "Не удалось загрузить данные об использовании",
+    "refresh": "Обновить",
+    "updated": "Обновлено {{time}}",
+    "limits": {
+      "heading": "Лимиты тарифа",
+      "status": {
+        "warning": "Приближение к лимиту",
+        "rejected": "Лимит исчерпан"
+      },
+      "source": {
+        "live": "Актуальные данные с claude.ai",
+        "observed": "По последнему отчёту о лимитах, {{relative}}",
+        "observedNote": "Эта машина авторизована токеном, полученным командой setup-token, который не умеет напрямую запрашивать лимиты тарифа. Эти цифры взяты из отчёта о лимитах, приложенного к последнему ходу сессии, поэтому они устарели ровно настолько, насколько давно получен этот отчёт.",
+        "none": "Данных о лимитах пока нет — они появятся после первого хода сессии на этой машине."
+      },
+      "overage": {
+        "line": "Дополнительное использование: {{status}}",
+        "linePrefix": "Дополнительное использование:",
+        "allowed": "разрешено",
+        "notAvailable": "недоступно",
+        "inUse": "используется",
+        "reason": {
+          "org_level_disabled": "Отключено для вашей организации",
+          "org_level_disabled_until": "Отключено для вашей организации до особого распоряжения",
+          "out_of_credits": "Кредиты исчерпаны",
+          "overage_not_provisioned": "Не настроено для этого аккаунта",
+          "member_level_disabled": "Отключено для вашего аккаунта",
+          "seat_tier_level_disabled": "Отключено для вашего уровня лицензии"
+        }
+      },
+      "extraUsage": {
+        "heading": "Расходы сверх лимита",
+        "disabled": "Отключено",
+        "amount": "Использовано {{used}} из {{limit}}"
+      }
+    },
+    "window": {
+      "five_hour": "5-часовая сессия",
+      "seven_day": "Неделя · все модели",
+      "seven_day_opus": "Неделя · Opus",
+      "seven_day_sonnet": "Неделя · Sonnet",
+      "seven_day_oauth_apps": "Неделя · OAuth-приложения",
+      "model": "Неделя · {{label}}",
+      "modelFallback": "модель",
+      "resetsIn": "Сброс через {{duration}}",
+      "resetSinceReport": "Сброшено после этого отчёта",
+      "duration": {
+        "daysHours": "{{days}} д {{hours}} ч",
+        "hoursMinutes": "{{hours}} ч {{minutes}} мин",
+        "minutesOnly": "{{minutes}} мин",
+        "lessThanMinute": "<1 мин"
+      }
+    },
+    "account": {
+      "heading": "Аккаунт",
+      "unavailable": "Сведения об аккаунте недоступны",
+      "plan": "Тариф",
+      "unknownPlan": "Неизвестно",
+      "authentication": "Авторизация",
+      "authOAuth": "OAuth-токен ({{source}})",
+      "authApiKey": "API-ключ",
+      "provider": "Провайдер",
+      "providerAnthropic": "Anthropic",
+      "email": "Эл. почта",
+      "organization": "Организация"
+    },
+    "breakdown": {
+      "heading": "Что расходует лимиты",
+      "unavailable": "Разбивка недоступна",
+      "period": {
+        "label": "Окно",
+        "day": "24 часа",
+        "week": "7 дней"
+      },
+      "requests": "{{requests}} в {{sessions}}",
+      "requestsCount_one": "{{count}} запрос",
+      "requestsCount_few": "{{count}} запроса",
+      "requestsCount_many": "{{count}} запросов",
+      "sessionsCount_one": "{{count}} сессии",
+      "sessionsCount_few": "{{count}} сессиях",
+      "sessionsCount_many": "{{count}} сессиях",
+      "behaviors": {
+        "heading": "Особенности использования",
+        "note": "Категории пересекаются, поэтому сумма не равна 100%.",
+        "cache_miss": "Промахи кэша промптов",
+        "long_context": "Длинный контекст",
+        "subagent_heavy": "Активное использование подагентов",
+        "high_parallel": "Много параллельных сессий",
+        "cron": "Запуски по расписанию"
+      },
+      "agents": "Агенты",
+      "skills": "Навыки",
+      "plugins": "Плагины",
+      "mcpServers": "MCP-серверы",
+      "footnote": "Приблизительно — по транскриптам только на этой машине."
     }
   },
   "docker": {

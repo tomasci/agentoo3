@@ -279,6 +279,11 @@ export const messages = pgTable(
     // Finding abandoned prompts. Also helps the existing pendingFor query,
     // which scans today.
     index('messages_pending_idx').on(t.sessionId).where(sql`${t.pending}`),
+    // The usage page (features/system/usage.ts) reads only the single newest
+    // rate_limit_event row to report observed plan-limit utilization. Without
+    // this, that lookup would seq-scan the whole table — ~160k rows and
+    // growing, with no other index on `type` — on every request.
+    index('messages_rate_limit_idx').on(t.createdAt).where(sql`${t.type} = 'rate_limit_event'`),
   ],
 )
 
