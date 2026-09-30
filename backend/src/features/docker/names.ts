@@ -258,3 +258,113 @@ export const EDITOR_LABEL_FILTER = 'label=com.agentoo.editor=1'
 export function editorInstallLabelFilter(installId: string): string {
   return `label=com.agentoo.editor.install=${installId}`
 }
+
+// --- parsing labels back to an owner candidate (features/docker/system.ts) --
+//
+// The inverse of composeProjectName/managedLabels/editorLabels above: given a
+// container's own labels (as `docker inspect` reports them back), decide
+// which scope — if any — this feature's naming layer would have produced
+// them for. Pure and DB-free, like everything else in this file: the system
+// container listing (features/docker/system.ts) is what joins the result
+// against this install's own projects/sessions, and keeping that join out of
+// this module is what lets the parsing rules below be unit-tested with
+// nothing but a labels object — see docker-names.test.ts.
+
+export function isValidSlug(slug: string): boolean {
+  return SLUG_RE.test(slug)
+}
+
+export function isSessionId(value: string): boolean {
+  return SESSION_ID_RE.test(value)
+}
+
+/**
+ * One container's candidate owner, before it is checked against this
+ * install's own database — the docker daemon is shared with other agentoo
+ * installs on the box (see `editorInstallId`'s own comment in
+ * features/editor/container.ts), so a label that parses cleanly here can
+ * still name a project or session this install has never heard of. That
+ * check is system.ts's job, not this one.
+ *
+ * `sessionPrefix` (hex12) and `sessionId` (full uuid) are mutually exclusive:
+ * compose only ever recovers the truncated form `scopedName` embeds (see its
+ * own comment for why 12 hex, not the full id), while the plain-Dockerfile
+ * and editor paths stamp the full id verbatim and so are recovered verbatim.
+ * `null` in both means repo scope — never true for `kind: 'editor'`, which
+ * has no repo-scope variant (see `EditorScopeRef` above).
+ */
+export interface ContainerOwnerCandidate {
+  kind: 'compose' | 'dockerfile' | 'editor'
+  slug: string
+  sessionId: string | null
+  sessionPrefix: string | null
+}
+
+/**
+ * The inverse of `scopedName`'s `${prefix}-${slug}` / `${prefix}-${slug}_${key}`
+ * join, for `prefix = 'agentoo'`. A plain string split rather than one big
+ * regex: SLUG_RE forbids `_` in a slug (see this file's own header), so the
+ * *first* (and only) `_` in a name this feature could ever have produced is
+ * unambiguously the join point, exactly the property `scopedName`'s own
+ * comment documents. A malformed name that happens to embed a second `_`
+ * still parses here (greedily, as part of the candidate slug) but is then
+ * rejected by `isValidSlug` below, never silently accepted.
+ */
+function parseComposeProjectName(
+  name: string,
+): { slug: string; sessionPrefix: string | null } | null {
+  if (!name.startsWith('agentoo-')) return null
+  const rest = name.slice('agentoo-'.length)
+  const sessionMatch = /^(.*)_s-([0-9a-f]{12})$/.exec(rest)
+  const slug = sessionMatch ? sessionMatch[1] : rest
+  const sessionPrefix = sessionMatch ? (sessionMatch[2] ?? null) : null
+  if (!slug || !isValidSlug(slug)) return null
+  return { slug, sessionPrefix }
+}
+
+/**
+ * Precedence, per the design: editor labels first — checked and rejected on
+ * their own terms rather than ever falling through to a looser match, since
+ * `com.agentoo.editor=1` unambiguously names this feature's own editor
+ * namespace regardless of what else is wrong with the rest of the labels —
+ * then a compose label naming one of *this feature's* stacks specifically
+ * (any other compose project, e.g. a human's own `docker compose up`, or
+ * another tool's, is unowned), then the plain-Dockerfile labels. A container
+ * matching none of the three is an ordinary, unrelated container on a daemon
+ * this box's docker feature does not own.
+ */
+export function parseContainerOwner(
+  labels: Record<string, string> | null | undefined,
+): ContainerOwnerCandidate | null {
+  const get = (key: string) => labels?.[key]
+
+  if (get('com.agentoo.editor') === '1') {
+    const slug = get('com.agentoo.editor.project')
+    const sessionId = get('com.agentoo.editor.session')
+    if (!slug || !isValidSlug(slug)) return null
+    if (!sessionId || !isSessionId(sessionId)) return null
+    return { kind: 'editor', slug, sessionId, sessionPrefix: null }
+  }
+
+  const composeProject = get('com.docker.compose.project')
+  if (composeProject !== undefined) {
+    const parsed = parseComposeProjectName(composeProject)
+    if (!parsed) return null
+    return {
+      kind: 'compose',
+      slug: parsed.slug,
+      sessionId: null,
+      sessionPrefix: parsed.sessionPrefix,
+    }
+  }
+
+  if (get('com.agentoo.managed') === '1') {
+    const slug = get('com.agentoo.project')
+    if (!slug || !isValidSlug(slug)) return null
+    const sessionId = get('com.agentoo.session')
+    if (sessionId !== undefined && !isSessionId(sessionId)) return null
+    return { kind: 'dockerfile', slug, sessionId: sessionId ?? null, sessionPrefix: null }
+  }
+
+  return null
+}

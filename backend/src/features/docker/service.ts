@@ -293,12 +293,23 @@ async function resolveRunPort(
 }
 
 /** Commands suggested in a 503 when docker itself is the problem — not a
- * fix we can apply, only the two things an operator checks first. */
-const DAEMON_RECOVERY_COMMANDS = ['sudo systemctl status docker', 'sudo systemctl start docker']
-const CLI_MISSING_RECOVERY_COMMANDS = [
+ * fix we can apply, only the two things an operator checks first. Exported so
+ * system.ts's own daemon-down 503 (the system-wide Docker page's stop
+ * endpoint) quotes the identical guidance rather than a second, driftable
+ * copy of it. */
+export const DAEMON_RECOVERY_COMMANDS = [
+  'sudo systemctl status docker',
+  'sudo systemctl start docker',
+]
+export const CLI_MISSING_RECOVERY_COMMANDS = [
   '# docker is not installed on this host',
   'curl -fsSL https://get.docker.com | sudo sh',
 ]
+
+/** The exact 403 message every docker mutation answers with when the feature
+ * kill switch is off — exported so system.ts's stop endpoint says the same
+ * thing rather than a second literal that could drift from this one. */
+export const DOCKER_DISABLED_MESSAGE = 'Docker controls are disabled (DOCKER_ENABLED=false)'
 
 interface OperationRequest {
   services?: string[]
@@ -320,7 +331,7 @@ async function requestOperation(
 ): Promise<DockerOperationDto> {
   // Cheapest check first: a disabled feature answers 403 before this project
   // (or session) is even looked up.
-  if (!env.DOCKER_ENABLED) throw forbidden('Docker controls are disabled (DOCKER_ENABLED=false)')
+  if (!env.DOCKER_ENABLED) throw forbidden(DOCKER_DISABLED_MESSAGE)
 
   const scope = await resolveDockerScope(projectId, sessionId) // 404s / 400s / 409s
   const detection = await detectProjectDocker(scope.path)

@@ -19,6 +19,7 @@ import {
   imageInspectArgs,
   inspectArgs,
   logsArgs,
+  psAllArgs,
   psFilterArgs,
   runArgs,
   versionArgs,
@@ -189,6 +190,10 @@ test('ps -aq --filter, one label at a time', () => {
     '--filter',
     'label=com.agentoo.project=demo',
   ])
+})
+
+test('ps -aq with no filter: every container on the daemon', () => {
+  expect(psAllArgs()).toEqual(['ps', '-aq'])
 })
 
 test('inspect caps at 200 ids', () => {

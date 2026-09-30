@@ -4,8 +4,10 @@ import {
   composeProjectLabelFilter,
   composeProjectName,
   containerName,
+  editorLabels,
   imageReference,
   managedLabels,
+  parseContainerOwner,
   projectLabelFilter,
   scopeKey,
 } from '../src/features/docker/names'
@@ -215,4 +217,134 @@ test('Defect 1: no two distinct (slug, sessionId) pairs ever produce the same na
   }
   expect(collisions).toBe(0)
   expect(names.size).toBeGreaterThan(1000)
+})
+
+// --- parseContainerOwner: the inverse of the builders above ------------------
+
+const SESSION = '33333333-3333-4333-8333-333333333333'
+const SESSION_SUFFIX = SESSION.replace(/-/g, '').slice(0, 12)
+
+test('round-trips composeProjectName at repo scope', () => {
+  const labels = { 'com.docker.compose.project': composeProjectName(repo('demo')) }
+  expect(parseContainerOwner(labels)).toEqual({
+    kind: 'compose',
+    slug: 'demo',
+    sessionId: null,
+    sessionPrefix: null,
+  })
+})
+
+test('round-trips composeProjectName at worktree scope, recovering the hex12 prefix', () => {
+  const labels = { 'com.docker.compose.project': composeProjectName(worktree('demo', SESSION)) }
+  expect(parseContainerOwner(labels)).toEqual({
+    kind: 'compose',
+    slug: 'demo',
+    sessionId: null,
+    sessionPrefix: SESSION_SUFFIX,
+  })
+})
+
+test('round-trips managedLabels at repo scope', () => {
+  const labels = Object.fromEntries(managedLabels(repo('demo')).map((l) => l.split('=') as [string, string]))
+  expect(parseContainerOwner(labels)).toEqual({
+    kind: 'dockerfile',
+    slug: 'demo',
+    sessionId: null,
+    sessionPrefix: null,
+  })
+})
+
+test('round-trips managedLabels at worktree scope, keeping the full session id', () => {
+  const pairs = managedLabels(worktree('demo', SESSION)).map((l) => {
+    const idx = l.indexOf('=')
+    return [l.slice(0, idx), l.slice(idx + 1)] as [string, string]
+  })
+  const labels = Object.fromEntries(pairs)
+  expect(parseContainerOwner(labels)).toEqual({
+    kind: 'dockerfile',
+    slug: 'demo',
+    sessionId: SESSION,
+    sessionPrefix: null,
+  })
+})
+
+test('round-trips editorLabels', () => {
+  const pairs = editorLabels({ slug: 'demo', sessionId: SESSION }, 'abc123def456').map((l) => {
+    const idx = l.indexOf('=')
+    return [l.slice(0, idx), l.slice(idx + 1)] as [string, string]
+  })
+  const labels = Object.fromEntries(pairs)
+  expect(parseContainerOwner(labels)).toEqual({
+    kind: 'editor',
+    slug: 'demo',
+    sessionId: SESSION,
+    sessionPrefix: null,
+  })
+})
+
+test('editor labels are checked first: malformed editor labels are rejected outright, never falling through', () => {
+  // Carries com.agentoo.editor=1 but no valid session id -- must not be
+  // reinterpreted as a plain-Dockerfile container even though it also
+  // happens to carry com.agentoo.managed=1.
+  const labels = {
+    'com.agentoo.editor': '1',
+    'com.agentoo.editor.project': 'demo',
+    'com.agentoo.editor.session': 'not-a-uuid',
+    'com.agentoo.managed': '1',
+    'com.agentoo.project': 'demo',
+  }
+  expect(parseContainerOwner(labels)).toBeNull()
+})
+
+test('a non-agentoo compose project (e.g. a human running `docker compose up` directly) is null', () => {
+  expect(parseContainerOwner({ 'com.docker.compose.project': 'myapp' })).toBeNull()
+})
+
+test('a compose project shaped like agentoo-<slug> but with a malformed session suffix is null', () => {
+  expect(
+    parseContainerOwner({ 'com.docker.compose.project': 'agentoo-demo_s-notenoughhex' }),
+  ).toBeNull()
+  expect(
+    parseContainerOwner({ 'com.docker.compose.project': 'agentoo-demo_s-UPPERCASE12X' }),
+  ).toBeNull()
+})
+
+test('a compose project whose slug half is invalid is null', () => {
+  expect(parseContainerOwner({ 'com.docker.compose.project': 'agentoo-' })).toBeNull()
+  expect(parseContainerOwner({ 'com.docker.compose.project': 'agentoo-Not_Valid' })).toBeNull()
+})
+
+test('plain-Dockerfile labels with an invalid session label are rejected, not silently treated as repo scope', () => {
+  const labels = {
+    'com.agentoo.managed': '1',
+    'com.agentoo.project': 'demo',
+    'com.agentoo.session': 'not-a-uuid',
+  }
+  expect(parseContainerOwner(labels)).toBeNull()
+})
+
+test('plain-Dockerfile labels with an invalid slug are rejected', () => {
+  expect(parseContainerOwner({ 'com.agentoo.managed': '1', 'com.agentoo.project': 'Not Valid' })).toBeNull()
+})
+
+test('managed=1 with no project label at all is null', () => {
+  expect(parseContainerOwner({ 'com.agentoo.managed': '1' })).toBeNull()
+})
+
+test('an ordinary, unrelated container (no recognised label at all) is null', () => {
+  expect(parseContainerOwner({ 'org.opencontainers.image.title': 'postgres' })).toBeNull()
+  expect(parseContainerOwner({})).toBeNull()
+  expect(parseContainerOwner(null)).toBeNull()
+  expect(parseContainerOwner(undefined)).toBeNull()
+})
+
+test('compose precedes plain-Dockerfile when (implausibly) both label families are present', () => {
+  const labels = {
+    'com.docker.compose.project': 'agentoo-demo',
+    'com.docker.compose.service': 'web',
+    'com.agentoo.managed': '1',
+    'com.agentoo.project': 'other',
+  }
+  expect(parseContainerOwner(labels)?.kind).toBe('compose')
+  expect(parseContainerOwner(labels)?.slug).toBe('demo')
 })

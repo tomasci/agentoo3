@@ -409,6 +409,40 @@ export async function getSessionLocation(
   return row
 }
 
+/**
+ * The docker system listing's own batch lookup (features/docker/system.ts):
+ * every session belonging to one of `projectIds`, with just the columns that
+ * feature's owner resolver needs (see `resolveContainerOwners`,
+ * docker/system.ts) — never the whole session row, for the same reason
+ * `getSessionLocation` above stays narrow.
+ *
+ * One query for however many projects matched a candidate slug, not one
+ * query per container: that endpoint is polled every 5s, and an N+1 there
+ * would scale with the number of *containers* on the box, not the number of
+ * projects.
+ */
+export interface SessionOwnerRow {
+  id: string
+  projectId: string
+  title: string | null
+  branch: string | null
+  worktreePath: string | null
+}
+
+export async function listSessionsForProjects(projectIds: string[]): Promise<SessionOwnerRow[]> {
+  if (projectIds.length === 0) return []
+  return db
+    .select({
+      id: sessions.id,
+      projectId: sessions.projectId,
+      title: sessions.title,
+      branch: sessions.branch,
+      worktreePath: sessions.worktreePath,
+    })
+    .from(sessions)
+    .where(inArray(sessions.projectId, projectIds))
+}
+
 /** Short, readable, and unique enough for a branch name. */
 const branchFor = (sessionId: string) => `agentoo/s-${sessionId.slice(0, 8)}`
 

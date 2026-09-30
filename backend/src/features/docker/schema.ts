@@ -173,6 +173,88 @@ export const dockerOperationSchema = z.object({
   finishedAt: z.string().nullable(),
 })
 
+// --- system-wide listing (GET /docker/containers, POST .../stop) ------------
+//
+// A distinct DTO family from dockerContainerSchema above, not a reuse of it:
+// the system page lists EVERY container on the host, including ones no
+// project in this install owns, so it needs a `composeProject`/`owner` pair
+// dockerContainerSchema deliberately never carries (that schema is always
+// already scoped to one project's own containers — see containers.ts).
+
+export const containerOwnerKindSchema = z.enum(['compose', 'dockerfile', 'editor'])
+
+export const containerOwnerSchema = z.object({
+  kind: containerOwnerKindSchema,
+  projectId: z.string().uuid(),
+  projectName: z.string(),
+  projectSlug: z.string(),
+  sessionId: z.string().uuid().nullable().openapi({
+    description: "null = the project's own repo/ checkout; a session id = that session's worktree.",
+  }),
+  sessionTitle: z.string().nullable(),
+  branch: z.string().nullable(),
+})
+
+export const systemContainerSchema = z.object({
+  id: z.string().openapi({
+    description:
+      'Full 64-hex container id, as `docker inspect` reports it — what the stop ' +
+      'endpoint takes.',
+  }),
+  shortId: z.string(),
+  name: z.string(),
+  image: z.string(),
+  state: containerStateSchema,
+  health: z.enum(['healthy', 'unhealthy', 'starting', 'none']),
+  exitCode: z.number().int().nullable(),
+  createdAt: z.string(),
+  startedAt: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+  composeProject: z.string().nullable().openapi({
+    description: 'The raw com.docker.compose.project label, or null for a non-compose container.',
+  }),
+  service: z.string().nullable(),
+  ports: z.array(z.number().int().min(1).max(65535)).openapi({
+    description:
+      'Distinct published HOST port numbers, ascending — never a bind address. An IPv4 ' +
+      '0.0.0.0 and an IPv6 [::] binding of the same port collapse to one entry.',
+  }),
+  owner: containerOwnerSchema.nullable().openapi({
+    description:
+      'null when the container carries no agentoo/compose ownership label this install ' +
+      'recognises, or when it does but the project/session it names no longer exists here.',
+  }),
+})
+
+export const dockerSystemSchema = z.object({
+  enabled: z.boolean().openapi({
+    description:
+      'env.DOCKER_ENABLED — when false the stop endpoint answers 403. Listing still works: ' +
+      'reads are never gated, same as GET /projects/{id}/docker.',
+  }),
+  daemon: daemonSchema.omit({ composeVersion: true }),
+  containers: z.array(systemContainerSchema).openapi({
+    description:
+      'Every container on the docker host, ordered by name ascending so the list ' +
+      'is stable across polls.',
+  }),
+  fetchedAt: z.string(),
+})
+
+export const stopSystemContainerResponseSchema = z.object({
+  container: systemContainerSchema.nullable().openapi({
+    description:
+      'null means the stop succeeded and the daemon has since removed the container itself ' +
+      '(a `docker run --rm` container auto-removes the moment it stops) — there is no fresher ' +
+      'state left to report. Any other "not found" (a bad id, or the daemon already not knowing ' +
+      'it before the stop was attempted) is a 404, never this null.',
+  }),
+})
+
+export type ContainerOwnerDto = z.infer<typeof containerOwnerSchema>
+export type SystemContainerDto = z.infer<typeof systemContainerSchema>
+export type DockerSystemDto = z.infer<typeof dockerSystemSchema>
+
 // --- requests ----------------------------------------------------------------
 
 const servicesField = z

@@ -1,5 +1,6 @@
 import { createRootRoute, createRoute, createRouter, Link, redirect } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
+import { DockerSystemPage } from '@/features/docker'
 import { AgentEditorPage, LibraryPage, SkillEditorPage } from '@/features/library'
 import { SessionsDashboardPage } from '@/features/sessions'
 import { SettingsPage } from '@/features/settings'
@@ -55,6 +56,18 @@ const sessionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/sessions',
   component: SessionsDashboardPage,
+})
+
+// The System tab's Docker page: every container on the host, across every
+// project — the host-wide counterpart to `projectDockerRoute` below, which
+// only ever shows one project's own containers. Not nested under
+// `projectRoute`: it takes no `$projectId` of its own, and
+// `activeTabIdForPath` (shared/store/tabs.ts) already resolves any path
+// outside `/projects/...` to the system tab.
+const dockerSystemRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/docker',
+  component: DockerSystemPage,
 })
 
 // A layout route, so /projects/$projectId/* shares the project lookup and the
@@ -244,6 +257,7 @@ export const routeTree = rootRoute.addChildren([
   indexRoute,
   newTabRoute,
   sessionsRoute,
+  dockerSystemRoute,
   projectRoute.addChildren([
     projectIndexRoute,
     projectSessionsRoute,

@@ -516,6 +516,30 @@ dashboard visible without the controls live. The installer sets this from
 deliberately separate switches, so a host can have Docker installed and
 `DOCKER_ENABLED=false`, or vice versa if installed by hand.
 
+**`GET /docker/containers`** is the system-wide page's own listing: every
+container the daemon knows about — `docker ps -aq` with no filter, not scoped
+to one project — since this box's daemon is shared with other agentoo
+installs and other tools. Each container's `com.docker.compose.project` /
+`com.agentoo.*` / `com.agentoo.editor.*` labels (see `features/docker/names.ts`)
+are parsed back into a candidate owner and joined against this install's own
+projects and sessions in two batched queries (never one per container, since
+this is meant to be polled every few seconds); an unresolved slug or session —
+including one that names a session sharing its project's checkout rather than
+its own worktree — reports `owner: null` rather than guessing. `ports` is only
+ever the distinct published HOST port numbers, never a bind address. Always
+200, same philosophy as `GET /projects/{id}/docker`: a missing CLI or an
+unreachable daemon is reported through `daemon`, with `containers: []`, and
+reads are never gated by `DOCKER_ENABLED`.
+
+**`POST /docker/containers/{containerId}/stop`** stops one container by id,
+`docker stop` with no `-t` (the daemon still honours each container's own
+configured stop grace period), run inline like the editor feature's own
+`docker rm -f` rather than queued — a single stop is short and bounded, unlike
+`compose up --build`. Gated by `DOCKER_ENABLED` (403), 404s on an unknown id,
+and 409s if a queued compose/dockerfile operation is already running for that
+container's own project/session scope, to avoid racing it. Idempotent:
+stopping an already-stopped container is still a 200 with its current state.
+
 ## Editor
 
 Each isolated session (one with its own git worktree — see "Sessions" above)
