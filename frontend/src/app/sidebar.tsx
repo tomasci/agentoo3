@@ -8,6 +8,7 @@ import {
   Lightbulb,
   MessageSquareText,
   MessagesSquare,
+  Network,
   Settings,
 } from 'lucide-react'
 import type { ReactNode } from 'react'
@@ -144,6 +145,16 @@ function SystemNav() {
               >
                 <HardDrive />
                 <span>{t('nav.storage')}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                render={
+                  <Link to="/ports" activeProps={{ 'aria-current': 'page', 'data-active': '' }} />
+                }
+              >
+                <Network />
+                <span>{t('nav.ports')}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
             {/* The one known prompt today (KNOWN_PROMPTS, features/system/prompts.ts

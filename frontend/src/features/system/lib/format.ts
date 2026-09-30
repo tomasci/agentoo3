@@ -8,3 +8,16 @@ export function formatBytes(bytes: number): string {
   const digits = value < 10 && exponent > 0 ? 1 : 0
   return `${value.toFixed(digits)} ${units[exponent]}`
 }
+
+/** A host and port as one string, bracketing the host when it's IPv6 so its
+ * own colons can't be mistaken for the address/port separator: bare
+ * `2001:4860:4840:400::443` reads as ambiguous (where does the address end?),
+ * while `[2001:4860:4840:400::]:443` doesn't. An address counts as IPv6 the
+ * moment it contains a `:` — a zone suffix (`fe80::1%eth0`) is part of that
+ * address and stays inside the brackets rather than tacked on after them.
+ * IPv4 and the `*` wildcard have no `:` of their own, so they render
+ * unbracketed. A null `port` renders the host alone, with no dangling `:`. */
+export function formatHostPort(address: string, port: number | null): string {
+  const host = address.includes(':') ? `[${address}]` : address
+  return port == null ? host : `${host}:${port}`
+}
