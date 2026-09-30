@@ -1,8 +1,15 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import { errorSchema } from '@/features/projects/schema'
 import { getModels } from './models'
+import { getPorts } from './ports'
 import { getPrompt, resetPrompt, updatePrompt } from './prompts'
-import { modelsResponseSchema, promptSchema, updatePromptSchema } from './schema'
+import {
+  modelsResponseSchema,
+  portScopeSchema,
+  portsResponseSchema,
+  promptSchema,
+  updatePromptSchema,
+} from './schema'
 import { systemStats } from './service'
 
 const systemSchema = z.object({
@@ -145,4 +152,36 @@ systemRouter.openapi(
     },
   }),
   async (c) => c.json(await resetPrompt(c.req.valid('param').name), 200),
+)
+
+// --- the port table -------------------------------------------------------
+//
+// A structured `ss -tulpn`: read-only, and the process column is only ever
+// as complete as `ss -p`'s own — see the module comment on ports.ts for why
+// most rows on this deployment have no resolvable process at all.
+
+const portsQuery = z.object({
+  scope: portScopeSchema.default('listening').openapi({
+    param: { name: 'scope', in: 'query' },
+  }),
+})
+
+systemRouter.openapi(
+  createRoute({
+    method: 'get',
+    path: '/system/ports',
+    tags: ['system'],
+    summary: "The host's current port -> process mapping",
+    description:
+      'Backed by `ss`, falling back to /proc/net/{tcp,tcp6,udp,udp6} plus a /proc/*/fd scan when ' +
+      '`ss` is missing or its output cannot be parsed. Never a 500 for either of those — only a ' +
+      '503, and only if both readers fail.',
+    request: { query: portsQuery },
+    responses: {
+      200: json(portsResponseSchema, 'The current port table'),
+      400: json(errorSchema, 'scope was not one of listening, all'),
+      503: json(errorSchema, 'Neither `ss` nor /proc could be read'),
+    },
+  }),
+  async (c) => c.json(await getPorts(c.req.valid('query').scope), 200),
 )

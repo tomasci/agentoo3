@@ -281,13 +281,14 @@ test('the system sidebar lists Sessions first, and its brand link goes to /sessi
   const menu = [...(sidebar()?.querySelectorAll('[data-slot="sidebar-content"] a') ?? [])]
   expect(menu.map((a) => a.getAttribute('href'))[0]).toBe('/sessions')
   expect(text(menu[0])).toBe('Sessions')
-  // The brand link plus six menu items — the existing ones kept, after Sessions.
+  // The brand link plus seven menu items — the existing ones kept, after Sessions.
   expect(links.map((a) => a.getAttribute('href'))).toEqual([
     '/sessions',
     '/sessions',
     '/library',
     '/ssh-keys',
     '/storage',
+    '/ports',
     '/prompts/idea-to-prompt',
     '/settings',
   ])

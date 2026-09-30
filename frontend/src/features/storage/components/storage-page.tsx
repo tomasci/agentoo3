@@ -1,6 +1,5 @@
 import { Link } from '@tanstack/react-router'
 import {
-  type Column,
   createColumnHelper,
   getCoreRowModel,
   getSortedRowModel,
@@ -8,7 +7,7 @@ import {
   type SortingState,
   useReactTable,
 } from '@tanstack/react-table'
-import { ArrowDownIcon, ArrowUpIcon, CircleAlertIcon, TriangleAlertIcon } from 'lucide-react'
+import { CircleAlertIcon, TriangleAlertIcon } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
@@ -23,6 +22,7 @@ import {
   Loading,
   type MenuAction,
   PageHeader,
+  SortableHeader,
   StatusBadge,
   toast,
 } from '@/shared/components'
@@ -66,31 +66,6 @@ const OUTCOME_TOAST_TYPE: Record<'success' | 'accent' | 'danger', 'success' | 'i
   success: 'success',
   accent: 'info',
   danger: 'error',
-}
-
-/** A column header that also toggles that column's sort — `DataTable` itself
- * renders whatever a column's own `header` returns, so a clickable, stateful
- * header is a per-column concern, not something the shared table needs to
- * know about. */
-function SortableHeader({
-  label,
-  column,
-}: {
-  label: string
-  column: Column<StorageAnomaly, unknown>
-}) {
-  const sorted = column.getIsSorted()
-  return (
-    <button
-      type="button"
-      className="inline-flex items-center gap-1 rounded-sm font-medium hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      onClick={column.getToggleSortingHandler()}
-    >
-      {label}
-      {sorted === 'asc' && <ArrowUpIcon className="size-3" />}
-      {sorted === 'desc' && <ArrowDownIcon className="size-3" />}
-    </button>
-  )
 }
 
 /** A session id, upgraded to a link once (id, still-existing) is confirmed —

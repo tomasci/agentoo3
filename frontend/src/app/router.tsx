@@ -5,7 +5,7 @@ import { SessionsDashboardPage } from '@/features/sessions'
 import { SettingsPage } from '@/features/settings'
 import { SshKeysPage } from '@/features/ssh-keys'
 import { StoragePage } from '@/features/storage'
-import { PromptEditorPage } from '@/features/system'
+import { PortsPage, PromptEditorPage } from '@/features/system'
 import { SYSTEM_HOME } from '@/shared/store/tabs'
 import { buttonVariants } from '@/shared/ui/button'
 import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
@@ -224,6 +224,14 @@ const storageRoute = createRoute({
   component: StoragePage,
 })
 
+// The System tab's live port table (a structured `ss -tulpn`): which
+// process, if any, owns each socket on the host.
+const portsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/ports',
+  component: PortsPage,
+})
+
 // An operator-editable instruction, addressed by the backend's own fixed name
 // for it (KNOWN_PROMPTS in features/system/prompts.ts) rather than by
 // anything a user picks — there is no "new prompt" route, unlike the library's
@@ -265,6 +273,7 @@ export const routeTree = rootRoute.addChildren([
   sshKeysRoute,
   settingsRoute,
   storageRoute,
+  portsRoute,
   promptRoute,
 ])
 
