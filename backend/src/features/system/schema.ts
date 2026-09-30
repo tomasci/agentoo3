@@ -106,8 +106,28 @@ export const portSourceSchema = z.enum(['ss', 'proc']).openapi({
     '/proc/net/{tcp,tcp6,udp,udp6} fallback used when `ss` is missing, exits non-zero, or its ' +
     "output does not parse. 'proc' rows are slightly less detailed than `ss`'s: /proc/net has no " +
     "record of a socket's bound interface, so a zone suffix ss would print ('%lo', '%eth0') is " +
-    "never there, and a dual-stack wildcard listener comes back as '::' where ss prints '*'.",
+    "never there, and a dual-stack wildcard listener comes back as '::' where ss prints '*'. It " +
+    "also has no cgroup column at all, so a 'proc' row can never carry attribution: 'service' " +
+    "(see portAttributionSchema) — only 'socket' and 'docker' are possible there.",
 })
+
+export const portAttributionSchema = z.enum(['socket', 'docker', 'service', 'none']).openapi({
+  description:
+    'How pid/processName were determined for this row, in the order they are tried (first match ' +
+    "wins). 'socket' is the kernel's own fd table: ss's own verified `users:((...))` column, or, " +
+    'in the /proc fallback, a direct /proc/*/fd scan — either way, only ever a socket this ' +
+    "backend's own uid holds. 'docker' is a docker-proxy process matched by cmdline (proto/host-ip/" +
+    'host-port), found by scanning /proc — this works for a socket owned by any uid, since a ' +
+    "process's own cmdline is process-table metadata, not something only its uid can read; " +
+    '`container` is filled alongside it when Docker could be reached and exactly one container ' +
+    "publishes that port. 'service' names the systemd unit implied by the socket's own cgroup, " +
+    "attributed to that unit's main process: reliable for the *name* (nginx, postgres, ...), and " +
+    "the pid is the unit's main process, which in practice is the listener itself for a " +
+    "single-process unit (nginx's master, postgres's postmaster) — not guaranteed to be the " +
+    "specific worker behind any one connection. 'none' when nothing above resolved a process; " +
+    "`pid` stays null and `processName` stays the literal string 'unknown'.",
+})
+export type PortAttributionDto = z.infer<typeof portAttributionSchema>
 
 export const portEntrySchema = z.object({
   protocol: z.enum(['tcp', 'udp']),
@@ -139,15 +159,45 @@ export const portEntrySchema = z.object({
     .number()
     .int()
     .nullable()
-    .openapi({ description: 'Null when the process could not be resolved.' }),
+    .openapi({ description: "Null exactly when attribution is 'none'." }),
   processName: z.string().openapi({
-    description: "The literal string 'unknown' when processKnown is false.",
+    description: "The literal string 'unknown' when attribution is 'none'.",
   }),
   processKnown: z.boolean().openapi({
     description:
-      'False when the process could not be resolved — kept as its own field so a caller never ' +
-      "has to string-compare processName against 'unknown'.",
+      "True exactly when attribution is not 'none' — kept as its own boolean field so a caller " +
+      "never has to string-compare attribution or processName to ask 'do we know the process'.",
   }),
+  attribution: portAttributionSchema,
+  unit: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        "The systemd unit implied by this socket's own cgroup — e.g. 'nginx.service', " +
+        "'postgresql@18-main.service', 'ssh.socket' — filled whenever known, regardless of which " +
+        'attribution won (a docker-proxy row still names docker.service here, for instance). Null ' +
+        "when the socket's cgroup was absent, unreadable, or named no unit at all (a bare slice).",
+    }),
+  container: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        "Docker container name. Only ever set when attribution is 'docker' and exactly one running " +
+        'container was found publishing this exact host port and protocol; null otherwise, ' +
+        'including when Docker could not be reached or the match was ambiguous.',
+    }),
+  owner: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        "Username for the socket's own uid: 'root' for uid 0, the plain numeric uid as a string " +
+        'when /etc/passwd has no matching entry, or null when the uid itself is unknown (an old ss ' +
+        'with no `-e` support, or an unattributed row from the /proc fallback). Filled whenever ' +
+        'known, regardless of which attribution won.',
+    }),
 })
 export type PortEntryDto = z.infer<typeof portEntrySchema>
 
@@ -166,8 +216,18 @@ export const portsResponseSchema = z.object({
   total: z.number().int().openapi({ description: 'Row count before truncation to MAX_ROWS.' }),
   truncated: z.boolean().openapi({ description: 'True when total exceeded the row cap.' }),
   unattributedCount: z.number().int().openapi({
-    description: 'Rows (after truncation) with processKnown: false.',
+    description:
+      "Rows (after truncation) with attribution 'none' (equivalently, processKnown: false).",
   }),
+  inferredCount: z
+    .number()
+    .int()
+    .openapi({
+      description:
+        "Rows (after truncation) with attribution 'docker' or 'service' — resolved by inference " +
+        "(a process-table match, or a systemd unit's main process) rather than the kernel's own fd " +
+        "table ('socket').",
+    }),
   ports: z.array(portEntrySchema),
 })
 export type PortsResponseDto = z.infer<typeof portsResponseSchema>

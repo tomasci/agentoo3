@@ -2,8 +2,9 @@
 // covering what tests/ports-page.test.tsx leaves out: numeric (not
 // lexicographic) Port and PID sorting, unresolved PIDs staying last in both
 // directions, recovery from a first-load 503 via Refresh, a failed refetch
-// that keeps the previous rows, the interpolated wording of the truncated and
-// permissions notices (root, named user, no user), the filter's count and
+// that keeps the previous rows, the interpolated wording of the truncated
+// notice and the unattributed/inferred notice (a named user, no user, and
+// `runningAsRoot` suppressing only the inferred half), the filter's count and
 // no-match state, the already-pressed scope toggle, Refresh issuing exactly
 // one request per click and being disabled while in flight, and the absence
 // of polling or focus refetches.
@@ -39,6 +40,10 @@ type Port = {
   pid: number | null
   processName: string
   processKnown: boolean
+  attribution: 'socket' | 'docker' | 'service' | 'none'
+  unit: string | null
+  container: string | null
+  owner: string | null
 }
 
 const port = (o: Partial<Port> & { localPort: number }): Port => ({
@@ -50,11 +55,15 @@ const port = (o: Partial<Port> & { localPort: number }): Port => ({
   pid: null,
   processName: 'unknown',
   processKnown: false,
+  attribution: 'none',
+  unit: null,
+  container: null,
+  owner: null,
   ...o,
 })
 
 const known = (localPort: number, pid: number, processName: string, o: Partial<Port> = {}) =>
-  port({ localPort, pid, processName, processKnown: true, ...o })
+  port({ localPort, pid, processName, processKnown: true, attribution: 'socket', ...o })
 
 const DEFAULT_PORTS: Port[] = [
   known(8080, 1234, 'node'),
@@ -73,6 +82,8 @@ function response(overrides: Record<string, unknown> = {}) {
     total: ports.length,
     truncated: false,
     unattributedCount: ports.filter((p) => !p.processKnown).length,
+    inferredCount: ports.filter((p) => p.attribution === 'docker' || p.attribution === 'service')
+      .length,
     ports,
     ...overrides,
   }
@@ -436,7 +447,7 @@ test('the loading state is a status region with the loading label, and no table 
   expect(container.querySelector('table')).toBeNull()
 })
 
-// --- Requirement 7: unresolved rows and the permissions notice ------------
+// --- Requirement 7: unresolved rows and the unattributed/inferred notices --
 
 test('an unresolved row shows "—" for PID and a muted "unknown" process', async () => {
   await mount(english)
@@ -448,40 +459,67 @@ test('an unresolved row shows "—" for PID and a muted "unknown" process', asyn
   expect(processCell?.querySelector('span')?.className ?? '').toContain('text-muted-foreground')
 })
 
-test('the permissions notice names the backend user when not root', async () => {
+// The contract behind this notice changed: `unattributedCount` now only ever
+// counts `attribution: 'none'` rows (a kernel that truly reported no owning
+// process — a TIME-WAIT connection, say), not "hidden because the backend
+// can't read another uid's fd table" — DEFAULT_PORTS' own port-22 row is
+// still one of those regardless, so the count below (1 of 3) is unchanged,
+// but the sentence naming it no longer mentions the backend's user at all.
+test('the unattributed notice states how many sockets have no identifiable process', async () => {
   await mount(english)
   await settle()
-  const notice = statusTexts().find((s) => s.includes('Process details are hidden'))
+  const notice = statusTexts().find((s) => s.includes('no identifiable process'))
   expect(notice).toBe(
-    'Process details are hidden for 1 of 3 sockets. The backend runs as "agentoo" and can only see its own processes; sockets owned by other users (root services, other accounts) show as unknown.',
+    '1 of 3 sockets have no identifiable process (for example connections in TIME-WAIT, which no process holds any more).',
   )
 })
 
-test('runningAsRoot: true uses the root wording, without claiming a permissions limit', async () => {
+test('runningAsRoot leaves the unattributed sentence exactly as it reads for a non-root backend', async () => {
   responseData = response({ runningAsRoot: true, user: 'root' })
   await mount(english)
   await settle()
-  const notice = statusTexts().find((s) => s.includes('Process details are hidden'))
+  const notice = statusTexts().find((s) => s.includes('no identifiable process'))
   expect(notice).toBe(
-    'Process details are hidden for 1 of 3 sockets — the kernel did not report an owning process for them.',
+    '1 of 3 sockets have no identifiable process (for example connections in TIME-WAIT, which no process holds any more).',
   )
 })
 
-test('user: null falls back to the no-user wording', async () => {
-  responseData = response({ user: null })
+// `user: null` no longer touches the unattributed sentence (above) — the
+// only sentence it still varies is the *inferred* one, which needs at least
+// one `service`/`docker` row to say anything at all.
+test('user: null falls back to the inferred sentence\'s no-user wording', async () => {
+  responseData = response({
+    user: null,
+    ports: [...DEFAULT_PORTS, known(443, 50, 'nginx', { attribution: 'service', unit: 'nginx.service', owner: 'root' })],
+  })
   await mount(english)
   await settle()
-  const notice = statusTexts().find((s) => s.includes('Process details are hidden'))
-  expect(notice).toBe(
-    'Process details are hidden for 1 of 3 sockets. The backend runs as a non-root account and can only see its own processes; sockets owned by other users (root services, other accounts) show as unknown.',
+  const notice = statusTexts().find((s) => s.includes('systemd unit or Docker'))
+  // DEFAULT_PORTS' own unattributed port-22 row means `unattributedCount` is
+  // also non-zero here, so this same status region carries that sentence
+  // too (see ports-page.tsx's own "both sentences in one Alert" comment) —
+  // `toContain`, not `toBe`, is what leaves that second sentence out of
+  // this assertion's business.
+  expect(notice).toContain(
+    '1 processes were identified from their systemd unit or Docker, because the backend runs as a non-root account and can\'t read other users\' sockets directly — they\'re marked with ⓘ.',
   )
 })
 
-test('the permissions notice renders in Russian under the ru bundle, naming the user', async () => {
+test('running as root suppresses the inferred sentence even when a row was in fact inferred', async () => {
+  responseData = response({
+    runningAsRoot: true,
+    user: 'root',
+    ports: [...DEFAULT_PORTS, known(443, 50, 'nginx', { attribution: 'service', unit: 'nginx.service', owner: 'root' })],
+  })
+  await mount(english)
+  await settle()
+  expect(statusTexts().find((s) => s.includes('systemd unit or Docker'))).toBeUndefined()
+})
+
+test('the unattributed notice renders in Russian under the ru bundle', async () => {
   await mount(russian)
   await settle()
-  const notice = statusTexts().find((s) => s.includes('Сведения о процессе'))
-  expect(notice).toContain('«agentoo»')
+  const notice = statusTexts().find((s) => s.includes('не имеют определяемого процесса'))
   expect(notice).toContain('1 из 3')
 })
 
@@ -541,13 +579,14 @@ test('no truncated notice when truncated is false', async () => {
   expect(container.textContent).not.toContain('Showing the first')
 })
 
-test('an empty port table shows the empty state and no permissions notice', async () => {
+test('an empty port table shows the empty state and no unattributed/inferred notice', async () => {
   responseData = response({ ports: [] })
   await mount(english)
   await settle()
   expect(container.textContent).toContain('No sockets found.')
   expect(container.querySelector('table')).toBeNull()
-  expect(container.textContent).not.toContain('Process details are hidden')
+  expect(container.textContent).not.toContain('no identifiable process')
+  expect(container.textContent).not.toContain('systemd unit or Docker')
   expect(container.textContent).toContain('Showing 0 of 0')
 })
 

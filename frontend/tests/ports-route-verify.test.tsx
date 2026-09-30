@@ -33,6 +33,7 @@ await mockModule('@/shared/api/generated/clients/getApiSystemPorts', () => ({
         total: 1,
         truncated: false,
         unattributedCount: 0,
+        inferredCount: 0,
         ports: [
           {
             protocol: 'tcp',
@@ -44,6 +45,10 @@ await mockModule('@/shared/api/generated/clients/getApiSystemPorts', () => ({
             pid: 4242,
             processName: 'bun-route-probe',
             processKnown: true,
+            attribution: 'socket',
+            unit: null,
+            container: null,
+            owner: 'agentoo',
           },
         ],
       },

@@ -603,10 +603,15 @@
       "state": "State",
       "peer": "Remote {{hostPort}}"
     },
-    "unattributed": {
-      "withUser": "Process details are hidden for {{count}} of {{total}} sockets. The backend runs as \"{{user}}\" and can only see its own processes; sockets owned by other users (root services, other accounts) show as unknown.",
-      "withoutUser": "Process details are hidden for {{count}} of {{total}} sockets. The backend runs as a non-root account and can only see its own processes; sockets owned by other users (root services, other accounts) show as unknown.",
-      "root": "Process details are hidden for {{count}} of {{total}} sockets — the kernel did not report an owning process for them."
+    "attribution": {
+      "label": "How this was identified",
+      "serviceTooltip": "Named from the socket's systemd unit \"{{unit}}\"; the PID is that unit's main process. The backend can't read other users' file descriptors, so this is inferred rather than read from the socket itself.",
+      "dockerTooltip": "Published by Docker for container \"{{container}}\"; the PID is the docker-proxy holding the port."
+    },
+    "notice": {
+      "inferredWithUser": "{{count}} processes were identified from their systemd unit or Docker, because the backend runs as \"{{user}}\" and can't read other users' sockets directly — they're marked with ⓘ.",
+      "inferredWithoutUser": "{{count}} processes were identified from their systemd unit or Docker, because the backend runs as a non-root account and can't read other users' sockets directly — they're marked with ⓘ.",
+      "unattributed": "{{count}} of {{total}} sockets have no identifiable process (for example connections in TIME-WAIT, which no process holds any more)."
     },
     "truncated": "Showing the first {{shown}} of {{total}} sockets.",
     "lastRefreshed": "Last refreshed {{time}} — source: {{source}}",

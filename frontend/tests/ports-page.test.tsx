@@ -1,18 +1,23 @@
 // The Ports page (`PortsPage`, route `/ports`): a live `ss -tulpn` — loading,
-// an unresolved row's own "unknown" marker, the client-side global filter
-// (by process name and by port), the Port column's sort toggle, Refresh
-// issuing a new request, a 503 rendered as a readable alert rather than a
-// blank page, and the informational "process details are hidden" notice
-// that appears whenever the response says some sockets went unattributed,
-// switching scope: the previous rows (and the scope toggle itself) stay on
-// screen, dimmed, rather than the whole page flickering away while the new
-// scope loads — see `usePorts`' own comment on `placeholderData:
-// keepPreviousData` — and that same "manual refresh only" contract holding
-// even without the app's own `refetchOnWindowFocus: false` default (neither
-// a focus nor a reconnect event refetches), the "Last refreshed" time
-// following the active i18next language rather than the browser's own
-// locale, and the global filter matching what an unresolved row actually
-// shows (the translated "unknown" label) rather than its raw `processName`.
+// an unresolved row's own "unknown" marker, the Process Name cell's own
+// muted second line (the systemd unit or Docker container behind an
+// inferred name, plus its owner) and the ⓘ marker next to a `service`- or
+// `docker`-attributed name, the client-side global filter (by process name,
+// port, PID, address, unit, container and owner), the Port column's sort
+// toggle, unknown process names sorting last on the Process Name column too,
+// Refresh issuing a new request, a 503 rendered as a readable alert rather
+// than a blank page, and the informational notice that names how many rows
+// were inferred (rather than read straight from a socket) and how many are
+// unattributed altogether, switching scope: the previous rows (and the scope
+// toggle itself) stay on screen, dimmed, rather than the whole page
+// flickering away while the new scope loads — see `usePorts`' own comment on
+// `placeholderData: keepPreviousData` — and that same "manual refresh only"
+// contract holding even without the app's own `refetchOnWindowFocus: false`
+// default (neither a focus nor a reconnect event refetches), the "Last
+// refreshed" time following the active i18next language rather than the
+// browser's own locale, and the global filter matching what an unresolved
+// row actually shows (the translated "unknown" label) rather than its raw
+// `processName`.
 //
 // Rendered with no router at all: unlike storage-page.tsx's anomalies table,
 // this page never renders a `Link` (there is nothing here to navigate to),
@@ -55,6 +60,10 @@ const PORTS = [
     pid: 1234,
     processName: 'node',
     processKnown: true,
+    attribution: 'socket',
+    unit: null,
+    container: null,
+    owner: 'agentoo',
   },
   {
     protocol: 'tcp',
@@ -66,6 +75,10 @@ const PORTS = [
     pid: null,
     processName: 'unknown',
     processKnown: false,
+    attribution: 'none',
+    unit: null,
+    container: null,
+    owner: null,
   },
   {
     protocol: 'udp',
@@ -77,6 +90,10 @@ const PORTS = [
     pid: 999,
     processName: 'systemd-resolved',
     processKnown: true,
+    attribution: 'socket',
+    unit: 'systemd-resolved.service',
+    container: null,
+    owner: 'systemd-resolved',
   },
 ]
 
@@ -91,6 +108,8 @@ function response(overrides: Record<string, unknown> = {}) {
     total: ports.length,
     truncated: false,
     unattributedCount: ports.filter((p) => !p.processKnown).length,
+    inferredCount: ports.filter((p) => p.attribution === 'docker' || p.attribution === 'service')
+      .length,
     ports,
     ...overrides,
   }
@@ -243,6 +262,151 @@ test('renders every row, marking an unresolved one with the unknown-process mark
   expect(container.querySelectorAll('tbody tr').length).toBe(3)
 })
 
+test('a docker-attributed row\'s second line names its container, not its unit', async () => {
+  responseData = response({
+    ports: [
+      {
+        protocol: 'tcp',
+        localAddress: '0.0.0.0',
+        localPort: 8100,
+        peerAddress: null,
+        peerPort: null,
+        state: 'LISTEN',
+        pid: 55555,
+        processName: 'docker-proxy',
+        processKnown: true,
+        attribution: 'docker',
+        unit: 'docker.service',
+        container: 'agentoo-agentoo3_s-95b7290f50be-backend-1',
+        owner: 'root',
+      },
+    ],
+  })
+  await mount()
+  await settle()
+
+  const row = container.querySelector('tbody tr')
+  expect(row?.textContent).toContain('docker-proxy')
+  expect(row?.textContent).toContain('agentoo-agentoo3_s-95b7290f50be-backend-1 · root')
+})
+
+test('a service-attributed row\'s second line names its unit and its owner', async () => {
+  responseData = response({
+    ports: [
+      {
+        protocol: 'tcp',
+        localAddress: '0.0.0.0',
+        localPort: 80,
+        peerAddress: null,
+        peerPort: null,
+        state: 'LISTEN',
+        pid: 1153,
+        processName: 'nginx',
+        processKnown: true,
+        attribution: 'service',
+        unit: 'nginx.service',
+        container: null,
+        owner: 'root',
+      },
+    ],
+  })
+  await mount()
+  await settle()
+
+  const row = container.querySelector('tbody tr')
+  expect(row?.textContent).toContain('nginx.service · root')
+})
+
+test('an unattributed row still shows its owner on a second line, even with no process name at all', async () => {
+  responseData = response({
+    ports: [
+      {
+        protocol: 'tcp',
+        localAddress: '10.0.0.5',
+        localPort: 51000,
+        peerAddress: '93.184.216.34',
+        peerPort: 443,
+        state: 'TIME-WAIT',
+        pid: null,
+        processName: 'unknown',
+        processKnown: false,
+        attribution: 'none',
+        unit: null,
+        container: null,
+        owner: 'root',
+      },
+    ],
+  })
+  await mount()
+  await settle()
+
+  const row = container.querySelector('tbody tr')
+  expect(row?.textContent).toContain('ports.unknownProcess')
+  // "unknown", then its owner on the line under it — an
+  // "unknown / root" row is more useful than a bare "unknown".
+  expect(row?.textContent).toContain('root')
+})
+
+test('the info marker sits next to a service- or docker-attributed name, never a socket-attributed one', async () => {
+  responseData = response({
+    ports: [
+      {
+        protocol: 'tcp',
+        localAddress: '127.0.0.1',
+        localPort: 8000,
+        peerAddress: null,
+        peerPort: null,
+        state: 'LISTEN',
+        pid: 1261535,
+        processName: 'bun',
+        processKnown: true,
+        attribution: 'socket',
+        unit: 'agentoo-api.service',
+        container: null,
+        owner: 'agentoo',
+      },
+      {
+        protocol: 'tcp',
+        localAddress: '0.0.0.0',
+        localPort: 22,
+        peerAddress: null,
+        peerPort: null,
+        state: 'LISTEN',
+        pid: 1,
+        processName: 'systemd',
+        processKnown: true,
+        attribution: 'service',
+        unit: 'ssh.socket',
+        container: null,
+        owner: 'root',
+      },
+      {
+        protocol: 'tcp',
+        localAddress: '0.0.0.0',
+        localPort: 8100,
+        peerAddress: null,
+        peerPort: null,
+        state: 'LISTEN',
+        pid: 55555,
+        processName: 'docker-proxy',
+        processKnown: true,
+        attribution: 'docker',
+        unit: 'docker.service',
+        container: 'agentoo-agentoo3_s-95b7290f50be-backend-1',
+        owner: 'root',
+      },
+    ],
+  })
+  await mount()
+  await settle()
+
+  // Exactly the service and docker rows get a marker — the socket-attributed
+  // one (an exact read from the kernel's own fd table) gets none — and each
+  // marker carries an accessible label a screen reader can announce.
+  const markers = container.querySelectorAll('[aria-label="ports.attribution.label"]')
+  expect(markers.length).toBe(2)
+})
+
 test('filtering by process name narrows the rows to just that process', async () => {
   await mount()
   await settle()
@@ -265,6 +429,72 @@ test('filtering by port number narrows the rows to just that socket', async () =
   const rows = container.querySelectorAll('tbody tr')
   expect(rows.length).toBe(1)
   expect(rows[0]?.textContent).toContain('systemd-resolved')
+})
+
+test('the filter also matches a row\'s systemd unit, its Docker container, and its owner', async () => {
+  responseData = response({
+    ports: [
+      {
+        protocol: 'tcp',
+        localAddress: '0.0.0.0',
+        localPort: 80,
+        peerAddress: null,
+        peerPort: null,
+        state: 'LISTEN',
+        pid: 1153,
+        processName: 'nginx',
+        processKnown: true,
+        attribution: 'service',
+        unit: 'nginx.service',
+        container: null,
+        owner: 'root',
+      },
+      {
+        protocol: 'tcp',
+        localAddress: '0.0.0.0',
+        localPort: 8100,
+        peerAddress: null,
+        peerPort: null,
+        state: 'LISTEN',
+        pid: 55555,
+        processName: 'docker-proxy',
+        processKnown: true,
+        attribution: 'docker',
+        unit: 'docker.service',
+        container: 'agentoo-agentoo3_s-95b7290f50be-backend-1',
+        owner: 'root',
+      },
+      {
+        protocol: 'tcp',
+        localAddress: '127.0.0.1',
+        localPort: 5432,
+        peerAddress: null,
+        peerPort: null,
+        state: 'LISTEN',
+        pid: 1203,
+        processName: 'postgres',
+        processKnown: true,
+        attribution: 'service',
+        unit: 'postgresql@18-main.service',
+        container: null,
+        owner: 'postgres',
+      },
+    ],
+  })
+  await mount()
+  await settle()
+
+  await type(filterInput(), 'nginx.service')
+  await settle(1)
+  expect(portCells()).toEqual(['80'])
+
+  await type(filterInput(), 'agentoo-agentoo3_s-95b7290f50be-backend-1')
+  await settle(1)
+  expect(portCells()).toEqual(['8100'])
+
+  await type(filterInput(), 'postgres')
+  await settle(1)
+  expect(portCells()).toEqual(['5432'])
 })
 
 test('the filter shows no match instead of silently emptying the table', async () => {
@@ -314,6 +544,41 @@ test('clicking the Port header reverses the row order', async () => {
   await click(header)
 
   expect(portCells()).toEqual(['8080', '53', '22'])
+})
+
+test('sorting by Process Name keeps unknown rows last in both directions', async () => {
+  responseData = response({
+    ports: [
+      // `owner: null` here: PORTS[0]'s own 'agentoo' owner would otherwise
+      // render as a second line under the name, and `nameCells` below reads
+      // the whole cell's `textContent` — name and second line run together
+      // with nothing separating them in that string.
+      { ...PORTS[0], localPort: 10, processName: 'zeta', processKnown: true, owner: null },
+      { ...PORTS[1], localPort: 20 },
+      { ...PORTS[0], localPort: 30, processName: 'alpha', processKnown: true, owner: null },
+    ],
+  })
+  await mount()
+  await settle()
+
+  const nameCells = () =>
+    [...container.querySelectorAll('tbody tr')].map((row) => row.children[4]?.textContent)
+  // Re-found before each click, not captured once: `SortableHeader`'s own
+  // arrow re-renders on every sort change, and clicking a stale reference to
+  // the pre-sort DOM node would silently do nothing on the second click —
+  // see tests/ports-page-verify.test.tsx's own PID sort tests, which use
+  // `findButton` fresh each time for the same reason.
+  const header = () => {
+    const b = buttons().find((el) => el.textContent?.trim() === 'ports.table.processName')
+    if (!b) throw new Error('no Process Name column header button')
+    return b
+  }
+
+  await click(header())
+  expect(nameCells()).toEqual(['alpha', 'zeta', 'ports.unknownProcess'])
+
+  await click(header())
+  expect(nameCells()).toEqual(['zeta', 'alpha', 'ports.unknownProcess'])
 })
 
 test('Refresh issues a second request for the current scope', async () => {
@@ -367,21 +632,110 @@ test('a 503 renders the backend\'s own message in an alert, not a blank page', a
   expect(findButton('ports.refresh')).toBeDefined()
 })
 
-test('the permissions notice appears when some sockets went unattributed', async () => {
+test('the unattributed notice appears when some sockets have no identifiable process', async () => {
   await mount()
   await settle()
 
-  expect(container.textContent).toContain('ports.unattributed.withUser')
+  expect(container.textContent).toContain('ports.notice.unattributed')
 })
 
-test('no permissions notice when every socket resolved to a known process', async () => {
+test('no notice at all when every socket resolved to a known, directly-read process', async () => {
   responseData = response({
     ports: PORTS.filter((p) => p.processKnown),
   })
   await mount()
   await settle()
 
-  expect(container.textContent).not.toContain('ports.unattributed')
+  // Both node and systemd-resolved above resolve via `attribution: 'socket'`
+  // — an exact read, not an inference — so neither the inferred nor the
+  // unattributed half of the notice has anything to say.
+  expect(container.textContent).not.toContain('ports.notice')
+})
+
+test('the inferred notice appears, naming the backend user, when some rows were identified via unit or Docker rather than read directly', async () => {
+  responseData = response({
+    ports: [
+      PORTS[0],
+      {
+        protocol: 'tcp',
+        localAddress: '0.0.0.0',
+        localPort: 80,
+        peerAddress: null,
+        peerPort: null,
+        state: 'LISTEN',
+        pid: 1153,
+        processName: 'nginx',
+        processKnown: true,
+        attribution: 'service',
+        unit: 'nginx.service',
+        container: null,
+        owner: 'root',
+      },
+    ],
+  })
+  await mount()
+  await settle()
+
+  expect(container.textContent).toContain('ports.notice.inferredWithUser')
+})
+
+test('running as root suppresses the inferred sentence, even when some rows are still counted as inferred', async () => {
+  responseData = response({
+    runningAsRoot: true,
+    ports: [
+      PORTS[0],
+      {
+        protocol: 'tcp',
+        localAddress: '0.0.0.0',
+        localPort: 80,
+        peerAddress: null,
+        peerPort: null,
+        state: 'LISTEN',
+        pid: 1153,
+        processName: 'nginx',
+        processKnown: true,
+        attribution: 'service',
+        unit: 'nginx.service',
+        container: null,
+        owner: 'root',
+      },
+    ],
+  })
+  await mount()
+  await settle()
+
+  expect(container.textContent).not.toContain('ports.notice.inferred')
+})
+
+test('the inferred and unattributed sentences both appear in the same notice when both counts are non-zero', async () => {
+  responseData = response({
+    ports: [
+      PORTS[1],
+      {
+        protocol: 'tcp',
+        localAddress: '0.0.0.0',
+        localPort: 80,
+        peerAddress: null,
+        peerPort: null,
+        state: 'LISTEN',
+        pid: 1153,
+        processName: 'nginx',
+        processKnown: true,
+        attribution: 'service',
+        unit: 'nginx.service',
+        container: null,
+        owner: 'root',
+      },
+    ],
+  })
+  await mount()
+  await settle()
+
+  const notice = [...container.querySelectorAll('[role="status"]')].find(
+    (el) => el.textContent?.includes('ports.notice.inferredWithUser'),
+  )
+  expect(notice?.textContent).toContain('ports.notice.inferredWithUser')
+  expect(notice?.textContent).toContain('ports.notice.unattributed')
 })
 
 test('the truncated banner appears when the backend capped the row count', async () => {
