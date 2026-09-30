@@ -10,7 +10,7 @@
 
 import { z } from 'zod'
 import { logger } from '@/lib/logger'
-import { imageInspectArgs, psFilterArgs, versionArgs } from './args'
+import { imageInspectArgs, psAllArgs, psFilterArgs, versionArgs } from './args'
 import {
   DOCKER_READ_TIMEOUT_MS,
   type DockerCli,
@@ -35,6 +35,19 @@ export async function listContainerIds(
   cli: DockerCli = realDockerCli,
 ): Promise<string[]> {
   const result = await cli.run(psFilterArgs(filter), { timeoutMs: DOCKER_READ_TIMEOUT_MS })
+  if (!result.ok) return []
+  return result.stdout
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean)
+}
+
+/** Every container on the daemon, no `--filter` at all — what the
+ * system-wide listing (features/docker/system.ts) starts from, as opposed to
+ * `listContainerIds` above (one scope's own containers). Same degrade-to-[]
+ * on a missing/unreachable daemon as every other read in this module. */
+export async function listAllContainerIds(cli: DockerCli = realDockerCli): Promise<string[]> {
+  const result = await cli.run(psAllArgs(), { timeoutMs: DOCKER_READ_TIMEOUT_MS })
   if (!result.ok) return []
   return result.stdout
     .split('\n')
@@ -272,7 +285,21 @@ export async function inspectContainersRaw(
     ['inspect', '--type', 'container', '--format', '{{json .}}', ...containerIds.slice(0, 200)],
     { timeoutMs: DOCKER_READ_TIMEOUT_MS },
   )
-  if (!result.ok) return []
+  if (!result.ok) {
+    // A non-zero exit does NOT mean nothing came back: `docker inspect a b`
+    // exits 1 the moment ANY one of several ids is unknown, but still prints
+    // NDJSON on stdout for every id that resolved (verified against a real
+    // daemon) — a container that was removed between `ps` and this call
+    // (`--rm`, `compose down`, a manual `docker rm`) must not blank out every
+    // OTHER container this call was also asked about. Falling through to
+    // parse `result.stdout` regardless of `ok` is what fixes that: a total
+    // failure (daemon unreachable, binary missing) has empty stdout and
+    // still degrades to `[]` below, exactly as before.
+    logger.warn(
+      `docker inspect exited non-zero (some of ${containerIds.length} id(s) may no longer exist): ` +
+        result.stderr.slice(0, 2000),
+    )
+  }
   return parseContainerInspectNdjson(result.stdout)
 }
 
@@ -281,6 +308,33 @@ export async function inspectContainers(
   cli: DockerCli = realDockerCli,
 ): Promise<DockerContainer[]> {
   return (await inspectContainersRaw(containerIds, cli)).map(toDockerContainer)
+}
+
+/**
+ * `inspectContainersRaw` above silently caps at 200 ids per its own argv
+ * builder (`inspectArgs`) — exactly right for one project scope's containers,
+ * which never come close to that many, but wrong for the system-wide listing
+ * (features/docker/system.ts), which has to report every container on the
+ * host. This chunks into ≤200-id calls instead of truncating, and is
+ * additive: `inspectContainersRaw` itself is untouched, so every existing
+ * caller keeps its current (intentional) 200-id cap.
+ *
+ * Sequential, not `Promise.all` over the chunks: a host with a few thousand
+ * containers would otherwise fire that many concurrent `docker inspect`
+ * processes at once, which is a worse failure mode than this listing taking
+ * a little longer.
+ */
+export async function inspectContainersRawAll(
+  containerIds: string[],
+  cli: DockerCli = realDockerCli,
+): Promise<ContainerInspectRaw[]> {
+  const INSPECT_CHUNK_SIZE = 200
+  const out: ContainerInspectRaw[] = []
+  for (let i = 0; i < containerIds.length; i += INSPECT_CHUNK_SIZE) {
+    const chunk = containerIds.slice(i, i + INSPECT_CHUNK_SIZE)
+    out.push(...(await inspectContainersRaw(chunk, cli)))
+  }
+  return out
 }
 
 // --- docker image inspect ----------------------------------------------------

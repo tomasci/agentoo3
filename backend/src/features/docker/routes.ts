@@ -16,8 +16,10 @@ import {
   dockerDetectionListSchema,
   dockerOperationSchema,
   dockerStateSchema,
+  dockerSystemSchema,
   downRequestSchema,
   serviceSelectionSchema,
+  stopSystemContainerResponseSchema,
   upRequestSchema,
 } from './schema'
 import {
@@ -31,6 +33,12 @@ import {
   requestDockerStop,
   requestDockerUp,
 } from './service'
+import { getSystemDockerState, stopSystemContainer } from './system'
+
+/** Hex only, so a containerId can never be read as a flag once it reaches
+ * argv — shared by the container-logs route and the system-wide container
+ * routes below, rather than each defining its own copy. */
+export const CONTAINER_ID_RE = /^[a-f0-9]{12,64}$/
 
 const idParam = z.object({
   id: z
@@ -96,6 +104,75 @@ dockerRouter.openapi(
     responses: { 200: json(dockerDetectionListSchema, 'Detection for every project') },
   }),
   async (c) => c.json(await listDockerDetections(), 200),
+)
+
+// --- the system-wide Docker page: every container on the host ----------------
+
+const systemContainerIdParam = z.object({
+  containerId: z
+    .string()
+    .regex(CONTAINER_ID_RE)
+    .openapi({ param: { name: 'containerId', in: 'path' } }),
+})
+
+dockerRouter.openapi(
+  createRoute({
+    method: 'get',
+    path: '/docker/containers',
+    tags: ['docker'],
+    summary: 'Every container on the docker host, across every project',
+    description:
+      "`docker ps -aq` with no filter, not just this install's own — the System page lists the " +
+      'whole daemon, since this box may run more than one agentoo install against it. Always 200, ' +
+      'the same philosophy as `GET /projects/{id}/docker`: a missing CLI or an unreachable daemon ' +
+      'is reported through `daemon`, with `containers: []`, rather than a server fault. Reads are ' +
+      'never gated by DOCKER_ENABLED (only the stop endpoint below is) — `enabled: false` still ' +
+      'returns a real container list.',
+    responses: { 200: json(dockerSystemSchema, 'Every container on the docker host') },
+  }),
+  async (c) => c.json(await getSystemDockerState(), 200),
+)
+
+dockerRouter.openapi(
+  createRoute({
+    method: 'post',
+    path: '/docker/containers/{containerId}/stop',
+    tags: ['docker'],
+    summary: 'Stop one container on the host, by id, without removing anything',
+    description:
+      "`docker stop` — no `-t`, so the daemon still honours each container's own configured stop " +
+      'grace period. Runs inline (not queued): unlike `compose up --build`, a single `docker stop` ' +
+      "is bounded and short, the same reasoning the editor feature's inline `docker rm -f` already " +
+      'uses. Idempotent — stopping an already-stopped container is still a 200 with its current ' +
+      'state. `container` is null when the stop succeeded and the daemon has since auto-removed ' +
+      'the container itself (`docker run --rm`) — that is still a 200, never a 404. Refused (409) ' +
+      'while a queued compose/dockerfile operation is in flight for the same project/session ' +
+      'scope, to avoid racing it.',
+    request: { params: systemContainerIdParam },
+    responses: {
+      200: json(
+        stopSystemContainerResponseSchema,
+        'Stopped (or already stopped, or auto-removed after stopping); see container',
+      ),
+      400: json(errorSchema, 'containerId is not a valid hex id'),
+      403: json(errorSchema, 'Docker controls are disabled (DOCKER_ENABLED=false)'),
+      404: json(errorSchema, 'No such container (before the stop was even attempted)'),
+      409: json(
+        errorSchema,
+        "Another docker operation is already running for this container's scope",
+      ),
+      502: json(errorSchema, 'docker stop failed, or timed out and may still be stopping'),
+      503: json(
+        errorSchema,
+        'docker (or the daemon) is unavailable, or the in-flight-operation check itself failed',
+      ),
+    },
+  }),
+  async (c) => {
+    const { containerId } = c.req.valid('param')
+    const container = await stopSystemContainer(containerId)
+    return c.json({ container }, 200)
+  },
 )
 
 dockerRouter.openapi(
@@ -371,8 +448,6 @@ dockerRouter.get('/projects/:id/docker/operations/:operationId/events', async (c
 
 // --- container logs ------------------------------------------------------
 
-/** Hex only, so a containerId can never be read as a flag once it reaches argv. */
-const CONTAINER_ID_RE = /^[a-f0-9]{12,64}$/
 const containerLogsParams = idParam.extend({ containerId: z.string().regex(CONTAINER_ID_RE) })
 const containerLogsQuery = z.object({
   tail: z.coerce.number().int().min(0).max(5000).optional(),

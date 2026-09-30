@@ -136,6 +136,7 @@
   },
   "nav": {
     "systemSessions": "Sessions",
+    "dockerSystem": "Docker",
     "sshKeys": "SSH keys",
     "storage": "Storage",
     "ports": "Ports",
@@ -741,6 +742,49 @@
     "badge": {
       "compose": "Compose",
       "dockerfile": "Dockerfile"
+    },
+    "system": {
+      "heading": "Docker",
+      "lead": "Every container on this host, across every project: its status, published ports and, where agentoo started it, the project (and worktree) that owns it.",
+      "refresh": "Refresh",
+      "updatedAt": "Updated {{time}}",
+      "loadFailed": "Could not load containers",
+      "disabledNotice": "Docker controls are disabled on this install, so containers can be viewed here but not stopped.",
+      "daemon": {
+        "notInstalledTitle": "Docker is not installed",
+        "notInstalled": "The docker CLI was not found on this host, so no containers can be listed.",
+        "unavailableTitle": "Docker daemon not reachable",
+        "unavailable": "The docker CLI is installed, but the daemon could not be reached."
+      },
+      "empty": {
+        "title": "No containers",
+        "description": "Nothing is running or stopped on this host right now."
+      },
+      "table": {
+        "name": "Container",
+        "status": "Status",
+        "ports": "Ports",
+        "owner": "Owner"
+      },
+      "status": {
+        "running": "Running",
+        "stopped": "Stopped",
+        "stoppedWithCode": "Stopped (exit {{code}})",
+        "paused": "Paused",
+        "restarting": "Restarting",
+        "removing": "Removing"
+      },
+      "owner": {
+        "editor": "Editor",
+        "open": "Open"
+      },
+      "stop": "Stop",
+      "stopDisabledReason": "Docker controls are disabled on this install.",
+      "stopConfirmTitle": "Stop {{name}}?",
+      "stopConfirmBody": "This can take up to 30 seconds. Starting it again is done from its own project's Docker page.",
+      "stopSucceeded": "Stopped {{name}}",
+      "stopFailed": "Could not stop {{name}}",
+      "stopConflict": "Another Docker operation is already in progress for this container's project. Try again shortly."
     }
   },
   "editor": {

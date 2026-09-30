@@ -103,6 +103,16 @@ function SystemNav() {
             <SidebarMenuItem>
               <SidebarMenuButton
                 render={
+                  <Link to="/docker" activeProps={{ 'aria-current': 'page', 'data-active': '' }} />
+                }
+              >
+                <Container />
+                <span>{t('nav.dockerSystem')}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                render={
                   <Link
                     to="/library"
                     activeProps={{ 'aria-current': 'page', 'data-active': '' }}

@@ -6,11 +6,13 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, test } from 'bun:test'
-import { inspectArgs } from '../src/features/docker/args'
+import { inspectArgs, psAllArgs } from '../src/features/docker/args'
 import {
   getDaemonVersion,
   inspectContainersRaw,
+  inspectContainersRawAll,
   inspectImage,
+  listAllContainerIds,
   listContainerIds,
   parseContainerInspectNdjson,
   toDockerContainer,
@@ -258,4 +260,71 @@ test('inspectContainersRaw keeps the raw labels the public DTO drops', async () 
     'startedAt',
     'state',
   ])
+})
+
+// --- listAllContainerIds: no --filter at all, the system-wide listing's ps ---
+
+test('listAllContainerIds sends exactly psAllArgs()', async () => {
+  const seen: string[][] = []
+  const cli = fakeCli(async (args) => {
+    seen.push(args)
+    return ok('abc\ndef\n')
+  })
+  expect(await listAllContainerIds(cli)).toEqual(['abc', 'def'])
+  expect(seen).toEqual([psAllArgs()])
+})
+
+test('listAllContainerIds degrades to [] when the command fails', async () => {
+  const cli = fakeCli(async () => fail('Cannot connect to the Docker daemon'))
+  expect(await listAllContainerIds(cli)).toEqual([])
+})
+
+// --- inspectContainersRawAll: chunked, unlike inspectContainersRaw's own cap ---
+
+test('inspectContainersRawAll inspects 250 ids as two chunks of <=200, not one truncated call', async () => {
+  const ids = Array.from({ length: 250 }, (_, i) => `id${i}`)
+  const seen: string[][] = []
+  const cli = fakeCli(async (args) => {
+    seen.push(args)
+    const requested = args.slice(5)
+    return ok(requested.map((id) => JSON.stringify({ Id: id })).join('\n'))
+  })
+  const raws = await inspectContainersRawAll(ids, cli)
+  expect(seen).toHaveLength(2)
+  expect(seen[0]?.slice(5)).toEqual(ids.slice(0, 200))
+  expect(seen[1]?.slice(5)).toEqual(ids.slice(200))
+  // Nothing truncated: all 250 came back, unlike inspectContainersRaw's own
+  // 200-id cap (pinned separately above).
+  expect(raws.map((r) => r.Id)).toEqual(ids)
+})
+
+test('inspectContainersRawAll makes exactly one call for <=200 ids', async () => {
+  const ids = Array.from({ length: 200 }, (_, i) => `id${i}`)
+  let calls = 0
+  const cli = fakeCli(async (args) => {
+    calls++
+    return ok(args.slice(5).map((id) => JSON.stringify({ Id: id })).join('\n'))
+  })
+  const raws = await inspectContainersRawAll(ids, cli)
+  expect(calls).toBe(1)
+  expect(raws).toHaveLength(200)
+})
+
+test('inspectContainersRawAll spawns nothing for an empty id list', async () => {
+  let calls = 0
+  const cli = fakeCli(async () => {
+    calls++
+    return ok('')
+  })
+  expect(await inspectContainersRawAll([], cli)).toEqual([])
+  expect(calls).toBe(0)
+})
+
+test('inspectContainersRawAll does not change inspectContainersRaw itself: an under-200 call is still capped there', async () => {
+  // Belt-and-braces against the brief's own constraint: adding the chunked
+  // helper must not touch inspectContainersRaw's existing behaviour for its
+  // other callers (containers.ts, editor/container.ts).
+  const ids = Array.from({ length: 250 }, (_, i) => `id${i}`)
+  const raws = await inspectContainersRaw(ids, fakeCli(async (args) => ok(args.slice(5).map((id) => JSON.stringify({ Id: id })).join('\n'))))
+  expect(raws).toHaveLength(200)
 })

@@ -132,6 +132,13 @@ export function psFilterArgs(filter: string): string[] {
   return ['ps', '-aq', '--filter', filter]
 }
 
+/** No `--filter` at all: every container on the daemon, agentoo-managed or
+ * not — what the system-wide Docker page lists, as opposed to `psFilterArgs`
+ * above (one project/scope's own containers). */
+export function psAllArgs(): string[] {
+  return ['ps', '-aq']
+}
+
 /** Cap at 200 ids per the brief: one inspect call, not one per container. */
 export function inspectArgs(containerIds: string[]): string[] {
   return ['inspect', '--type', 'container', '--format', '{{json .}}', ...containerIds.slice(0, 200)]
