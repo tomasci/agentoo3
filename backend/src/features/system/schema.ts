@@ -85,3 +85,89 @@ export const modelsResponseSchema = z.object({
   }),
 })
 export type ModelsDto = z.infer<typeof modelsResponseSchema>
+
+// --- the port table, mirroring features/system/ports.ts's PortEntry -------
+//
+// `state` stays z.string() rather than a z.enum(): the vocabulary listed
+// below is everything the two readers currently emit, but a future kernel
+// state neither reader recognises degrades to 'UNKNOWN' rather than being
+// rejected, and an enum here would make that impossible to express.
+
+export const portScopeSchema = z.enum(['listening', 'all']).openapi({
+  description:
+    "'listening' is what `ss -l` shows — TCP LISTEN plus UDP UNCONN (unconnected) sockets. " +
+    "'all' is every TCP/UDP socket in any state, including ESTABLISHED and TIME-WAIT.",
+})
+export type PortScopeDto = z.infer<typeof portScopeSchema>
+
+export const portSourceSchema = z.enum(['ss', 'proc']).openapi({
+  description:
+    "Which reader produced the rows. 'ss' is the normal path; 'proc' is the " +
+    '/proc/net/{tcp,tcp6,udp,udp6} fallback used when `ss` is missing, exits non-zero, or its ' +
+    "output does not parse. 'proc' rows are slightly less detailed than `ss`'s: /proc/net has no " +
+    "record of a socket's bound interface, so a zone suffix ss would print ('%lo', '%eth0') is " +
+    "never there, and a dual-stack wildcard listener comes back as '::' where ss prints '*'.",
+})
+
+export const portEntrySchema = z.object({
+  protocol: z.enum(['tcp', 'udp']),
+  localAddress: z.string().openapi({
+    description:
+      "Bare address, no brackets, and an IPv6 zone kept as a '%iface' suffix when ss reports " +
+      "one — e.g. '0.0.0.0', '127.0.0.53%lo', '::', '::1', '*'.",
+    example: '127.0.0.1',
+  }),
+  localPort: z.number().int().min(0).max(65535),
+  peerAddress: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        "Null when the peer is a wildcard ('*', or '0.0.0.0'/'::' with no specific port) — which " +
+        'is the normal case for a listening or unconnected socket.',
+    }),
+  peerPort: z.number().int().min(0).max(65535).nullable().openapi({
+    description: 'Null exactly when peerAddress is null.',
+  }),
+  state: z.string().openapi({
+    description:
+      "ss's own state names, uppercased, with ESTAB normalised to ESTABLISHED: LISTEN, UNCONN, " +
+      'ESTABLISHED, SYN-SENT, SYN-RECV, FIN-WAIT-1, FIN-WAIT-2, TIME-WAIT, CLOSE-WAIT, LAST-ACK, ' +
+      'CLOSING, CLOSED, UNKNOWN.',
+  }),
+  pid: z
+    .number()
+    .int()
+    .nullable()
+    .openapi({ description: 'Null when the process could not be resolved.' }),
+  processName: z.string().openapi({
+    description: "The literal string 'unknown' when processKnown is false.",
+  }),
+  processKnown: z.boolean().openapi({
+    description:
+      'False when the process could not be resolved — kept as its own field so a caller never ' +
+      "has to string-compare processName against 'unknown'.",
+  }),
+})
+export type PortEntryDto = z.infer<typeof portEntrySchema>
+
+export const portsResponseSchema = z.object({
+  scope: portScopeSchema,
+  source: portSourceSchema,
+  collectedAt: z.string().openapi({ description: 'ISO timestamp of this read.' }),
+  user: z.string().nullable().openapi({
+    description: "This backend process's own os.userInfo().username, or null if that call throws.",
+  }),
+  runningAsRoot: z.boolean().openapi({
+    description:
+      'Whether the backend process is running as uid 0. Normally false on this deployment — see ' +
+      'the module comment on ports.ts — which is why most rows below have no resolvable process.',
+  }),
+  total: z.number().int().openapi({ description: 'Row count before truncation to MAX_ROWS.' }),
+  truncated: z.boolean().openapi({ description: 'True when total exceeded the row cap.' }),
+  unattributedCount: z.number().int().openapi({
+    description: 'Rows (after truncation) with processKnown: false.',
+  }),
+  ports: z.array(portEntrySchema),
+})
+export type PortsResponseDto = z.infer<typeof portsResponseSchema>

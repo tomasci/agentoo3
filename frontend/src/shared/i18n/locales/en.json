@@ -138,6 +138,7 @@
     "systemSessions": "Sessions",
     "sshKeys": "SSH keys",
     "storage": "Storage",
+    "ports": "Ports",
     "project": "Project",
     "sessions": "Sessions",
     "docker": "Docker",
@@ -572,6 +573,44 @@
         "firstSeen": "First seen",
         "lastSeen": "Last seen"
       }
+    }
+  },
+  "ports": {
+    "heading": "Ports",
+    "lead": "Which process, if any, owns each socket on this host — a readable ss -tulpn.",
+    "loadFailed": "Could not load the port table",
+    "refresh": "Refresh",
+    "scope": {
+      "label": "Show",
+      "listening": "Listening",
+      "all": "All connections"
+    },
+    "filter": {
+      "placeholder": "Filter by port, process, PID or address"
+    },
+    "count": "Showing {{shown}} of {{total}}",
+    "empty": "No sockets found.",
+    "noMatch": "No ports match this filter.",
+    "unknownProcess": "unknown",
+    "table": {
+      "protocol": "Protocol",
+      "localAddress": "Local Address",
+      "port": "Port",
+      "pid": "PID",
+      "processName": "Process Name",
+      "state": "State",
+      "peer": "Remote {{hostPort}}"
+    },
+    "unattributed": {
+      "withUser": "Process details are hidden for {{count}} of {{total}} sockets. The backend runs as \"{{user}}\" and can only see its own processes; sockets owned by other users (root services, other accounts) show as unknown.",
+      "withoutUser": "Process details are hidden for {{count}} of {{total}} sockets. The backend runs as a non-root account and can only see its own processes; sockets owned by other users (root services, other accounts) show as unknown.",
+      "root": "Process details are hidden for {{count}} of {{total}} sockets — the kernel did not report an owning process for them."
+    },
+    "truncated": "Showing the first {{shown}} of {{total}} sockets.",
+    "lastRefreshed": "Last refreshed {{time}} — source: {{source}}",
+    "source": {
+      "ss": "ss",
+      "proc": "/proc"
     }
   },
   "docker": {
