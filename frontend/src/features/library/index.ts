@@ -1,6 +1,7 @@
 export { AgentEditorPage } from './components/agent-editor-page'
 export { LibraryPage } from './components/library-page'
 export { ProjectLibraryPage } from './components/project-library-page'
+export { PromptEditorPage } from './components/prompt-editor-page'
 export { SkillEditorPage } from './components/skill-editor-page'
 export {
   type Agent,

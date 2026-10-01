@@ -148,7 +148,6 @@
     "projectLibrary": "Agents & skills",
     "system": "System",
     "configuration": "Configuration",
-    "prompts": "Prompts",
     "ideas": "Ideas",
     "projectSettings": "Settings"
   },
@@ -348,9 +347,10 @@
     "hostDetails": "Server load"
   },
   "library": {
-    "intro": "Agents and skills live here once and are used by any project you select them for. Editing one changes it everywhere it is used — that is the point of a shared library rather than per-project copies.",
+    "intro": "Agents and skills live here once and are used by any project you select them for. Editing one changes it everywhere it is used — that is the point of a shared library rather than per-project copies. System prompts live here too, but they are not assigned to any project — they are installation-wide instructions the app itself runs on.",
     "agents": "Agents",
     "skills": "Skills",
+    "systemPrompts": "System prompts",
     "newAgent": "New agent",
     "newSkill": "New skill",
     "noAgents": "No agents yet. An agent is a role — an orchestrator that plans and delegates, or a specialist it delegates to.",
@@ -368,11 +368,16 @@
       "description": "Description",
       "model": "Model",
       "usedBy": "Used by",
-      "files": "Bundled"
+      "files": "Bundled",
+      "source": "Source"
     },
     "role": {
       "orchestrator": "orchestrator",
       "subagent": "subagent"
+    },
+    "promptSource": {
+      "custom": "Custom",
+      "default": "Built-in default"
     },
     "roleHint": {
       "orchestrator": "Can drive a session. Gets the autonomy guarantee, and the orchestration method unless you turn the team off below.",
@@ -954,7 +959,13 @@
     "resetFailed": "Could not reset",
     "resetToDefault": "Reset to default",
     "resetTitle": "Reset to the built-in default?",
-    "resetConfirm": "Your saved instruction will be deleted, and the app will fall back to the built-in default shown above. This cannot be undone."
+    "resetConfirm": "Your saved instruction will be deleted, and the app will fall back to the built-in default shown above. This cannot be undone.",
+    "items": {
+      "idea-to-prompt": {
+        "title": "Idea → prompt instruction",
+        "description": "Turns an idea's canvas into a single development prompt for an orchestrator session."
+      }
+    }
   },
   "ideas": {
     "heading": "Ideas",

@@ -1,4 +1,5 @@
-import { CircleAlertIcon, InfoIcon } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
+import { ArrowLeftIcon, CircleAlertIcon, InfoIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
@@ -47,6 +48,14 @@ export function PromptEditorPage({ name }: { name: string }) {
 
   return (
     <div className="flex flex-col gap-5">
+      <Link
+        to="/library"
+        className="inline-flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeftIcon className="size-4" />
+        {t('library.backToLibrary')}
+      </Link>
+
       <PageHeader
         title={t('prompts.title')}
         description={t('prompts.description')}

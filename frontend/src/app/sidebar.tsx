@@ -7,7 +7,6 @@ import {
   KeyRound,
   Library,
   Lightbulb,
-  MessageSquareText,
   MessagesSquare,
   Network,
   Settings,
@@ -166,23 +165,6 @@ function SystemNav() {
               >
                 <Gauge />
                 <span>{t('nav.usage')}</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            {/* The one known prompt today (KNOWN_PROMPTS, features/system/prompts.ts
-                on the backend); a second one would just be a second item here, not a
-                new route — see the comment on promptRoute in app/router.tsx. */}
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                render={
-                  <Link
-                    to="/prompts/$name"
-                    params={{ name: 'idea-to-prompt' }}
-                    activeProps={{ 'aria-current': 'page', 'data-active': '' }}
-                  />
-                }
-              >
-                <MessageSquareText />
-                <span>{t('nav.prompts')}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>

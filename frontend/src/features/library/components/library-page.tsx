@@ -24,9 +24,12 @@ import {
   useDeleteSkill,
   useSkills,
 } from '../hooks/use-library'
+import { usePrompts } from '../hooks/use-prompts'
+import { KNOWN_PROMPTS } from '../model/prompts'
 
 const agentColumn = createColumnHelper<AgentSummary>()
 const skillColumn = createColumnHelper<Skill>()
+const promptColumn = createColumnHelper<{ name: (typeof KNOWN_PROMPTS)[number] }>()
 
 export function LibraryPage() {
   const { t } = useTranslation()
@@ -35,6 +38,10 @@ export function LibraryPage() {
   const skills = useSkills()
   const removeAgent = useDeleteAgent()
   const removeSkill = useDeleteSkill()
+  // One GET per known prompt (there is no list endpoint — see use-prompts.ts),
+  // in the same order as KNOWN_PROMPTS, so the Source cell below can read
+  // promptQueries[info.row.index] straight off it.
+  const promptQueries = usePrompts(KNOWN_PROMPTS)
 
   // One piece of state per table: the row awaiting confirmation, or null.
   const [pendingAgent, setPendingAgent] = useState<AgentSummary | null>(null)
@@ -181,6 +188,67 @@ export function LibraryPage() {
     [t, navigate],
   )
 
+  const promptColumns = useMemo(
+    () => [
+      promptColumn.accessor('name', {
+        header: () => t('library.table.name'),
+        meta: { role: 'primary' },
+        cell: (info) => (
+          <Link
+            to="/library/prompts/$name"
+            params={{ name: info.getValue() }}
+            className="font-medium text-foreground hover:underline"
+          >
+            {t(`prompts.items.${info.getValue()}.title`)}
+          </Link>
+        ),
+      }),
+      promptColumn.display({
+        id: 'description',
+        header: () => t('library.table.description'),
+        meta: { role: 'secondary', label: t('library.table.description') },
+        cell: (info) => (
+          <span className="text-sm text-muted-foreground">
+            {t(`prompts.items.${info.row.original.name}.description`)}
+          </span>
+        ),
+      }),
+      promptColumn.display({
+        id: 'source',
+        header: () => t('library.table.source'),
+        meta: { role: 'meta', label: t('library.table.source') },
+        cell: (info) => {
+          const query = promptQueries[info.row.index]
+          if (!query || query.isPending || query.isError) return <span>—</span>
+          return (
+            <StatusBadge tone={query.data.source === 'file' ? 'accent' : 'neutral'}>
+              {query.data.source === 'file'
+                ? t('library.promptSource.custom')
+                : t('library.promptSource.default')}
+            </StatusBadge>
+          )
+        },
+      }),
+      promptColumn.display({
+        id: 'actions',
+        header: () => '',
+        meta: { role: 'actions' },
+        cell: (info) => {
+          const name = info.row.original.name
+          const actions: MenuAction[] = [
+            {
+              id: 'edit',
+              label: t('common.edit'),
+              onSelect: () => void navigate({ to: '/library/prompts/$name', params: { name } }),
+            },
+          ]
+          return <ActionsMenu actions={actions} label={t('library.actionsFor', { name })} />
+        },
+      }),
+    ],
+    [t, navigate, promptQueries],
+  )
+
   const agentTable = useReactTable({
     data: agents.data ?? [],
     columns: agentColumns,
@@ -189,6 +257,13 @@ export function LibraryPage() {
   const skillTable = useReactTable({
     data: skills.data ?? [],
     columns: skillColumns,
+    getCoreRowModel: getCoreRowModel(),
+  })
+  // A fixed registry, not a fetched list — see model/prompts.ts — so the
+  // table has data the moment the component renders.
+  const promptTable = useReactTable({
+    data: useMemo(() => KNOWN_PROMPTS.map((name) => ({ name })), []),
+    columns: promptColumns,
     getCoreRowModel: getCoreRowModel(),
   })
 
@@ -260,6 +335,12 @@ export function LibraryPage() {
             }
           />
         )}
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <PageHeader level={2} title={t('library.systemPrompts')} />
+
+        <DataTable table={promptTable} />
       </div>
 
       <ConfirmDialog

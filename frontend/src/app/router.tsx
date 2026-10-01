@@ -1,12 +1,12 @@
 import { createRootRoute, createRoute, createRouter, Link, redirect } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { DockerSystemPage } from '@/features/docker'
-import { AgentEditorPage, LibraryPage, SkillEditorPage } from '@/features/library'
+import { AgentEditorPage, LibraryPage, PromptEditorPage, SkillEditorPage } from '@/features/library'
 import { SessionsDashboardPage } from '@/features/sessions'
 import { SettingsPage } from '@/features/settings'
 import { SshKeysPage } from '@/features/ssh-keys'
 import { StoragePage } from '@/features/storage'
-import { PortsPage, PromptEditorPage, UsagePage } from '@/features/system'
+import { PortsPage, UsagePage } from '@/features/system'
 import { SYSTEM_HOME } from '@/shared/store/tabs'
 import { buttonVariants } from '@/shared/ui/button'
 import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
@@ -215,6 +215,20 @@ const skillRoute = createRoute({
   },
 })
 
+// An operator-editable instruction, addressed by the backend's fixed name for
+// it (KNOWN_PROMPTS in backend/src/features/system/prompts.ts) — there is no
+// "new prompt" route because this is not a collection. The UI lists it under
+// the Library because the operator edits it like an agent or skill; the API
+// stays under /system because it is a fixed registry, not a library kind.
+const libraryPromptRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/prompts/$name',
+  component: function LibraryPromptRoute() {
+    const { name } = libraryPromptRoute.useParams()
+    return <PromptEditorPage name={name} />
+  },
+})
+
 const sshKeysRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/ssh-keys',
@@ -254,17 +268,15 @@ const usageRoute = createRoute({
   component: UsagePage,
 })
 
-// An operator-editable instruction, addressed by the backend's own fixed name
-// for it (KNOWN_PROMPTS in features/system/prompts.ts) rather than by
-// anything a user picks — there is no "new prompt" route, unlike the library's
-// agents and skills, because this is not a collection. System-tab, not
-// project-tab: the instruction is installation-wide.
-const promptRoute = createRoute({
+// The prompt editor's old address, before it moved under /library. Kept as a
+// redirect, not deleted: a tab's path persists in localStorage
+// (shared/store/tabs.ts), so a tab or bookmark saved under the old URL still
+// needs somewhere to land.
+const legacyPromptRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/prompts/$name',
-  component: function PromptRoute() {
-    const { name } = promptRoute.useParams()
-    return <PromptEditorPage name={name} />
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: '/library/prompts/$name', params })
   },
 })
 
@@ -292,13 +304,14 @@ export const routeTree = rootRoute.addChildren([
   agentRoute,
   newSkillRoute,
   skillRoute,
+  libraryPromptRoute,
   libraryRoute,
   sshKeysRoute,
   settingsRoute,
   storageRoute,
   portsRoute,
   usageRoute,
-  promptRoute,
+  legacyPromptRoute,
 ])
 
 /** An unknown URL should say so, not render an empty layout. */
