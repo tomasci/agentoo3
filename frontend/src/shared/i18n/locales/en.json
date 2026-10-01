@@ -1164,5 +1164,10 @@
         "confirm": "Remove \"{{name}}\" from this idea?"
       }
     }
+  },
+  "markdownField": {
+    "source": "Markdown source",
+    "showSource": "Edit the markdown source",
+    "showFormatted": "Back to formatted view"
   }
 }

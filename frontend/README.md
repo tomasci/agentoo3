@@ -8,7 +8,7 @@ come next.
 | Concern | Choice |
 |---|---|
 | UI | React 19, shadcn/ui (style `base-nova`) on Base UI primitives, default neutral theme |
-| Markdown editing | CodeMirror 6, with a repo-owned Obsidian-style live-preview layer (`shared/lib/markdown-live-preview.ts`) — the session composer's visual mode; see "Styling" below, and that file's own comment for why not a rich-text editor |
+| Markdown editing | CodeMirror 6, with a repo-owned Obsidian-style live-preview layer (`shared/lib/markdown-live-preview.ts`) — the session composer's visual mode and `shared/components/markdown-field.tsx`'s (the library's agent prompt and skill body editors); see "Styling" below, and that file's own comment for why not a rich-text editor |
 | Build | Vite 8, Bun as runtime and package manager |
 | Styling | Tailwind v4 (`@tailwindcss/vite`) + shadcn's own generated CSS variables — see "Styling" below |
 | Icons | lucide-react |
@@ -136,7 +136,13 @@ one. The rule that keeps it that way:
   (`shared/lib/markdown-live-preview.ts`) follows the same semantic-colour
   rule as everywhere else in its own decoration classes, which live as
   literal strings in that file rather than here, since Tailwind's scanner
-  never sees a class name assembled at runtime.
+  never sees a class name assembled at runtime. `shared/components/
+  markdown-field.tsx` wraps this same editor for a whole markdown *document*
+  rather than a chat-sized box — the library's agent prompt and skill body
+  fields — behind a border meant to look like the `Textarea` it replaces
+  (`rounded-lg border border-input`, focus shown with `focus-within` since
+  the actual focusable control is CodeMirror's contenteditable a layer
+  inside it) rather than `InputGroup`'s own framing.
 
 ### Adding a shadcn component
 

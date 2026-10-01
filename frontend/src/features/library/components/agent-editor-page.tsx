@@ -3,7 +3,7 @@ import { ArrowLeftIcon, CircleAlertIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { ConfirmDialog, Loading, PageHeader } from '@/shared/components'
+import { ConfirmDialog, Loading, MarkdownField, PageHeader } from '@/shared/components'
 import { parseNumberInput } from '@/shared/lib/number-input'
 import { Alert, AlertDescription } from '@/shared/ui/alert'
 import { Button } from '@/shared/ui/button'
@@ -13,7 +13,6 @@ import { Field, FieldContent, FieldDescription, FieldLabel } from '@/shared/ui/f
 import { Input } from '@/shared/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
 import { Switch } from '@/shared/ui/switch'
-import { Textarea } from '@/shared/ui/textarea'
 import {
   useAgent,
   useCreateAgent,
@@ -345,14 +344,11 @@ export function AgentEditorPage({ name }: { name?: string }) {
       </Card>
 
       <Field>
-        <FieldLabel htmlFor="agent-prompt">{t('library.agent.prompt')}</FieldLabel>
-        <Textarea
+        <MarkdownField
           id="agent-prompt"
-          className="field-sizing-fixed font-mono"
-          rows={20}
+          label={t('library.agent.prompt')}
           value={draft.prompt}
-          onChange={(e) => set('prompt', e.target.value)}
-          spellCheck={false}
+          onChange={(value) => set('prompt', value)}
           placeholder={t('library.agent.promptPlaceholder')}
         />
         <FieldDescription>

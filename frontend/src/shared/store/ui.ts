@@ -25,3 +25,17 @@ export const composerModeAtom = atomWithStorage<'visual' | 'raw'>(
   undefined,
   { getOnInit: true },
 )
+
+// Persisted per browser, same rationale as `composerModeAtom` above —
+// `getOnInit` avoids a `MarkdownField` in raw mode flashing visual on every
+// page load before its own effect tears a freshly-mounted editor back down.
+// Any stored value other than the literal string `'raw'` reads as `'visual'`.
+// A separate key from `composerModeAtom`: a reader's taste for the session
+// composer's compact box says nothing about a whole-document field, and the
+// two must stay independently switchable.
+export const documentEditorModeAtom = atomWithStorage<'visual' | 'raw'>(
+  'agentoo:document-editor-mode',
+  'visual',
+  undefined,
+  { getOnInit: true },
+)
