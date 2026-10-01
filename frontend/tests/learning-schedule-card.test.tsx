@@ -16,6 +16,7 @@ import { Provider as JotaiProvider } from 'jotai'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
+import { formatDateTime } from '../src/features/settings/lib/format'
 import en from '../src/shared/i18n/locales/en.json'
 import { mockModule } from './mock-module'
 
@@ -23,12 +24,13 @@ type Schedule = { enabled: boolean; time: string; timezone: string }
 
 const DEFAULT_SCHEDULE: Schedule = { enabled: false, time: '04:00', timezone: 'UTC' }
 let override: Schedule | null = null
+let nextRunAt: string | null = null
 let patchCalls: Record<string, unknown>[] = []
 
 const current = () =>
   override === null
-    ? { value: DEFAULT_SCHEDULE, source: 'default', defaultValue: DEFAULT_SCHEDULE, nextRunAt: null }
-    : { value: override, source: 'override', defaultValue: DEFAULT_SCHEDULE, nextRunAt: null }
+    ? { value: DEFAULT_SCHEDULE, source: 'default', defaultValue: DEFAULT_SCHEDULE, nextRunAt }
+    : { value: override, source: 'override', defaultValue: DEFAULT_SCHEDULE, nextRunAt }
 
 await mockModule('@/shared/api/generated/clients/getApiSystemSettings', () => ({
   getApiSystemSettings: async () => ({
@@ -122,6 +124,7 @@ beforeEach(() => {
   document.body.innerHTML = ''
   problems.length = 0
   override = null
+  nextRunAt = null
   patchCalls = []
 })
 
@@ -191,4 +194,20 @@ test('a default schedule shows "Scheduled runs are off" and disables Reset', asy
   await mount()
   expect(text(card())).toContain('Scheduled runs are off')
   expect(button('Reset to default').disabled).toBe(true)
+})
+
+// The next-run line once rendered `Date#toLocaleString()` directly — no
+// shared formatting, no "your local time" label, unlike every other date
+// this app shows (see src/features/library/lib/format.ts's own comment on
+// the identical bug the Library panel already had). It now goes through the
+// same formatter the rest of the app uses and carries the same label.
+test('the next run is shown with the shared date formatter and "your local time"', async () => {
+  override = { enabled: true, time: '06:30', timezone: 'Europe/Moscow' }
+  nextRunAt = '2026-10-02T10:00:00.000Z'
+  await mount()
+
+  const expected = `Next run: ${formatDateTime(nextRunAt)} (your local time).`
+  expect(text(card())).toContain(expected)
+  // Never the raw, unlabelled `Date#toLocaleString()` output this replaced.
+  expect(text(card())).not.toContain(new Date(nextRunAt).toLocaleString())
 })

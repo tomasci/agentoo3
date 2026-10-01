@@ -489,6 +489,10 @@
         "agent": "Agent",
         "skill": "Skill"
       },
+      "kindLower": {
+        "agent": "agent",
+        "skill": "skill"
+      },
       "action": {
         "create": "New",
         "modify": "Modify"
@@ -603,7 +607,7 @@
     "learningTimezone": "Timezone",
     "learningScheduleOn": "Daily at {{time}} ({{timezone}}).",
     "learningScheduleOff": "Scheduled runs are off.",
-    "learningNextRun": "Next run: {{when}}",
+    "learningNextRun": "Next run: {{when}} (your local time).",
     "learningNextRunNone": "Not scheduled.",
     "learningUsingDefault": "Using the default schedule.",
     "learningOverridden": "Overriding the default schedule."

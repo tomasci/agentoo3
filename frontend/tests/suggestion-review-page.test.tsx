@@ -292,7 +292,9 @@ test('a create suggestion’s Apply confirms adding the new item to the library'
 
   await click(button('Apply'))
   expect(text(document.body.querySelector('[role="alertdialog"]'))).toContain(
-    'adds the new Skill "release-notes" to the library',
+    // Lowercase mid-sentence ("the new skill"), not the capitalized badge
+    // form ("Skill") — this is running text, not a standalone label.
+    'adds the new skill "release-notes" to the library',
   )
 })
 
@@ -349,8 +351,10 @@ test('a pending create suggestion whose name is now taken disables Apply and war
   detail = createDetail({ targetExists: true })
   await mount('sug-2')
   expect(button('Apply').disabled).toBe(true)
+  // Lowercase mid-sentence ("this skill"), for the same reason as the Apply
+  // confirmation above.
   expect(text(main())).toContain(
-    'A library item named "release-notes" already exists, so this Skill can\'t be created',
+    'A library item named "release-notes" already exists, so this skill can\'t be created',
   )
 })
 

@@ -21,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Spinner } from '@/shared/ui/spinner'
 import { Switch } from '@/shared/ui/switch'
 import { useSystemSettings, useUpdateSystemSettings } from '../hooks/use-system-settings'
+import { formatDateTime } from '../lib/format'
 import { timezoneOptions, zoneWithOffset } from '../lib/timezones'
 import {
   type LearningScheduleFormValues,
@@ -218,7 +219,7 @@ export function LearningScheduleCard() {
                 <br />
                 {settings.learningSchedule.nextRunAt
                   ? t('settings.learningNextRun', {
-                      when: new Date(settings.learningSchedule.nextRunAt).toLocaleString(),
+                      when: formatDateTime(settings.learningSchedule.nextRunAt),
                     })
                   : t('settings.learningNextRunNone')}
                 <br />

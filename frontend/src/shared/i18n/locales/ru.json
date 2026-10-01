@@ -493,6 +493,10 @@
         "agent": "Агент",
         "skill": "Навык"
       },
+      "kindLower": {
+        "agent": "агент",
+        "skill": "навык"
+      },
       "action": {
         "create": "Новый",
         "modify": "Изменение"
@@ -507,7 +511,7 @@
       "table": {
         "kind": "Тип",
         "action": "Действие",
-        "title": "Название",
+        "title": "Заголовок",
         "rejectedAt": "Отклонено"
       },
       "detail": {
@@ -609,7 +613,7 @@
     "learningTimezone": "Часовой пояс",
     "learningScheduleOn": "Ежедневно в {{time}} ({{timezone}}).",
     "learningScheduleOff": "Автоматические запуски выключены.",
-    "learningNextRun": "Следующий запуск: {{when}}",
+    "learningNextRun": "Следующий запуск: {{when}} (по вашему местному времени).",
     "learningNextRunNone": "Не запланировано.",
     "learningUsingDefault": "Используется расписание по умолчанию.",
     "learningOverridden": "Переопределяет расписание по умолчанию."

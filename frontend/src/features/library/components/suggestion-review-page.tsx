@@ -225,7 +225,7 @@ export function SuggestionReviewPage({ id }: { id: string }) {
           <AlertDescription>
             {t('library.suggestions.detail.targetTakenBody', {
               name: suggestion.name,
-              kind: t(`library.suggestions.kind.${suggestion.kind}`),
+              kind: t(`library.suggestions.kindLower.${suggestion.kind}`),
             })}
           </AlertDescription>
         </Alert>
@@ -323,7 +323,7 @@ export function SuggestionReviewPage({ id }: { id: string }) {
           suggestion.action === 'modify'
             ? t('library.suggestions.detail.applyConfirmModify', { name: suggestion.name })
             : t('library.suggestions.detail.applyConfirmCreate', {
-                kind: t(`library.suggestions.kind.${suggestion.kind}`),
+                kind: t(`library.suggestions.kindLower.${suggestion.kind}`),
                 name: suggestion.name,
               })
         }

@@ -4,17 +4,20 @@
 //
 // Mounted the same way tests/suggested-page.test.tsx mounts its own route:
 // real router/shell, generated clients replaced through tests/mock-module.ts,
-// a private English I18nextProvider.
+// a private I18nextProvider — English by default, Russian for the one test
+// below that needs it (the Name/Title header collision this table once had,
+// both rendering as «Название»).
 
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
-import i18next from 'i18next'
+import i18next, { type i18n as I18n } from 'i18next'
 import { Provider as JotaiProvider } from 'jotai'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
 import en from '../src/shared/i18n/locales/en.json'
+import ru from '../src/shared/i18n/locales/ru.json'
 import { mockModule } from './mock-module'
 
 type Suggestion = {
@@ -81,6 +84,14 @@ await english.init({
   interpolation: { escapeValue: false },
 })
 
+const russian = i18next.createInstance()
+await russian.init({
+  lng: 'ru',
+  fallbackLng: 'ru',
+  resources: { ru: { translation: ru } },
+  interpolation: { escapeValue: false },
+})
+
 const problems: string[] = []
 const realError = console.error
 console.error = (...args: unknown[]) => {
@@ -101,7 +112,7 @@ const settle = async () => {
     })
 }
 
-async function mount() {
+async function mount(i18n: I18n = english) {
   container = document.createElement('div')
   document.body.append(container)
   const router = createRouter({
@@ -123,7 +134,7 @@ async function mount() {
   root = createRoot(container)
   await act(async () => {
     root?.render(
-      <I18nextProvider i18n={english}>
+      <I18nextProvider i18n={i18n}>
         <JotaiProvider>
           <QueryClientProvider client={client}>
             <RouterProvider router={router} />
@@ -155,6 +166,7 @@ afterEach(async () => {
 const main = () => container.querySelector('main') ?? container
 const text = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
 const rows = () => [...main().querySelectorAll('tbody tr')]
+const headers = () => [...main().querySelectorAll('thead th')].map(text)
 
 async function openRowMenu() {
   const trigger = rows()[0]?.querySelector('button[aria-haspopup="menu"]') as HTMLElement | null
@@ -193,6 +205,18 @@ test('lists kind, action, name, title and the rejected date', async () => {
   expect(text(rows()[0])).toContain('Tighten the review checklist')
   expect(text(rows()[0])).toContain('Modify')
   expect(text(rows()[0])).toContain('Agent')
+})
+
+// The Name and Title columns once both rendered «Название» in Russian
+// (library.table.name and library.suggestions.table.title shared one
+// translation) — a reader had no way to tell the agent's own name from the
+// suggestion's title. The Title column now reads «Заголовок».
+test('the Name and Title columns get distinct Russian headers', async () => {
+  await mount(russian)
+  const columnHeaders = headers()
+  expect(columnHeaders).toContain('Название')
+  expect(columnHeaders).toContain('Заголовок')
+  expect(new Set(columnHeaders).size).toBe(columnHeaders.length)
 })
 
 test('an empty list shows the empty state, not a bare table', async () => {
