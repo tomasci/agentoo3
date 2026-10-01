@@ -42,17 +42,50 @@ export async function listContainerIds(
     .filter(Boolean)
 }
 
+export interface ContainerIdsResult {
+  /** Whether the `docker ps -aq` call itself reached a live daemon — false
+   * for every CLI-level failure this module's own `DockerCli.run` can
+   * report (a non-zero exit, the daemon down, the socket unreadable, the
+   * `docker` binary missing at all). `listAllContainerIds` below collapses
+   * this together with a genuinely empty listing into the same `[]`, which
+   * is right for every one of its own callers (an empty listing either
+   * way) — but wrong for a caller that has to tell "reachable, zero
+   * containers" apart from "could not even ask" (see ports.ts's own
+   * `queryDockerPublishedPorts`, which needs exactly that distinction to
+   * decide whether a `docker-proxy` candidate's claimed port can be
+   * confirmed at all, or must be waived). */
+  reachable: boolean
+  ids: string[]
+}
+
+/**
+ * The same single call as `listAllContainerIds` below (one `docker ps -aq`,
+ * no `--filter`), but reporting `reachable` alongside the ids rather than
+ * discarding that distinction — see `ContainerIdsResult`'s own comment.
+ * `listAllContainerIds` is now a thin wrapper over this, so every existing
+ * caller keeps its exact current behaviour (and this never adds a second
+ * `docker` invocation of its own).
+ */
+export async function listAllContainerIdsResult(
+  cli: DockerCli = realDockerCli,
+): Promise<ContainerIdsResult> {
+  const result = await cli.run(psAllArgs(), { timeoutMs: DOCKER_READ_TIMEOUT_MS })
+  if (!result.ok) return { reachable: false, ids: [] }
+  return {
+    reachable: true,
+    ids: result.stdout
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  }
+}
+
 /** Every container on the daemon, no `--filter` at all — what the
  * system-wide listing (features/docker/system.ts) starts from, as opposed to
  * `listContainerIds` above (one scope's own containers). Same degrade-to-[]
  * on a missing/unreachable daemon as every other read in this module. */
 export async function listAllContainerIds(cli: DockerCli = realDockerCli): Promise<string[]> {
-  const result = await cli.run(psAllArgs(), { timeoutMs: DOCKER_READ_TIMEOUT_MS })
-  if (!result.ok) return []
-  return result.stdout
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean)
+  return (await listAllContainerIdsResult(cli)).ids
 }
 
 // --- docker inspect --type container ----------------------------------------

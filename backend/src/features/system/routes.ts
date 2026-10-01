@@ -206,7 +206,10 @@ systemRouter.openapi(
     description:
       'Backed by `ss`, falling back to /proc/net/{tcp,tcp6,udp,udp6} plus a /proc/*/fd scan when ' +
       '`ss` is missing or its output cannot be parsed. Never a 500 for either of those — only a ' +
-      '503, and only if both readers fail.',
+      '503, and only if both readers fail. Every row also carries `attribution`, `unit`, ' +
+      '`container` and `owner` — see portAttributionSchema for how a row that `ss -p` itself ' +
+      'cannot resolve (the common case for this unprivileged account) can still often be named, ' +
+      'without this endpoint ever gaining a new privilege to do it.',
     request: { query: portsQuery },
     responses: {
       200: json(portsResponseSchema, 'The current port table'),

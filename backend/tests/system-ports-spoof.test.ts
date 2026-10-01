@@ -1,21 +1,24 @@
-// Independent re-verification of the PID-attribution fix in
-// backend/src/features/system/ports.ts, focused on defeating the argument in
-// `needsVerification` (only names containing `"` are checked against
-// /proc/<pid>/comm) and the backtracking tiler in `parseProcessColumn`.
+// Independent re-verification of PID attribution in
+// backend/src/features/system/ports.ts. Originally written against the
+// `ss -p` users:(...) tiler; the endpoint now attributes by inode (`ss -e`'s
+// `ino:<n>` plus a /proc/*/fd scan) and reads the name from /proc/<pid>/comm,
+// so a comm's bytes never reach a parser at all.
 //
 // The property under attack, stated once: the endpoint must NEVER attribute a
-// socket to a pid that does not actually hold it. An honest `unknown`
-// (pid: null) is acceptable; a wrong, non-null pid is a defect.
+// socket to a pid that does not actually hold it — and, now that the name
+// comes from /proc, a socket this account can see into must come back
+// `socket` with every real holder's pid and exact comm (an `unknown` there
+// would be a socket hidden by its process name).
 //
 // Two attack surfaces:
-//   * unit level — parseSsOutput on hand-built `users:((...))` columns, so we
-//     control exactly what `ss` "printed", including the `)`-bearing shapes
-//     real ss on this host happens to sanitise away.
 //   * real processes — a process that rewrites its own comm
 //     (prctl PR_SET_NAME via python ctypes), binds a listener and sleeps, and
 //     two cooperating processes that fork() after bind() so both hold one
 //     socket. For each we read the REAL /proc/<pid>/comm and require the
-//     endpoint's rows for that port to name only real holders (or null).
+//     endpoint's rows for that port to be exactly the real holders.
+//   * unit level — parseSsOutput on hand-built `users:((...))` columns: a line
+//     still carrying one (an old capture, a future ss default) keeps its row
+//     but yields no pid and no -e facts, whatever the column says.
 //
 // Real-process cases need Linux + iproute2 `ss` + python3; skipped cleanly
 // otherwise. Every spawned pid is force-killed in afterAll.
@@ -144,8 +147,8 @@ else:
 `
 
 // The candidate comms from the task brief, plus extras. Each is set as a
-// process's own comm; the kernel truncates to 15 bytes and (on this host) ss
-// further sanitises the printed name at the first ')'.
+// process's own comm; the kernel truncates to 15 bytes. (ss -p used to cut
+// the printed name at the first ')'; the endpoint no longer reads that.)
 const CANDIDATE_NAMES = [
   '",pid=1,fd=2),(',
   'a",pid=1',
@@ -162,7 +165,7 @@ const CANDIDATE_NAMES = [
 
 describe.skipIf(!canRun)('PID spoofing: single renamed process', () => {
   for (const name of CANDIDATE_NAMES) {
-    test(`comm ${JSON.stringify(name)}: own pid or unknown, never a foreign pid`, async () => {
+    test(`comm ${JSON.stringify(name)}: socket, own pid, exact comm — never a foreign pid`, async () => {
       const proc = Bun.spawn([PYTHON as string, '-c', RENAME_ONE, name], {
         stdout: 'pipe',
         stderr: 'ignore',
@@ -195,23 +198,13 @@ describe.skipIf(!canRun)('PID spoofing: single renamed process', () => {
         const foreign = rows.filter((r) => r.pid !== null && r.pid !== proc.pid)
         expect({ ...detail, foreign }).toMatchObject({ foreign: [] })
 
-        // Any resolved row is flagged known; a quote-bearing name only survives
-        // the /proc round trip if it equals this pid's real comm, so require
-        // that there. A quote-free name is whatever ss printed (real ss on this
-        // host sanitises the comm at the first ')', so it can legitimately
-        // differ from /proc/<pid>/comm) — the pid is what must be right, and
-        // the `foreign` check above already pins that.
-        for (const r of rows) {
-          if (r.pid !== null) {
-            expect(r.processKnown).toBe(true)
-            if (r.processName.includes('"')) {
-              expect({ ...detail, nameMatches: r.processName === truthComm })
-                .toMatchObject({ nameMatches: true })
-            }
-          } else {
-            expect(r.processName).toBe('unknown')
-          }
-        }
+        // Tightened for the inode design: the fd is ours and readable, so the
+        // ONLY right answer is one row, our pid, and the byte-exact comm the
+        // kernel holds — ss's own sanitising of the printed name no longer
+        // matters, and `unknown` would be a socket hidden by its name.
+        expect({ ...detail, got: rows.map((r) => ({ pid: r.pid, name: r.processName, known: r.processKnown })) }).toMatchObject({
+          got: [{ pid: proc.pid, name: truthComm, known: true }],
+        })
       } finally {
         proc.kill('SIGKILL')
         await proc.exited
@@ -231,7 +224,7 @@ describe.skipIf(!canRun)('PID spoofing: fork-shared socket, two renamed processe
     ['",pid=1,fd=2', 'a'],
   ]
   for (const [nameA, nameB] of PAIRS) {
-    test(`shared [${nameA}] + [${nameB}]: only the two real pids, or unknown`, async () => {
+    test(`shared [${nameA}] + [${nameB}]: exactly the two real pids, each its own comm`, async () => {
       const proc = Bun.spawn([PYTHON as string, '-c', RENAME_SHARED, nameA, nameB], {
         stdout: 'pipe',
         stderr: 'ignore',
@@ -275,19 +268,16 @@ describe.skipIf(!canRun)('PID spoofing: fork-shared socket, two renamed processe
         // pid, and never one holder relabelled with the other's crafted name.
         const foreign = rows.filter((r) => r.pid !== null && !holders.has(r.pid))
         expect({ ...detail, foreign }).toMatchObject({ foreign: [] })
-        // A quote-bearing name only survives verification if it equals that
-        // pid's real comm; a quote-free one is ss's (possibly ')'-sanitised)
-        // printed name, so only its pid — a real holder, per `foreign` — is
-        // required to be right.
-        for (const r of rows) {
-          if (r.pid !== null && r.processName.includes('"')) {
-            // Compare against a fresh /proc read — the same thing the endpoint
-            // verified against — not the earlier snapshot.
-            const fresh = await realComm(r.pid)
-            expect({ ...detail, pid: r.pid, nameMatches: r.processName === fresh })
-              .toMatchObject({ nameMatches: true })
-          }
-        }
+        // Tightened for the inode design: both holders are this account's, so
+        // the rows are EXACTLY the two real pids, each with its own fresh
+        // /proc comm — not `unknown`, and never the other process's name.
+        const want = await Promise.all(
+          [...holders.keys()].sort((a, b) => a - b).map(async (pid) => ({ pid, name: await realComm(pid), known: true })),
+        )
+        const got = rows
+          .map((r) => ({ pid: r.pid, name: r.processName, known: r.processKnown }))
+          .sort((a, b) => (a.pid ?? -1) - (b.pid ?? -1))
+        expect({ ...detail, got }).toMatchObject({ got: want })
       } finally {
         proc.kill('SIGKILL')
         await proc.exited
@@ -301,58 +291,54 @@ describe.skipIf(!canRun)('PID spoofing: fork-shared socket, two renamed processe
   }
 })
 
-// --- unit level: the `)`-bearing shapes real ss sanitises away here, plus the
-// two-process alternative-tiling shapes, driven straight through the parser. ---
+// --- unit level: a users:(...) column is never parsed ------------------------
+// These used to pin the deleted tiler's answer (the real pid survives a
+// forged entry). The parser no longer reads that column at all: a line
+// carrying one keeps its row, and loses every -e fact, so no pid can come out
+// of it — neither the forged pid 1 nor the genuine one printed there. The
+// real-process tests above check the genuine holder is still named, by inode.
 
 describe('parser attribution on adversarial process columns (unit)', () => {
   const q = String.fromCharCode(34)
-  const line = (col: string) => `tcp LISTEN 0 1 127.0.0.1:80 0.0.0.0:* ${col}`
+  const TAIL = 'uid:999 ino:171946 sk:1 cgroup:/system.slice/a.service <->'
+  const line = (col: string) => `tcp LISTEN 0 1 127.0.0.1:80 0.0.0.0:* ${col} ${TAIL}`
   const attr = (col: string) =>
-    ports.parseSsOutput(line(col)).map((r) => ({ pid: r.pid, name: r.processName, known: r.processKnown }))
+    ports.parseSsOutput(line(col)).map((r) => ({ pid: r.pid, name: r.processName, known: r.processKnown, owner: r.owner, unit: r.unit }))
+  const NOTHING = { pid: null, name: 'unknown', known: false, owner: null, unit: null }
 
-  test('single process whose comm embeds a full fake entry keeps its real pid', () => {
+  test('single process whose comm embeds a full fake entry: one row, no pid (neither fake nor printed)', () => {
     // comm = ",pid=1,fd=2" printed as ("",pid=1,fd=2",pid=<real>,fd=4)
-    expect(attr(`users:((${q}${q},pid=1,fd=2${q},pid=987654,fd=4))`)).toEqual([
-      { pid: 987654, name: `${q},pid=1,fd=2`, known: true },
-    ])
-    // comm = ",pid=1,fd=2) (ends in a paren): real ss would sanitise, but even
-    // if it printed it verbatim the orphaned real quote blocks the fake tiling.
-    expect(attr(`users:((${q}${q},pid=1,fd=2)${q},pid=987654,fd=4))`)).toEqual([
-      { pid: 987654, name: `${q},pid=1,fd=2)`, known: true },
-    ])
+    expect(attr(`users:((${q}${q},pid=1,fd=2${q},pid=987654,fd=4))`)).toEqual([NOTHING])
+    // comm = ",pid=1,fd=2) (ends in a paren)
+    expect(attr(`users:((${q}${q},pid=1,fd=2)${q},pid=987654,fd=4))`)).toEqual([NOTHING])
   })
 
-  test('two-process shared socket with a boundary-forging commA: real pids only', () => {
+  test('two-process shared socket with a boundary-forging commA: one row, no pid, -e facts dropped', () => {
     // ("",pid=1,fd=2),(",pid=A,fd=4),("real",pid=B,fd=5) with LARGE real pids.
     const col = `users:((${q}${q},pid=1,fd=2),(${q},pid=171946,fd=4),(${q}real${q},pid=171947,fd=5))`
-    const got = attr(col)
-    // No row may carry pid 1; only the two real holders survive.
-    expect(got.some((r) => r.pid === 1)).toBe(false)
-    expect(got.map((r) => r.pid).sort((a, b) => (a ?? 0) - (b ?? 0))).toEqual([171946, 171947])
+    expect(attr(col)).toEqual([NOTHING])
   })
 
   test('the SAME shape with tiny real pids still never yields the forged pid 1', () => {
-    // The only regime where the digit budget could let a forged boundary tile;
-    // commB's own real closing quote must still orphan it.
     const col = `users:((${q}${q},pid=1,fd=2),(${q},pid=7,fd=4),(${q}real${q},pid=8,fd=5))`
     const got = attr(col)
-    console.log(`[unit tiny-pid] ${JSON.stringify(got)}`)
     expect(got.some((r) => r.pid === 1)).toBe(false)
+    expect(got).toEqual([NOTHING])
   })
 
   test('a genuinely empty users:(()) column is one unknown row', () => {
-    expect(attr('users:(())')).toEqual([{ pid: null, name: 'unknown', known: false }])
+    expect(attr('users:(())')).toEqual([NOTHING])
   })
 })
 
-// --- tiler runtime on adversarial input (linear, deterministic) ----------------
+// --- a huge users: column cannot stall the parser ----------------------------
+// The tiler these used to time is gone; what still matters is that an
+// adversarially long line (a future ss, a captured fixture) is rejected in
+// bounded time and still yields exactly its one row.
 
 describe('tiler stays fast on adversarial input', () => {
   test('a long column of quote-heavy near-entries that never fully tiles parses fast', () => {
     const q = String.fromCharCode(34)
-    // 4000 copies of a 15-quote name (can never close into a valid entry), then
-    // a trailing junk char so no full tiling exists — worst case for a naive
-    // exponential backtracker.
     const inner = `(${q}${q.repeat(15)}${q},pid=1,fd=2),`.repeat(4000)
     const line = `tcp LISTEN 0 1 127.0.0.1:80 0.0.0.0:* users:(${inner}Z)`
     const t0 = performance.now()
@@ -364,16 +350,28 @@ describe('tiler stays fast on adversarial input', () => {
     expect(dt).toBeLessThan(1000)
   })
 
-  test('thousands of valid fd-entries for one pid dedupe to a single row, fast', () => {
+  test('thousands of fd-entries for one pid: one row, no pid, fast', () => {
+    // Was "dedupe to a single (pid 42) row" — the dedup it pinned was the
+    // tiler's; per-pid dedup is now attributeInodes', checked on a real
+    // process with dup()'d fds in system-ports-verify.test.ts. CPU time, min
+    // of 3, for the reason the original comment gave (wall time measured the
+    // machine's load, not the parser).
     const inner = Array.from({ length: 4000 }, (_, i) => `("bun",pid=42,fd=${i})`).join(',')
-    const line = `tcp LISTEN 0 1 127.0.0.1:80 0.0.0.0:* users:(${inner})`
-    const t0 = performance.now()
-    const rows = ports.parseSsOutput(line)
-    const dt = performance.now() - t0
-    console.log(`[tiler] valid-entries len=${line.length} -> ${rows.length} rows in ${dt.toFixed(1)}ms`)
-    expect(rows.map((r) => [r.pid, r.processName])).toEqual([[42, 'bun']])
-    expect(dt).toBeLessThan(1000)
-  })
+    const line = `tcp LISTEN 0 1 127.0.0.1:80 0.0.0.0:* users:(${inner}) uid:999 ino:5 sk:1 cgroup:/system.slice/a.service <->`
+    let rows = ports.parseSsOutput(line)
+    expect(rows.map((r) => [r.pid, r.processName, r.owner, r.unit])).toEqual([[null, 'unknown', null, null]])
+
+    let cpuMs = Number.POSITIVE_INFINITY
+    for (let i = 0; i < 3; i++) {
+      const c0 = process.cpuUsage()
+      rows = ports.parseSsOutput(line)
+      const c = process.cpuUsage(c0)
+      cpuMs = Math.min(cpuMs, (c.user + c.system) / 1000)
+    }
+    console.log(`[tiler] valid-entries len=${line.length} -> ${rows.length} rows in ${cpuMs.toFixed(1)}ms CPU (min of 3)`)
+    expect(rows).toHaveLength(1)
+    expect(cpuMs).toBeLessThan(1000)
+  }, 60_000)
 })
 
 // --- IPv4-mapped IPv6 from /proc decodes the way ss prints it (fix 3) -----------

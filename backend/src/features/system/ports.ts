@@ -1,4 +1,4 @@
-// The host's current port -> process mapping — a structured `ss -tulpn`.
+// The host's current port -> process mapping — a structured `ss -tuln`.
 //
 // Two readers, tried in order:
 //   1. `ss` (fast, structured, gives us the process column when it can).
@@ -12,21 +12,83 @@
 // hand.
 //
 // This box runs the backend as a non-root systemd service account (see
-// backend/README.md). `ss -p` only resolves a process for sockets owned by
-// the calling uid — every other row comes back with no process column at
-// all, which is the ordinary result here, not a degraded one. The /proc
-// fallback has the identical limit for the identical reason: readdir/readlink
-// on another user's /proc/<pid>/fd throws EACCES, which is skipped silently
-// rather than treated as a fault.
+// backend/README.md), with no-new-privileges set and no sudo, setuid helper
+// or file capability available to it — a socket only ever attributes to a
+// process this account's own uid can see into `/proc/<pid>/fd` for, and the
+// /proc fallback hits the identical EACCES wall on another user's
+// `/proc/<pid>/fd`. That used to mean most rows on this deployment came back
+// `unknown`, which the operator reads as a bug rather than the expected
+// result of running unprivileged. The three passes below (`socket`,
+// `docker`, `service` — see `Attribution`) do not change any of that: they
+// add no privilege at all, only read facts the kernel and systemd already
+// expose to any account — `ss -e`'s own uid/cgroup columns,
+// `/sys/fs/cgroup/**/cgroup.procs` and `/proc/<pid>/{comm,cmdline,status,fd}`
+// (all world-readable), and a read-only Docker query over the socket this
+// account's `docker` group membership already grants. A privileged reader
+// (CAP_SYS_PTRACE, a setuid helper, `sudo ss`) would see every socket
+// resolved for free; that is out of scope here on purpose, not an oversight.
+//
+// Neither reader ever asks `ss` (or anything else) to name a process for a
+// socket. `ss -p` prints the holding process's `comm` unescaped inside a
+// `users:((...))` column — and `comm` is entirely self-reported (any
+// unprivileged process can rewrite its own via `prctl`/`/proc/self/comm`).
+// Two cooperating processes sharing one socket (fork after bind) can pick
+// comms that, printed back to back in that one column, read as a SECOND,
+// wholly fictitious socket line — an attacker-controlled newline in a comm
+// can just as easily make ss's own real line for that socket fail to parse
+// and vanish instead. No amount of parsing that text can be made safe: a
+// process is always free to pick the exact bytes a parser is looking for.
+// So this module never reads it at all — `-p` is not even in the argv (see
+// `SS_ARGS`). Attribution is by inode instead: `ss -e` prints `ino:<n>` for
+// every socket, kernel-assigned and never chosen by any process; a scan of
+// `/proc/[pid]/fd/*` for a `socket:[<inode>]` readlink (`attributeInodes`)
+// finds every pid holding that inode, exactly the set `ss -p` itself could
+// ever have resolved (identical uid-scoped permissions), and `comm` is then
+// read as a plain, byte-exact file — never matched against, never split on,
+// just displayed. Zero attacker-controlled bytes ever enter a parse step.
 
 import { readdir, readFile, readlink } from 'node:fs/promises'
 import { userInfo } from 'node:os'
+import { type DockerCli, realDockerCli } from '@/features/docker/cli'
+import {
+  inspectContainersRawAll,
+  listAllContainerIdsResult,
+  type PublishedPort,
+  toDockerContainer,
+} from '@/features/docker/inspect'
 import { serviceUnavailable } from '@/lib/errors'
 import { logger } from '@/lib/logger'
-import { readBounded } from '@/lib/spawn'
+import { readBounded, sleep } from '@/lib/spawn'
 
 export type PortScope = 'listening' | 'all'
 export type Protocol = 'tcp' | 'udp'
+
+/**
+ * How `pid`/`processName` were determined, in the order they are tried (see
+ * `enrichUnattributed`) — first match wins, and every entry that reaches
+ * `'none'` keeps `pid: null, processName: 'unknown'` exactly as before this
+ * field existed.
+ *
+ *   - `'socket'`  — a direct `/proc/*\/fd` scan for the socket's own inode
+ *     (`attributeInodes`), fed by `ss -e`'s `ino:<n>` column in the ss
+ *     reader or `/proc/net`'s own inode field in the fallback. Only ever
+ *     resolves a socket this service account itself owns — see the module
+ *     comment for why this reads the fd table directly rather than any text
+ *     `ss` prints about the process.
+ *   - `'docker'`  — a `docker-proxy` process whose cmdline's proto/host-ip/
+ *     host-port matches this socket (`matchDockerProxy`), cross-checked
+ *     against a live, read-only Docker query for the publishing container.
+ *     Works for a socket owned by any uid, because `docker-proxy`'s cmdline
+ *     is process-table metadata, not something only its own uid can read.
+ *   - `'service'` — the systemd unit implied by the socket's own cgroup
+ *     (`cgroup:<path>` from `ss -e`), attributed to that unit's main
+ *     process. Reliable for the *name*; the pid is the unit's main process,
+ *     which in practice is the listener itself for a single-process unit
+ *     (nginx's master, postgres's postmaster) but is not guaranteed to be
+ *     the specific worker that owns any one connection.
+ *   - `'none'`    — nothing above resolved a process for this socket.
+ */
+export type Attribution = 'socket' | 'docker' | 'service' | 'none'
 
 export interface PortEntry {
   protocol: Protocol
@@ -38,6 +100,10 @@ export interface PortEntry {
   pid: number | null
   processName: string
   processKnown: boolean
+  attribution: Attribution
+  unit: string | null
+  container: string | null
+  owner: string | null
 }
 
 export interface PortsResult {
@@ -49,6 +115,7 @@ export interface PortsResult {
   total: number
   truncated: boolean
   unattributedCount: number
+  inferredCount: number
   ports: PortEntry[]
 }
 
@@ -59,190 +126,43 @@ export const MAX_ROWS = 5000
 // Read-only by construction: `scope` only ever selects one of these two
 // fixed argv arrays — nothing here is built from the request. `-K`/`--kill`
 // (closes the socket), `-D`/`--diag` (writes a dump to disk) and `-F` are
-// never used, and there is no shell to reinterpret anything even if they were.
+// never used, and there is no shell to reinterpret anything even if they
+// were. There is also no `-p` — see the module comment: attribution is by
+// inode (`ss -e`'s own `ino:<n>` plus a `/proc/*/fd` scan), never by asking
+// `ss` to print a process's self-reported `comm` for us to parse. `-e`
+// ("show detailed socket information": uid, inode, cgroup) is the one flag
+// added for the `docker`/`service` attribution passes and the inode itself;
+// it is exactly as read-only as every flag already here — ss prints more
+// about a socket, it changes nothing about one.
 export const SS_ARGS: Record<PortScope, string[]> = {
-  listening: ['ss', '-H', '-t', '-u', '-n', '-p', '-l'],
-  all: ['ss', '-H', '-t', '-u', '-n', '-p', '-a'],
+  listening: ['ss', '-H', '-t', '-u', '-n', '-e', '-l'],
+  all: ['ss', '-H', '-t', '-u', '-n', '-e', '-a'],
 }
 
 const SS_TIMEOUT_MS = 5_000
 
 // --- ss parsing, pure and exported for tests --------------------------------
 
-/**
- * One candidate `("name",pid=N,fd=M)` read out of a `users:((...))` column,
- * before it has been checked against /proc — see `verifyProcesses` below.
- */
-interface ProcessCandidate {
-  pid: number
-  name: string
-}
-
-/**
- * `users:(("nginx",pid=1234,fd=6),("nginx",pid=1235,fd=6))` is comm printed
- * unescaped: the name can itself contain spaces, parens, commas and quotes
- * ('tmux: server', '(sd-pam)', 'Web Content' — or, since any unprivileged
- * process can rewrite its own comm (prctl / /proc/self/comm, capped at 15
- * bytes), a name crafted to look like `"<real name>",pid=<other pid>` and
- * shift where a naive parser thinks the entry ends). Matching up to the
- * first quote, or up to the first `,fd=\d+\)`, both let a hostile comm
- * relabel its own socket onto a pid it does not own — observed on this
- * host: a socket owned by an ordinary process whose comm was set to
- * `a",pid=1` came back attributed to pid 1 (init).
- *
- * The only reading that cannot be steered by the name's own content is
- * tiling: the span between `users:(` and the final `)` must be covered
- * *completely* by `("<0-15 bytes>",pid=<digits>,fd=<digits>)` entries
- * joined by `,`. If no tiling covers the whole span, nothing here is
- * trustworthy and the column is treated as empty (unattributed), same as
- * `users:(())`. This tiling is unique even for a name built to look like
- * more than one entry — see `buildVerifiedEntries`, which cross-checks the
- * winning pid's own /proc/<pid>/comm for exactly the names where that
- * matters: the ones this had to look past an embedded quote to read.
- */
-function parseProcessColumn(column: string): ProcessCandidate[] {
-  if (!column.startsWith('users:(') || !column.endsWith(')')) return []
-  const span = column.slice('users:('.length, -1)
-  return tileProcessEntries(span) ?? []
-}
-
-/** One parsed entry at a fixed starting offset in `span`: where it ends, and
- * the pid/name it read. */
-interface EntryMatch {
-  end: number
-  pid: number
-  name: string
-}
-
-/** `span.charCodeAt(i)` is a decimal digit — checked by code point rather
- * than `span[i]` so a run's end never needs a non-null assertion to index
- * back into the string (charCodeAt is always a number, NaN past the end). */
-function isDigitAt(span: string, i: number): boolean {
-  const code = span.charCodeAt(i)
-  return code >= 48 /* '0' */ && code <= 57 /* '9' */
-}
-
-/**
- * Every way to read one `("name",pid=N,fd=M)` entry starting at `span[start]`,
- * in order of increasing name length — the same order a lazy `.{0,15}?` in a
- * backtracking regex tries first. The name's own length is the only
- * ambiguity; pid and fd are each the maximal run of digits at their fixed
- * position, which is never ambiguous.
- */
-function entryCandidatesAt(span: string, start: number): EntryMatch[] {
-  const candidates: EntryMatch[] = []
-  if (span[start] !== '(' || span[start + 1] !== '"') return candidates
-
-  for (let nameLen = 0; nameLen <= 15; nameLen++) {
-    const quoteIdx = start + 2 + nameLen
-    if (quoteIdx >= span.length || span[quoteIdx] !== '"') continue
-
-    let i = quoteIdx + 1
-    if (span.slice(i, i + 5) !== ',pid=') continue
-    i += 5
-    const pidStart = i
-    while (isDigitAt(span, i)) i++
-    if (i === pidStart) continue // ',pid=' with no digits after it
-    const pidEnd = i
-
-    if (span.slice(i, i + 4) !== ',fd=') continue
-    i += 4
-    const fdStart = i
-    while (isDigitAt(span, i)) i++
-    if (i === fdStart) continue // ',fd=' with no digits after it
-
-    if (span[i] !== ')') continue
-    candidates.push({
-      end: i + 1,
-      pid: Number(span.slice(pidStart, pidEnd)),
-      name: span.slice(start + 2, quoteIdx),
-    })
-  }
-  return candidates
-}
-
-/**
- * A full tiling of `span` (the text between `users:(` and the final `)`)
- * into entries joined by `,`, covering it end to end — or null if no such
- * tiling exists. Memoized on start offset: the same suffix can be reached
- * through more than one choice of an earlier entry's name length, and every
- * recursive call strictly advances `start` (an entry is always at least a
- * few characters), so there is no cycle to guard against, only repeated
- * work to avoid.
- */
-function tileProcessEntries(span: string): ProcessCandidate[] | null {
-  const memo = new Map<number, ProcessCandidate[] | null>()
-
-  function from(start: number): ProcessCandidate[] | null {
-    if (start === span.length) return []
-    if (memo.has(start)) return memo.get(start) ?? null
-
-    let result: ProcessCandidate[] | null = null
-    for (const candidate of entryCandidatesAt(span, start)) {
-      if (candidate.end === span.length) {
-        result = [{ pid: candidate.pid, name: candidate.name }]
-        break
-      }
-      if (span[candidate.end] === ',') {
-        const rest = from(candidate.end + 1)
-        if (rest) {
-          result = [{ pid: candidate.pid, name: candidate.name }, ...rest]
-          break
-        }
-      }
-    }
-    memo.set(start, result)
-    return result
-  }
-
-  return from(0)
-}
-
-/**
- * ss prints the process column unescaped and any process can rewrite its
- * own comm — see `parseProcessColumn` — so a tiling that parses cleanly is
- * still only a claim. The kernel's current `/proc/<pid>/comm` is the
- * tiebreaker: an entry is trusted only if that pid's comm, read right now,
- * is exactly the name ss printed for it. An entry whose pid has already
- * exited (comm unreadable) is dropped for the same reason a mismatch is —
- * there is nothing left to verify it against.
- *
- * `readComm` is injected so a unit test can drive this without a real
- * /proc, and is called at most once per distinct pid per invocation
- * (cached here), because the same pid legitimately recurs across many
- * sockets on one request.
- */
-export async function verifyProcesses<T extends ProcessCandidate>(
-  entries: T[],
-  readComm: (pid: number) => Promise<string | null>,
-): Promise<T[]> {
-  const commCache = new Map<number, string | null>()
-  const verified: T[] = []
-
-  for (const entry of entries) {
-    let comm = commCache.get(entry.pid)
-    if (comm === undefined) {
-      comm = await readComm(entry.pid)
-      commCache.set(entry.pid, comm)
-    }
-    if (comm !== null && comm === entry.name) verified.push(entry)
-  }
-
-  return verified
-}
-
 /** A real comm can end in a space, so only the one trailing newline `comm`
  * files are terminated with is stripped — a full `.trim()` would also eat
- * that space and make a legitimate comm fail to match itself. */
+ * that space and make a legitimate comm fail to match itself. This is the
+ * ONLY transformation ever applied to a comm anywhere in this module: no
+ * escaping, no splitting, no matching against it — see the module comment
+ * on why any parse of process-reported text is inherently unsafe. */
 function stripTrailingNewline(text: string): string {
   return text.endsWith('\n') ? text.slice(0, -1) : text
 }
 
-async function readCommForVerification(pid: number): Promise<string | null> {
+/** Reads one pid's `comm`, byte-exact past the one trailing newline strip
+ * above. Never fails the caller: an already-exited pid (a race between
+ * whatever snapshot named it and this read) or a genuinely unreadable file
+ * both degrade to `null`, which every caller treats as "nothing to attribute
+ * here" rather than a crafted answer. */
+async function readProcComm(pid: number): Promise<string | null> {
   try {
     return stripTrailingNewline(await readFile(`/proc/${pid}/comm`, 'utf8'))
   } catch {
-    return null // exited between ss's snapshot and this read, or unreadable
+    return null
   }
 }
 
@@ -299,8 +219,234 @@ function normalizePeer(
   return { address, port }
 }
 
-/** One socket row parsed out of `ss` output, before its process candidates
- * (if any) have been checked against /proc. */
+// --- `ss -e`'s own tail: uid/ino/sk/cgroup/v6only, and the shutdown marker --
+//
+// With `-p` never passed (see SS_ARGS), everything past the peer column on a
+// real `ss -e` line is ss's own output — never a process's own comm — with
+// exactly one exception: `cgroup:<path>`'s own value, which a user with a
+// delegated cgroup subtree can still choose. `parseSsTailFields` is written
+// to that one exception: strict left-to-right parsing, ss's own field order
+// enforced (`TAIL_KEY_ORDER`), and every field trusted exactly as far as
+// ss's own fixed print order lets it be genuine. `uid`/`ino`/`sk` are always
+// written by ss BEFORE `cgroup`'s own bytes even begin, so a violation before
+// `cgroup` is reached still drops every field for the whole tail — it means
+// this text does not look like ss's own tail at all, not a cgroup playing
+// tricks, and there is no genuine prefix to trust in that case. A violation
+// AT or AFTER `cgroup` — its own value's shape, a space inside a delegated
+// name splitting off a stray token, or a forged trailing `uid:`/`ino:` meant
+// to be misread as a real one — can only ever be that one user-controlled
+// field misbehaving, so only the cgroup-derived facts are dropped; the
+// genuine uid/ino/sk already read off the earlier, ss-written tokens are
+// kept (see `parseSsTailFields`'s own comment for why that split is safe).
+
+const SHUTDOWN_MARKERS: ReadonlySet<string> = new Set(['<->', '-->', '<--', '---'])
+
+/** One recognised `key:value`-shaped tail token's key, or null if `token`
+ * does not even look like `word:value`. */
+function tailTokenKey(token: string): string | null {
+  const m = /^([a-z0-9_]+):\S*$/.exec(token)
+  return m ? (m[1] as string) : null
+}
+
+/** ss's own field order — the sequence `parseSsTailFields`'s repeat/order
+ * check enforces among whichever of these actually appear on a line. */
+const TAIL_KEY_ORDER = ['uid', 'ino', 'sk', 'cgroup', 'v6only'] as const
+type TailKey = (typeof TAIL_KEY_ORDER)[number]
+
+/** Strict value shape for each key ss itself ever emits. `cgroup`'s own
+ * shape excludes whitespace (not just the quote/parens a `users:(...)`
+ * entry needed to guard against) — a delegated cgroup name is the one
+ * value here a user can still pick. A raw C0/DEL control byte (a literal
+ * `\r`, or one of the Unicode line separators) is rejected separately, by
+ * `hasControlCharacter` below rather than by this regex — biome disallows a
+ * literal control-character range inside a regex literal, on the reasonable
+ * assumption that one is usually a typo; here it is the opposite, so a
+ * plain char-code scan says the same thing without tripping that rule. */
+const TAIL_VALUE_SHAPE: Record<TailKey, RegExp> = {
+  uid: /^\d+$/,
+  ino: /^\d+$/,
+  sk: /^[0-9a-f]+$/,
+  cgroup: /^[^"()\s]+$/,
+  v6only: /^[01]$/,
+}
+
+/** Whether `text` contains a C0 control character or DEL (U+0000-U+001F,
+ * U+007F) — anything a real systemd-chosen path segment never contains
+ * (see `CGROUP_SEGMENT_RE` below, which independently rejects the same
+ * bytes for the exact same reason), but a delegated cgroup's own directory
+ * name is not guaranteed to respect. `\s` in `TAIL_VALUE_SHAPE.cgroup`
+ * already excludes whitespace, including U+2028/U+2029; this covers every
+ * other control byte the regex leaves alone (`\x00`-`\x1F` minus the
+ * whitespace ones, plus `\x7F`). */
+function hasControlCharacter(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (code <= 0x1f || code === 0x7f) return true
+  }
+  return false
+}
+
+export interface SsTailFields {
+  /** From `uid:<n>`. Null when that token was never seen — old ss with no
+   * `-e` output at all, ss's own shorthand for uid 0, or a tail rejected
+   * outright (see `sawEFields`, which is what tells the first of those from
+   * the other two). */
+  uid: number | null
+  /** From `ino:<n>` — the same three-way ambiguity as `uid`. See
+   * `ownerForLine`'s own ino-0-means-orphan rule, the one place this is
+   * used, and `collectAttributableInodes`, which is why an `ino` here is
+   * never itself the string `0` treated specially — the caller does that. */
+  ino: number | null
+  /** From `cgroup:<path>`, verbatim and unvalidated — ss's own output, so
+   * every caller treats it as data (see `parseCgroup`, which does the
+   * actual validation before any filesystem path is built from it). */
+  cgroupPath: string | null
+  /** True once at least one `-e` field was recognised — either because the
+   * whole tail parsed cleanly end to end, or because uid/ino/sk parsed
+   * cleanly before a violation at or after `cgroup` dropped only the
+   * cgroup-derived facts (see `parseSsTailFields`). Never true for a tail
+   * rejected before `cgroup` was ever reached. */
+  sawEFields: boolean
+}
+
+const NO_TAIL_FIELDS: SsTailFields = { uid: null, ino: null, cgroupPath: null, sawEFields: false }
+
+/**
+ * Whether `text` contains an old `users:(...)` claim at all. The argv this
+ * module actually runs never passes `-p` (see `SS_ARGS`), so a real `ss`
+ * invocation from this endpoint never prints one — but an old captured
+ * fixture, or a future `ss` that changes its own defaults, still might. The
+ * safe reading is not to parse it (see the module comment on why any parse
+ * of a `users:(...)` column is inherently ambiguous — a process controls
+ * its own comm), never to resurrect the tiling/verification machinery that
+ * used to make sense of it: a tail carrying one is simply invalid.
+ */
+function containsUsersColumn(text: string): boolean {
+  return /(^|\s)users:\(/.test(text)
+}
+
+/**
+ * Parses the text after the peer-address column of one `ss -e` line — uid,
+ * inode, socket hash, cgroup path, the v6only flag, and the one shutdown-
+ * state marker ss ever appends last — strictly left to right: every KNOWN
+ * key must match its own value shape (`TAIL_VALUE_SHAPE`) and appear in
+ * ss's own order (`TAIL_KEY_ORDER`), at most once. An unknown `key:value`
+ * token — a future ss field this module has never seen, or one of ss's own
+ * extras like `timer:(...)` — is tolerated wherever it falls BEFORE
+ * `cgroup`, and never disturbs that order check.
+ *
+ * A violation before `cgroup` is reached — a token that isn't even
+ * `key:value`-shaped, a known key repeated or out of ss's own order, a known
+ * key whose value doesn't match its own shape, or the defensive
+ * `users:(...)` check above — drops every field for the WHOLE tail, exactly
+ * as before this function's own hardening: `uid`/`ino`/`sk` are ss's own
+ * bytes, always written before the user's own cgroup value even starts, so
+ * a violation there means this text does not look like ss's own tail at
+ * all — there is no genuine prefix to salvage.
+ *
+ * A violation AT or AFTER `cgroup`'s own key, though, drops only the
+ * cgroup-derived facts — `cgroupPath` (hence `unit`) goes null, but the
+ * `uid`/`ino` already read survive — because a delegated cgroup can be
+ * named anything its owner likes, including literally `x uid:0`, which ss
+ * then prints verbatim as `cgroup:/…/x uid:0`: a SECOND `uid` token sitting
+ * after the genuine one, or (a plain space in the name) a stray fragment
+ * that is not even `key:value`-shaped. Either way, ss itself already wrote
+ * the genuine `uid`/`ino`/`sk` tokens earlier in this same left-to-right
+ * scan, strictly before the cgroup value's own bytes begin: the user can
+ * shape their OWN field however they like, but they cannot rewrite what ss
+ * already emitted before it. So a forged or malformed token can only ever
+ * land at or after `cgroup`'s own position, never earlier, which is why only
+ * what comes at or after it needs to be distrusted — dropping the earlier,
+ * genuinely-ss-written facts too would just turn "my socket is visible" into
+ * "my socket shows as unknown" by naming a single space in a cgroup nobody
+ * else can even create.
+ */
+export function parseSsTailFields(tailText: string): SsTailFields {
+  if (tailText.length === 0) return NO_TAIL_FIELDS
+  if (containsUsersColumn(tailText)) return NO_TAIL_FIELDS
+
+  const tokens = tailText.split(' ')
+  if (SHUTDOWN_MARKERS.has(tokens[tokens.length - 1] as string)) tokens.pop()
+
+  let uid: number | null = null
+  let ino: number | null = null
+  let cgroupPath: string | null = null
+  let lastOrder = -1
+  const seen = new Set<TailKey>()
+  let sawAnyField = false
+  // Set the moment `cgroup:<path>` itself parses cleanly — from here on,
+  // every further token is either ss's own optional `v6only:<0|1>` or a
+  // symptom of the cgroup value misbehaving (see the function's own doc
+  // comment), never a reason to distrust the uid/ino already read above.
+  let cgroupSeen = false
+
+  for (const token of tokens) {
+    if (cgroupSeen) {
+      // Only ss's own optional `v6only:<0|1>` may follow a valid cgroup
+      // value. Anything else here — a fragment of the cgroup's own name
+      // that a literal space split off, or a token shaped like a real key
+      // chosen to read as one — is the one user-controlled field
+      // misbehaving, not evidence the rest of the tail is untrustworthy:
+      // keep the uid/ino already read from the earlier, ss-written tokens,
+      // and drop only the cgroup-derived facts.
+      if (token.startsWith('v6only:') && !seen.has('v6only')) {
+        const value = token.slice('v6only:'.length)
+        if (TAIL_VALUE_SHAPE.v6only.test(value)) {
+          seen.add('v6only')
+          continue
+        }
+      }
+      return { uid, ino, cgroupPath: null, sawEFields: sawAnyField }
+    }
+
+    // `cgroup:<path>`'s own value is the one field a user can shape freely,
+    // and it can contain internal whitespace/control bytes that a real
+    // `key:value` token never does — which is exactly why it is recognised
+    // by its own literal prefix here, BEFORE the generic `tailTokenKey`
+    // check below: that check requires the whole value to be `\S*` (no
+    // embedded whitespace at all), so a tab or a control character inside
+    // a delegated cgroup name would otherwise make this token fail to look
+    // like `key:value` at ALL — landing in the "not even key:value-shaped"
+    // branch below, which (correctly, for every OTHER field) drops the
+    // whole tail. A whitespace/control byte inside `cgroup:`'s own value is
+    // instead exactly the "cgroup value misbehaving" case this function's
+    // own doc comment describes, so it is handled with the same softer rule.
+    if (token.startsWith('cgroup:')) {
+      const order = TAIL_KEY_ORDER.indexOf('cgroup')
+      if (order < lastOrder) return NO_TAIL_FIELDS // out of order before cgroup ever cleanly parsed
+      sawAnyField = true
+      const value = token.slice('cgroup:'.length)
+      if (!TAIL_VALUE_SHAPE.cgroup.test(value) || hasControlCharacter(value)) {
+        return { uid, ino, cgroupPath: null, sawEFields: true }
+      }
+      seen.add('cgroup')
+      lastOrder = order
+      cgroupPath = value
+      cgroupSeen = true
+      continue
+    }
+
+    const key = tailTokenKey(token)
+    if (key === null) return NO_TAIL_FIELDS // not even key:value-shaped: not ss's own tail
+    sawAnyField = true
+
+    const order = TAIL_KEY_ORDER.indexOf(key as TailKey)
+    if (order === -1) continue // unknown key: tolerated, ignored for ordering and value
+
+    if (seen.has(key as TailKey) || order < lastOrder) return NO_TAIL_FIELDS // repeat, or out of order
+    const value = token.slice(key.length + 1)
+    if (!TAIL_VALUE_SHAPE[key as TailKey].test(value)) return NO_TAIL_FIELDS
+
+    seen.add(key as TailKey)
+    lastOrder = order
+    if (key === 'uid') uid = Number(value)
+    else if (key === 'ino') ino = Number(value)
+  }
+
+  return { uid, ino, cgroupPath, sawEFields: sawAnyField }
+}
+
+/** One socket row parsed out of `ss` output. */
 interface ParsedSsLine {
   protocol: Protocol
   localAddress: string
@@ -308,10 +454,135 @@ interface ParsedSsLine {
   peerAddress: string | null
   peerPort: number | null
   state: string
-  processes: ProcessCandidate[]
+  /** From `ss -e`'s `uid:<n>` — 0 when `-e` fields are present but the
+   * token itself was omitted (ss's own shorthand for uid 0), null when no
+   * `-e` fields are present at all (this socket's uid is simply unknown). */
+  uid: number | null
+  /** From `ss -e`'s `ino:<n>` — see `ownerForLine`'s ino-0-means-orphan
+   * rule and `collectAttributableInodes`, the two places this is read. */
+  ino: number | null
+  /** From `ss -e`'s `cgroup:<path>`, verbatim and unvalidated. */
+  cgroupPath: string | null
 }
 
-function toUnknownEntry(line: ParsedSsLine): PortEntry {
+// --- owner: uid -> username, read once per request --------------------------
+
+/**
+ * `/etc/passwd` is world-readable and this maps every uid it lists, once —
+ * shared by both readers (ss's own `uid:` column, and, in the /proc
+ * fallback, `/proc/net/*`'s `uid` field) rather than a `getent` spawn per
+ * row. A caller with no real passwd data at all (the pure `parseSsOutput`
+ * path this module also exports for tests) passes an empty map instead of
+ * calling this, which degrades `ownerForUid` to its own numeric-string
+ * fallback — never a fabricated name.
+ */
+async function loadPasswdOwners(): Promise<Map<number, string>> {
+  const map = new Map<number, string>()
+  let text: string
+  try {
+    text = await readFile('/etc/passwd', 'utf8')
+  } catch {
+    return map // unusual, but degrade to the numeric/'root' fallback rather than fail the request
+  }
+  for (const line of text.split('\n')) {
+    if (!line || line.startsWith('#')) continue
+    const fields = line.split(':')
+    const name = fields[0]
+    const uid = Number(fields[2])
+    if (name && Number.isInteger(uid) && !map.has(uid)) map.set(uid, name) // first entry for a uid wins
+  }
+  return map
+}
+
+/**
+ * `'root'` for uid 0 unconditionally (ss omits the `uid:` token for it
+ * rather than printing `uid:0`, so this never even needs `/etc/passwd` to
+ * say so), the numeric uid as a string when `passwdMap` has no entry for
+ * it, and null only when the uid itself is unknown — an old ss with no `-e`
+ * output, or an unattributed `/proc/net` row.
+ */
+export function ownerForUid(
+  uid: number | null,
+  passwdMap: ReadonlyMap<number, string>,
+): string | null {
+  if (uid === null) return null
+  if (uid === 0) return 'root'
+  return passwdMap.get(uid) ?? String(uid)
+}
+
+// --- unit: the systemd unit implied by a socket's own cgroup ---------------
+
+/** Conservative on purpose: `ss -e`'s `cgroup:<path>` is data, not a path
+ * this module chose, and it is about to be joined onto `/sys/fs/cgroup` and
+ * read from disk (see `readCgroupProcs`) — so a value that does not look
+ * exactly like a systemd cgroup path (no `..` segment, no character outside
+ * the set systemd itself ever emits for a slice/unit name, plus its own
+ * `\xNN` escape for a byte that isn't) is rejected outright rather than
+ * given the benefit of the doubt. */
+const CGROUP_SEGMENT_RE = /^(?:[A-Za-z0-9@._:-]|\\x[0-9a-fA-F]{2})+$/
+
+function isValidCgroupPath(path: string): boolean {
+  if (!path.startsWith('/')) return false
+  const segments = path.split('/').slice(1)
+  return segments.every(
+    (segment) => segment.length > 0 && segment !== '..' && CGROUP_SEGMENT_RE.test(segment),
+  )
+}
+
+const UNIT_SUFFIX_RE = /\.(service|socket|scope)$/
+
+/** The deepest (rightmost) path segment that names a systemd unit rather
+ * than a slice — e.g. `/system.slice/user@1000.service/app.slice/foo.service`
+ * is `foo.service`, and `/system.slice/ssh.socket` is `ssh.socket`. Null when
+ * no segment qualifies (a bare slice, or nothing at all). */
+function deepestUnitSegment(path: string): string | null {
+  const segments = path.split('/').filter(Boolean)
+  for (let i = segments.length - 1; i >= 0; i--) {
+    const segment = segments[i] as string
+    if (UNIT_SUFFIX_RE.test(segment)) return segment
+  }
+  return null
+}
+
+export interface CgroupInfo {
+  /** The unit name for display — see `deepestUnitSegment`. */
+  unit: string | null
+  /** `rawPath` itself, once validated — the only form of it this module
+   * will ever join onto `/sys/fs/cgroup` and read (see `readCgroupProcs`).
+   * Null whenever `unit` is, and also whenever the path failed validation
+   * even if it happened to contain something that looked unit-shaped. */
+  validPath: string | null
+}
+
+/** Pure: validates and interprets one `cgroup:<path>` value. Never touches
+ * the filesystem — see `readCgroupProcs` for the one place that does, using
+ * `validPath` from here. */
+export function parseCgroup(rawPath: string | null): CgroupInfo {
+  if (rawPath === null || !isValidCgroupPath(rawPath)) return { unit: null, validPath: null }
+  const unit = deepestUnitSegment(rawPath)
+  // No unit at all (a bare slice) means there is nothing for `service`
+  // attribution to read `cgroup.procs` FOR — see applyServiceAttribution's
+  // own gate — so `validPath` stays null right alongside `unit` rather than
+  // exposing a path nothing will ever use.
+  return unit === null ? { unit: null, validPath: null } : { unit, validPath: rawPath }
+}
+
+/**
+ * `ownerForUid`, with one extra rule on top: `ino:0` is ss's own sentinel
+ * for an orphan socket (TIME-WAIT and similar — held by the kernel itself,
+ * not by any process), and for exactly those sockets `-e` also omits
+ * `uid:` — the SAME shorthand it uses for a genuine uid of 0. Without this
+ * check that omission is indistinguishable from "owned by root", which is
+ * how an orphan socket was wrongly reported as root-owned. `ino:0` is the
+ * one signal available to tell the two apart, so it wins outright: an
+ * orphan's owner is unknown, never inferred.
+ */
+function ownerForLine(line: ParsedSsLine, passwdMap: ReadonlyMap<number, string>): string | null {
+  if (line.ino === 0) return null
+  return ownerForUid(line.uid, passwdMap)
+}
+
+function toUnknownEntry(line: ParsedSsLine, passwdMap: ReadonlyMap<number, string>): PortEntry {
   return {
     protocol: line.protocol,
     localAddress: line.localAddress,
@@ -322,10 +593,19 @@ function toUnknownEntry(line: ParsedSsLine): PortEntry {
     pid: null,
     processName: 'unknown',
     processKnown: false,
+    attribution: 'none',
+    unit: parseCgroup(line.cgroupPath).unit,
+    container: null,
+    owner: ownerForLine(line, passwdMap),
   }
 }
 
-function toKnownEntry(line: ParsedSsLine, proc: ProcessCandidate): PortEntry {
+function toKnownEntry(
+  line: ParsedSsLine,
+  pid: number,
+  name: string,
+  passwdMap: ReadonlyMap<number, string>,
+): PortEntry {
   return {
     protocol: line.protocol,
     localAddress: line.localAddress,
@@ -333,20 +613,116 @@ function toKnownEntry(line: ParsedSsLine, proc: ProcessCandidate): PortEntry {
     peerAddress: line.peerAddress,
     peerPort: line.peerPort,
     state: line.state,
-    pid: proc.pid,
-    processName: proc.name,
+    pid,
+    processName: name,
     processKnown: true,
+    attribution: 'socket',
+    unit: parseCgroup(line.cgroupPath).unit,
+    container: null,
+    owner: ownerForLine(line, passwdMap),
   }
 }
 
+/** No real passwd data behind the pure parsers (`parseSsOutput`, and every
+ * hand-built fixture in system-ports.test.ts) — `ownerForUid` degrades to
+ * its own numeric-string fallback against this rather than a caller having
+ * to special-case "no map". */
+const NO_PASSWD_DATA: ReadonlyMap<number, string> = new Map()
+
+/** ss's own state vocabulary (iproute2's `sstate_name[]`), in the RAW form
+ * ss itself ever prints — `ESTAB`, never `normalizeState`'s own normalised
+ * `ESTABLISHED`. A second column that is not one of these was never
+ * emitted by any real `ss` at all. */
+const SS_STATE_NAMES: ReadonlySet<string> = new Set([
+  'LISTEN',
+  'UNCONN',
+  'ESTAB',
+  'SYN-SENT',
+  'SYN-RECV',
+  'FIN-WAIT-1',
+  'FIN-WAIT-2',
+  'TIME-WAIT',
+  'CLOSE-WAIT',
+  'LAST-ACK',
+  'CLOSING',
+  'CLOSED',
+  'UNKNOWN',
+])
+
 /**
- * Parses `ss -H -t -u -n -p {-l|-a}` output into one row per socket line,
- * process candidates included but not yet checked against /proc (that step
- * needs to be async and is done separately — see `verifyProcesses` and
- * `collectFromSs` — so this stays synchronous and easy to unit test). A
- * line this cannot make sense of is skipped rather than failing the whole
- * request — one odd row (a future ss adding a netid, a truncated line)
- * should not cost every other one.
+ * The six leading columns of one `ss -H ...` line — Netid, State, Recv-Q,
+ * Send-Q, Local Address:Port, Peer Address:Port — found strictly by
+ * POSITION (a run of `\S+`, `\d+` for the two queue columns). Group 7
+ * (`rest`, optional) is everything after the sixth field's own separator —
+ * ss's own `-e` tail, since `-p` is never in the argv (see `SS_ARGS`) there
+ * is no process-controlled text left in a real line at all.
+ *
+ * That capture is `[^\n]*`, not `.*`: JavaScript's `.` excludes not just
+ * `\n` but `\r` and the Unicode line separators U+2028/U+2029 as well, and
+ * a delegated cgroup name (see `TAIL_VALUE_SHAPE`'s own comment) could
+ * contain one. `text.split('\n')` above already guarantees `line` itself
+ * never contains a literal `\n`, so `[^\n]*` matches every remaining
+ * character `.` would have refused — without that, a `\r` anywhere in the
+ * tail made the WHOLE line fail to match at all, silently dropping a real
+ * socket's own record rather than merely failing to trust its cgroup.
+ */
+const SS_LINE_RE =
+  /^(\S+)[ \t]+(\S+)[ \t]+(\d+)[ \t]+(\d+)[ \t]+(\S+)[ \t]+(\S+)(?:[ \t]+([^\n]*))?$/
+
+/**
+ * Recognises exactly the address literals ss ever prints for either the
+ * local or peer column: an IPv4 dotted quad, a bare IPv6 literal (already
+ * unwrapped from its bracket form by `splitHostPort`) optionally suffixed
+ * with the `%zone` ss appends for a link-local address, or the wildcard
+ * `*`. Shared by both columns so each is validated exactly as strictly as
+ * the other — with `-p` gone (see `SS_ARGS`), neither one is ever
+ * process-controlled text in the first place, but there is no reason to
+ * trust either any further than the kernel's own vocabulary requires.
+ */
+const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}$/
+// A pure hex/colon IPv6 literal, OR one whose last group is an embedded
+// IPv4 dotted quad — valid IPv6 syntax generally (`::a.b.c.d`), and exactly
+// the form ss itself prints for an IPv4-mapped address (`::ffff:127.0.0.1`,
+// see decodeIPv6Hex's own comment on why ss never prints that as two more
+// hex groups instead).
+const IPV6_RE = /^[0-9a-fA-F:]+$/
+const IPV6_V4_MAPPED_RE = /^[0-9a-fA-F:]*:(?:\d{1,3}\.){3}\d{1,3}$/
+
+function isValidAddressLiteral(address: string): boolean {
+  if (address === '*') return true
+  const bare = address.replace(/%[^%]*$/, '')
+  if (IPV4_RE.test(bare)) return true
+  if (!bare.includes(':')) return false
+  return IPV6_RE.test(bare) || IPV6_V4_MAPPED_RE.test(bare)
+}
+
+/** `addr:port` for either the local or peer column: rejects `"`, `(`, `)`
+ * outright (never any part of a real address or port), then requires the
+ * address half to be one of the literal shapes `isValidAddressLiteral`
+ * recognises. The port half is returned as text — its own digit-or-`*`
+ * check differs slightly between local (never `*`) and peer (`*` means
+ * unconnected), so each caller in `parseSsLines` checks that itself. */
+function parseAddressPortField(raw: string): { address: string; port: string } | null {
+  if (raw.includes('"') || raw.includes('(') || raw.includes(')')) return null
+  const split = splitHostPort(raw)
+  if (!split || !isValidAddressLiteral(split.address)) return null
+  return split
+}
+
+function parseValidPeerField(raw: string): { address: string; port: string } | null {
+  const split = parseAddressPortField(raw)
+  if (!split) return null
+  if (split.port !== '*' && !/^\d+$/.test(split.port)) return null
+  return split
+}
+
+/**
+ * Parses `ss -H -t -u -n -e {-l|-a}` output into one row per socket line.
+ * Attribution needs an async `/proc/*\/fd` scan (`attributeInodes`), done
+ * separately by the one real caller (`collectFromSs`) — this stays
+ * synchronous and easy to unit test. A line this cannot make sense of is
+ * skipped rather than failing the whole request — one odd row (a future ss
+ * adding a netid, a truncated line) should not cost every other one.
  */
 function parseSsLines(text: string): ParsedSsLine[] {
   const lines: ParsedSsLine[] = []
@@ -358,44 +734,33 @@ function parseSsLines(text: string): ParsedSsLine[] {
     // cheap to tolerate.
     if (/^(Netid|State)\b/.test(line)) continue
 
-    const fields = line.split(/\s+/)
-    if (fields.length < 6) continue
+    const m = SS_LINE_RE.exec(line)
+    if (!m) continue
 
-    const netidRaw = fields[0] ?? ''
-    const stateRaw = fields[1] ?? ''
-    const localRaw = fields[4] ?? ''
-    const peerRaw = fields[5] ?? ''
-    const rest = fields.slice(6)
-    const netid = netidRaw.toLowerCase()
+    const netid = (m[1] as string).toLowerCase()
     if (netid !== 'tcp' && netid !== 'udp') continue // -t -u already restrict this; defensive only
     const protocol: Protocol = netid
 
-    const local = splitHostPort(localRaw)
-    if (!local || !/^\d+$/.test(local.port)) continue
+    if (!SS_STATE_NAMES.has((m[2] as string).toUpperCase())) continue
+
+    const local = parseAddressPortField(m[5] as string)
+    if (!local || local.address.length === 0 || !/^\d+$/.test(local.port)) continue
     const localPort = Number(local.port)
     if (localPort > 65535) continue
 
-    const peerRawSplit = splitHostPort(peerRaw)
-    const peerPortRaw = peerRawSplit
-      ? peerRawSplit.port === '*'
-        ? null
-        : /^\d+$/.test(peerRawSplit.port)
-          ? Number(peerRawSplit.port)
-          : null
-      : null
-    const peer = peerRawSplit
-      ? normalizePeer(peerRawSplit.address, peerPortRaw)
-      : { address: null, port: null }
+    const peerField = parseValidPeerField(m[6] as string)
+    if (!peerField) continue
+    const peerPortRaw = peerField.port === '*' ? null : Number(peerField.port)
+    const peer = normalizePeer(peerField.address, peerPortRaw)
 
-    const state = normalizeState(stateRaw)
-    const processes = parseProcessColumn(rest.join(' '))
-
-    const seenPids = new Set<number>()
-    const dedupedProcesses = processes.filter((proc) => {
-      if (seenPids.has(proc.pid)) return false // multiple fds, same process — one row
-      seenPids.add(proc.pid)
-      return true
-    })
+    const state = normalizeState(m[2] as string)
+    const tail = parseSsTailFields(m[7] ?? '')
+    // ss omits `uid:` for uid 0 rather than printing it — so an absent uid
+    // means root only once we know `-e` fields are present AND parsed
+    // cleanly; `sawEFields` is false both for an ss with no `-e` support at
+    // all and for a tail `parseSsTailFields` rejected outright, so neither
+    // one can default to root either.
+    const uid = tail.uid !== null ? tail.uid : tail.sawEFields ? 0 : null
 
     lines.push({
       protocol,
@@ -404,7 +769,9 @@ function parseSsLines(text: string): ParsedSsLine[] {
       peerAddress: peer.address,
       peerPort: peer.port,
       state,
-      processes: dedupedProcesses,
+      uid,
+      ino: tail.ino,
+      cgroupPath: tail.cgroupPath,
     })
   }
 
@@ -412,91 +779,673 @@ function parseSsLines(text: string): ParsedSsLine[] {
 }
 
 /**
- * Pure parser for `ss -H -t -u -n -p {-l|-a}` output, with no /proc
- * verification: the shape a unit test drives directly. `collectFromSs` — the
- * only real caller — never uses this: it calls `parseSsLines` itself so it
- * can verify each line's process candidates before turning them into rows.
- * Returns [] (not a throw) for input with nothing parseable; the caller
+ * Pure parser for `ss -H -t -u -n -e {-l|-a}` output, with no `/proc` scan
+ * and no `docker`/`service` enrichment: the shape a unit test drives
+ * directly. `collectFromSs` — the only real caller of the full pipeline —
+ * never uses this: it calls `parseSsLines` itself so it can attribute each
+ * line's inode via `attributeInodes` and enrich whatever is still
+ * unattributed afterwards, before turning them into rows. `unit` here is
+ * still derived from `cgroup:<path>` (pure, no I/O needed for that), but
+ * `owner` never resolves past its own numeric-uid/`'root'` fallback (no
+ * `/etc/passwd` behind this path — see `NO_PASSWD_DATA`), `pid`/
+ * `processName` never resolve at all (no `/proc/*\/fd` scan here either —
+ * every row comes back `attribution: 'none'`), and `container` stays null.
+ * Returns `[]` (not a throw) for input with nothing parseable; the caller
  * decides whether that means "no sockets" or "this output didn't parse".
  */
 export function parseSsOutput(text: string): PortEntry[] {
-  const entries: PortEntry[] = []
-  for (const line of parseSsLines(text)) {
-    if (line.processes.length === 0) {
-      entries.push(toUnknownEntry(line))
-      continue
-    }
-    for (const proc of line.processes) entries.push(toKnownEntry(line, proc))
-  }
-  return entries
+  return parseSsLines(text).map((line) => toUnknownEntry(line, NO_PASSWD_DATA))
 }
 
 type SsAttempt = { ok: true; entries: PortEntry[] } | { ok: false; reason: string }
 
-/**
- * Verifies every line's process candidates against /proc (see
- * `verifyProcesses`) and turns the result into rows, one per line unless
- * every candidate for that line failed verification — in which case, same
- * as a line with no process column at all, it becomes one unknown row
- * rather than silently disappearing.
- */
-/**
- * A legitimate comm never contains a raw `"` — that character is only ever
- * in an extracted name at all because `parseProcessColumn`'s tiling had to
- * look past an embedded quote to find where the entry really ends (see its
- * own comment), which is exactly the shape a comm crafted to spoof its pid
- * takes. Tiling's own uniqueness already recovers the right pid even for
- * that shape, so this is not what stands between an attacker and a wrong
- * answer — but it is where trusting the parse the same way every ordinary
- * entry is trusted would mean trusting the same string the attack is built
- * from, so it is the one case that gets the extra /proc round trip before
- * being believed. An ordinary name — the overwhelming majority of entries,
- * every one of them in the common case where this backend owns none of the
- * sockets a request happens to see — never pays for it.
- */
-function needsVerification(proc: ProcessCandidate): boolean {
-  return proc.name.includes('"')
+/** `PortEntry`s that carry a validated cgroup path, keyed by object identity
+ * — the one piece of state the `service` enrichment pass
+ * (`applyServiceAttribution`) needs that isn't already sitting on the public
+ * entry itself (its derived `unit`, yes; the raw path a `cgroup.procs` read
+ * is built from, no — see `parseCgroup`). A `Map` rather than a field on
+ * `PortEntry` so the wire shape stays exactly the documented fields, nothing
+ * extra riding along for internal use. */
+type CgroupPathByEntry = ReadonlyMap<PortEntry, string>
+
+/** Same idea as `CgroupPathByEntry`, but the RAW (unvalidated) `cgroup:`
+ * text ss printed for this entry's own socket, kept even when `parseCgroup`
+ * would reject it for a `cgroup.procs` read. Used for exactly one thing —
+ * a plain string comparison against a candidate `docker-proxy`'s own
+ * `/proc/<pid>/cgroup` (see `verifyDockerProxyCandidate`) — which needs no
+ * filesystem-safety validation at all, since nothing here is ever joined
+ * onto a path and read. */
+type RawCgroupPathByEntry = ReadonlyMap<PortEntry, string>
+
+// --- `docker` attribution: a docker-proxy process's own cmdline -------------
+
+export interface DockerProxyBinding {
+  protocol: Protocol
+  hostIp: string
+  hostPort: number
+  containerIp: string
+  containerPort: number
 }
 
-async function buildVerifiedEntries(
-  lines: ParsedSsLine[],
-  readComm: (pid: number) => Promise<string | null>,
-): Promise<PortEntry[]> {
-  const trustedByLine = new Map<number, ProcessCandidate[]>()
-  const suspicious: Array<ProcessCandidate & { lineIndex: number }> = []
-
-  lines.forEach((line, lineIndex) => {
-    for (const proc of line.processes) {
-      if (needsVerification(proc)) {
-        suspicious.push({ ...proc, lineIndex })
-        continue
-      }
-      const forLine = trustedByLine.get(lineIndex)
-      if (forLine) forLine.push(proc)
-      else trustedByLine.set(lineIndex, [proc])
-    }
-  })
-
-  const verified = await verifyProcesses(suspicious, readComm)
-  for (const { lineIndex, ...proc } of verified) {
-    const forLine = trustedByLine.get(lineIndex)
-    if (forLine) forLine.push(proc)
-    else trustedByLine.set(lineIndex, [proc])
+/**
+ * Pure: `docker-proxy`'s cmdline is plain flag/value pairs (`-use-listen-fd`
+ * is the one bare flag) — no shell, nothing to shell-split, just an argv
+ * this module never spawned itself, so every field is validated shape
+ * before use rather than trusted outright.
+ */
+export function parseDockerProxyCmdline(argv: readonly string[]): DockerProxyBinding | null {
+  const flagValue = (flag: string): string | undefined => {
+    const i = argv.indexOf(flag)
+    return i === -1 ? undefined : argv[i + 1]
   }
 
-  const entries: PortEntry[] = []
-  lines.forEach((line, lineIndex) => {
-    const procs = trustedByLine.get(lineIndex)
-    if (!procs || procs.length === 0) {
-      entries.push(toUnknownEntry(line))
-      return
-    }
-    for (const proc of procs) entries.push(toKnownEntry(line, proc))
-  })
-  return entries
+  const proto = flagValue('-proto')
+  const hostIp = flagValue('-host-ip')
+  const hostPort = Number(flagValue('-host-port'))
+  const containerIp = flagValue('-container-ip')
+  const containerPort = Number(flagValue('-container-port'))
+
+  if (proto !== 'tcp' && proto !== 'udp') return null
+  if (!hostIp || !containerIp) return null
+  if (!Number.isInteger(hostPort) || !Number.isInteger(containerPort)) return null
+
+  return { protocol: proto, hostIp, hostPort, containerIp, containerPort }
 }
 
-async function collectFromSs(scope: PortScope): Promise<SsAttempt> {
+function isV6Shaped(address: string): boolean {
+  return address.includes(':')
+}
+
+/**
+ * Whether a docker-proxy bound to `hostIp` could be the process behind a
+ * socket whose local address ss/`` proc reports as `localAddress` — address
+ * family aware, so a v4 wildcard proxy (`-host-ip 0.0.0.0`) can never match
+ * a v6 socket and vice versa, even though both are "any address" in their
+ * own family. `%zone` suffixes are stripped first: docker never publishes
+ * to a link-local zoned address, so a socket's own zone is irrelevant to
+ * whether this is the same bind.
+ */
+export function hostIpMatchesLocalAddress(hostIp: string, localAddress: string): boolean {
+  const bareLocal = localAddress.replace(/%.*$/, '')
+  if (hostIp === '0.0.0.0') return !isV6Shaped(bareLocal)
+  if (hostIp === '::') return isV6Shaped(bareLocal)
+  return bareLocal === hostIp
+}
+
+export function dockerProxyMatches(
+  entry: Pick<PortEntry, 'protocol' | 'localAddress' | 'localPort'>,
+  binding: DockerProxyBinding,
+): boolean {
+  return (
+    entry.protocol === binding.protocol &&
+    entry.localPort === binding.hostPort &&
+    hostIpMatchesLocalAddress(binding.hostIp, entry.localAddress)
+  )
+}
+
+const DOCKER_PROXY_COMM = 'docker-proxy'
+
+/** One `docker-proxy`-shaped process found in `/proc` — a CANDIDATE only:
+ * its comm and cmdline are self-reported, and this by itself proves
+ * nothing about whether the process is trustworthy — see
+ * `verifyDockerProxyCandidate`, the gate every one of these has to pass
+ * before `applyDockerAttribution` acts on it. */
+export interface DockerProxyCandidate {
+  pid: number
+  binding: DockerProxyBinding
+}
+
+/**
+ * Scans `/proc/[pid]/comm` for every `docker-proxy`-NAMED process and
+ * parses its `/proc/[pid]/cmdline` — the same `/proc` this account already
+ * reads for the fd-attribution scan (`attributeInodes`), just looking at a
+ * different two files per pid, and bounded by the identical time budget
+ * for the identical reason: a huge process table must not turn one GET
+ * into a multi-second hang. `docker-proxy`'s own comm and cmdline are
+ * readable regardless of which uid owns it — see the module comment on why
+ * this pass exists at all.
+ *
+ * Deliberately trusts nothing about what it finds beyond "shaped like a
+ * proxy claim" — comm and cmdline are both self-reported (`prctl`/`execve`,
+ * either one entirely under the process's own control), so ANY process can
+ * produce a hit here just by asking to. That's exactly why this function's
+ * output is a list of CANDIDATES, and why `applyDockerAttribution` runs
+ * every one of them through `verifyDockerProxyCandidate` (uid, cgroup
+ * membership, a live Docker query — none of them self-reported) before
+ * trusting any of it.
+ */
+async function scanDockerProxyBindings(budgetMs: number): Promise<DockerProxyCandidate[]> {
+  const out: DockerProxyCandidate[] = []
+
+  let pidDirs: string[]
+  try {
+    pidDirs = await readdir('/proc')
+  } catch {
+    return out
+  }
+
+  const deadline = Date.now() + budgetMs
+  for (const entry of pidDirs) {
+    if (Date.now() > deadline) break
+    if (!/^\d+$/.test(entry)) continue
+
+    const comm = await readProcComm(Number(entry))
+    if (comm !== DOCKER_PROXY_COMM) continue
+
+    let cmdlineRaw: string
+    try {
+      cmdlineRaw = await readFile(`/proc/${entry}/cmdline`, 'utf8')
+    } catch {
+      continue
+    }
+    const argv = cmdlineRaw.split('\0').filter((arg) => arg.length > 0)
+    const binding = parseDockerProxyCmdline(argv)
+    if (binding) out.push({ pid: Number(entry), binding })
+  }
+
+  return out
+}
+
+// --- `docker` attribution's own anti-forgery checks -------------------------
+//
+// `scanDockerProxyBindings`'s cmdline match is necessary but never
+// sufficient: comm and argv are set by the process itself, so any
+// unprivileged process can rename itself `docker-proxy` and carry a
+// `-proto`/`-host-ip`/`-host-port` cmdline claiming ANY port at all — see
+// the module's own security note on this. What follows checks the three
+// things a process cannot fake about itself: the uid the kernel actually
+// runs it as, which cgroup the kernel actually placed it in, and whether a
+// live Docker daemon actually agrees a container publishes the claimed
+// port.
+
+/** `/proc/<pid>/status`'s `Uid:` line: real, effective, saved, filesystem —
+ * in that order, whitespace-separated. World-readable, like every other
+ * `/proc/<pid>/*` file this module reads for `docker`/`service`
+ * attribution (see the module comment). */
+const STATUS_UID_RE = /^Uid:\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m
+
+/** All four of a pid's uids, or null if the file could not be read
+ * (already exited, or genuinely unreadable) or carried no `Uid:` line at
+ * all. */
+async function readProcUids(
+  pid: number,
+): Promise<readonly [number, number, number, number] | null> {
+  try {
+    const text = await readFile(`/proc/${pid}/status`, 'utf8')
+    const m = STATUS_UID_RE.exec(text)
+    if (!m) return null
+    return [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]
+  } catch {
+    return null
+  }
+}
+
+/** The cgroup v2 unified-hierarchy line of `/proc/<pid>/cgroup` (always
+ * `0::<path>` — the only kind of cgroup hierarchy this module's other
+ * cgroup read, `readCgroupProcs`, already assumes). Null if the file
+ * could not be read or carried no such line. */
+async function readProcCgroupPath(pid: number): Promise<string | null> {
+  try {
+    const text = await readFile(`/proc/${pid}/cgroup`, 'utf8')
+    for (const line of text.split('\n')) {
+      if (line.startsWith('0::')) return line.slice(3)
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+const DOCKER_SERVICE_UNIT = 'docker.service'
+
+/**
+ * The three checks one `docker-proxy` candidate must ALL pass before its
+ * cmdline match is trusted — see the section comment above for why comm
+ * and argv alone never are:
+ *
+ *   (a) `/proc/<pid>/status` shows real, effective, saved AND filesystem
+ *       uid all 0. The real proxy runs as root; a same-account fake
+ *       cannot become root just by asking.
+ *   (b) `/proc/<pid>/cgroup` equals the SOCKET's own `cgroup:` path from
+ *       `ss -e` (`socketCgroupPath`) — a socket's cgroup is set from its
+ *       creating process's cgroup at `socket()` time, so the genuine
+ *       proxy's own cgroup is always identical to the one ss reports for
+ *       the socket it holds; an unprivileged process cannot move itself
+ *       into `docker.service`'s cgroup to fake that. When the socket's own
+ *       cgroup is unknown (`socketCgroupPath === null`) AND
+ *       `allowMissingCgroupFallback` is true, the fallback is that the
+ *       candidate's OWN cgroup resolves to `docker.service` itself — still
+ *       nothing an unprivileged process can fake. `allowMissingCgroupFallback`
+ *       is only ever true for the `/proc/net` reader, which carries no
+ *       cgroup column at all (see `applyDockerAttribution`'s own doc
+ *       comment) — on the `ss` path, a row with no cgroup fails this check
+ *       outright rather than falling back to it, since there `-e` genuinely
+ *       ran and a missing cgroup means the tail was invalid (see
+ *       `parseSsTailFields`), not merely "this reader never has one".
+ *   (c) Docker's own published ports confirm `(protocol, hostPort)` is
+ *       actually published by a running container right now
+ *       (`publishedByContainer`) — skipped, not failed, when Docker itself
+ *       could not be reached (`dockerReachable`); (a) and (b) alone are
+ *       enough to trust the pid/name in that case, just not enough to name
+ *       a `container`.
+ *
+ * `readUids`/`readCgroup` are injected so a unit test can drive this with
+ * no real `/proc` at all, mirroring `resolveMainProcess`'s own shape.
+ */
+async function verifyDockerProxyCandidate(
+  pid: number,
+  socketCgroupPath: string | null,
+  allowMissingCgroupFallback: boolean,
+  dockerReachable: boolean,
+  publishedByContainer: boolean,
+  readUids: (pid: number) => Promise<readonly [number, number, number, number] | null>,
+  readCgroup: (pid: number) => Promise<string | null>,
+): Promise<boolean> {
+  const uids = await readUids(pid)
+  if (!uids || uids.some((uid) => uid !== 0)) return false // (a)
+
+  const proxyCgroup = await readCgroup(pid)
+  if (proxyCgroup === null) return false
+  const cgroupOk =
+    socketCgroupPath !== null
+      ? proxyCgroup === socketCgroupPath
+      : allowMissingCgroupFallback && parseCgroup(proxyCgroup).unit === DOCKER_SERVICE_UNIT
+  if (!cgroupOk) return false // (b)
+
+  if (dockerReachable && !publishedByContainer) return false // (c)
+
+  return true
+}
+
+/**
+ * Runs every candidate bound to the same entry through
+ * `verifyDockerProxyCandidate` and returns the one that passed — but ONLY
+ * if exactly one did. Zero survivors means no candidate here can be
+ * trusted; more than one (which should never happen for a real deployment
+ * — see the module comment on `Attribution`) means this function refuses
+ * to pick one by scan order, since that is exactly the kind of guess a
+ * fake proxy racing a real one is trying to win. Either way the caller
+ * falls through to `service` instead, same as no cmdline match at all.
+ *
+ * Async, with every read injected — mirrors `resolveMainProcess`'s own
+ * shape so a unit test can drive the uid/cgroup/ambiguity logic together
+ * with no real `/proc` and no real Docker daemon at all. The one real
+ * caller (`applyDockerAttribution`) passes readers cached across the whole
+ * request's pids.
+ */
+export async function resolveDockerProxy(
+  candidates: readonly DockerProxyCandidate[],
+  context: {
+    socketCgroupPath: string | null
+    /** See `verifyDockerProxyCandidate`'s own doc on check (b): true only
+     * for the `/proc/net` reader, which has no cgroup column at all. On the
+     * `ss` path this is always false — a missing cgroup there means the
+     * `-e` tail was invalid, not "this reader never has one" (see
+     * `applyDockerAttribution`). */
+    allowMissingCgroupFallback: boolean
+    dockerReachable: boolean
+    isPublished: (protocol: Protocol, hostPort: number) => boolean
+    readUids: (pid: number) => Promise<readonly [number, number, number, number] | null>
+    readCgroup: (pid: number) => Promise<string | null>
+  },
+): Promise<DockerProxyCandidate | null> {
+  const verified: DockerProxyCandidate[] = []
+  for (const candidate of candidates) {
+    const published = context.dockerReachable
+      ? context.isPublished(candidate.binding.protocol, candidate.binding.hostPort)
+      : false
+    const ok = await verifyDockerProxyCandidate(
+      candidate.pid,
+      context.socketCgroupPath,
+      context.allowMissingCgroupFallback,
+      context.dockerReachable,
+      published,
+      context.readUids,
+      context.readCgroup,
+    )
+    if (ok) verified.push(candidate)
+  }
+  return verified.length === 1 ? (verified[0] as DockerProxyCandidate) : null
+}
+
+interface ContainerPortsRow {
+  name: string
+  ports: readonly PublishedPort[]
+}
+
+/**
+ * A hung daemon must not add more than a few seconds to this endpoint's own
+ * response. `listAllContainerIds`/`inspectContainersRawAll` are already
+ * bounded per call by `DOCKER_READ_TIMEOUT_MS` (10s, via the shared
+ * `DockerCli`) — generous for a docker query taken on its own, but too long
+ * to ask a dashboard poll to wait on just to learn a container's name.
+ * Racing a shorter deadline only stops *this* request from waiting on it —
+ * a `docker` child that was actually spawned is still killed on its own
+ * schedule by `DockerCli`'s existing SIGKILL-on-timeout, exactly as it
+ * would be for any other caller of these functions.
+ */
+const DOCKER_QUERY_TIMEOUT_MS = 5_000
+
+/** `reachable: false` is what tells "Docker was actually asked and said
+ * nothing publishes this port" apart from "Docker could not be asked at
+ * all" — `rows: []` alone can't, since a real, reachable daemon with zero
+ * running containers looks identical on the wire. `verifyDockerProxyCandidate`'s
+ * own check (c) needs that distinction: unreachable waives the published-port
+ * check entirely, reachable-but-empty fails it for every candidate. */
+interface DockerPublishedPortsQuery {
+  reachable: boolean
+  rows: ContainerPortsRow[]
+}
+
+async function queryDockerPublishedPorts(cli: DockerCli): Promise<DockerPublishedPortsQuery> {
+  try {
+    return await Promise.race([
+      (async () => {
+        const { reachable, ids } = await listAllContainerIdsResult(cli)
+        const raws = await inspectContainersRawAll(ids, cli)
+        const rows = raws.map((raw) => {
+          const container = toDockerContainer(raw)
+          return { name: container.name, ports: container.ports }
+        })
+        return { reachable, rows }
+      })(),
+      sleep(DOCKER_QUERY_TIMEOUT_MS).then((): DockerPublishedPortsQuery => {
+        throw new Error(`docker query timed out after ${DOCKER_QUERY_TIMEOUT_MS}ms`)
+      }),
+    ])
+  } catch (error) {
+    // Never fails the request over this — a docker query is an enrichment,
+    // not a dependency this endpoint needs to answer at all (see the module
+    // comment: `attribution` degrading to 'none' for these rows is exactly
+    // the pre-existing, honest answer this feature already gives).
+    logger.warn(
+      `docker query for port attribution failed, container names left null (${String(error)})`,
+    )
+    return { reachable: false, rows: [] }
+  }
+}
+
+/** Whether ANY running container publishes this exact `(protocol,
+ * hostPort)` — `verifyDockerProxyCandidate`'s check (c). Deliberately
+ * simpler than `resolveContainerForPort` below: existence is all a
+ * candidate's own trustworthiness depends on, never which name wins when
+ * more than one container happens to publish the same port. */
+function isPublishedByAnyContainer(
+  rows: readonly ContainerPortsRow[],
+  protocol: Protocol,
+  hostPort: number,
+): boolean {
+  return rows.some((row) =>
+    row.ports.some((p) => p.protocol === protocol && p.hostPort === hostPort),
+  )
+}
+
+/** Null when zero or more than one running container publishes this exact
+ * host port and protocol — an ambiguous match is reported as unknown rather
+ * than guessed at. */
+function resolveContainerForPort(
+  rows: readonly ContainerPortsRow[],
+  protocol: Protocol,
+  hostPort: number,
+): string | null {
+  const matches = rows.filter((row) =>
+    row.ports.some((p) => p.protocol === protocol && p.hostPort === hostPort),
+  )
+  return matches.length === 1 ? (matches[0]?.name ?? null) : null
+}
+
+/**
+ * Promotes every still-unattributed entry with exactly one VERIFIED
+ * `docker-proxy` candidate (see `resolveDockerProxy`) to `attribution:
+ * 'docker'` (see `Attribution`), then — only if at least one row actually
+ * matched, so a box with no relevant published port never pays for a
+ * docker query at all — asks Docker once for the container publishing each
+ * matched port. `container` stays null for a matched row when Docker could
+ * not be reached at all or the name resolution itself was ambiguous;
+ * `attribution` and `pid`/`processName` do not depend on that second query,
+ * since `resolveDockerProxy` already required a reachable Docker to
+ * confirm the port before getting this far (or, when Docker was
+ * unreachable, accepted the uid+cgroup checks alone).
+ *
+ * `allowMissingCgroupFallback` is threaded straight through to
+ * `resolveDockerProxy`'s context — see its own doc comment. The two real
+ * callers set it deliberately: `collectFromSs` passes `false` (a row with
+ * no cgroup there means the `-e` tail was invalid, not merely absent by
+ * design), `collectFromProc` passes `true` (the `/proc/net` reader has no
+ * cgroup column at all, ever).
+ */
+async function applyDockerAttribution(
+  entries: PortEntry[],
+  cli: DockerCli,
+  rawCgroupPathByEntry: RawCgroupPathByEntry,
+  allowMissingCgroupFallback: boolean,
+): Promise<void> {
+  const bindings = await scanDockerProxyBindings(PROC_SCAN_BUDGET_MS)
+  if (bindings.length === 0) return
+
+  const matchesByEntry = new Map<PortEntry, DockerProxyCandidate[]>()
+  for (const entry of entries) {
+    const matches = bindings.filter((b) => dockerProxyMatches(entry, b.binding))
+    if (matches.length > 0) matchesByEntry.set(entry, matches)
+  }
+  if (matchesByEntry.size === 0) return
+
+  const query = await queryDockerPublishedPorts(cli)
+
+  const uidCache = new Map<number, readonly [number, number, number, number] | null>()
+  const cgroupCache = new Map<number, string | null>()
+  const readUids = async (pid: number) => {
+    if (!uidCache.has(pid)) uidCache.set(pid, await readProcUids(pid))
+    return uidCache.get(pid) ?? null
+  }
+  const readCgroup = async (pid: number) => {
+    if (!cgroupCache.has(pid)) cgroupCache.set(pid, await readProcCgroupPath(pid))
+    return cgroupCache.get(pid) ?? null
+  }
+  const isPublished = (protocol: Protocol, hostPort: number) =>
+    isPublishedByAnyContainer(query.rows, protocol, hostPort)
+
+  for (const [entry, matches] of matchesByEntry) {
+    const winner = await resolveDockerProxy(matches, {
+      socketCgroupPath: rawCgroupPathByEntry.get(entry) ?? null,
+      allowMissingCgroupFallback,
+      dockerReachable: query.reachable,
+      isPublished,
+      readUids,
+      readCgroup,
+    })
+    if (!winner) continue // none verified, or more than one did — fall through to `service`
+
+    entry.attribution = 'docker'
+    entry.pid = winner.pid
+    entry.processName = DOCKER_PROXY_COMM
+    entry.processKnown = true
+    entry.container = query.reachable
+      ? resolveContainerForPort(query.rows, winner.binding.protocol, winner.binding.hostPort)
+      : null
+  }
+}
+
+// --- `service` attribution: the systemd unit's main process ----------------
+
+const CGROUP_ROOT = '/sys/fs/cgroup'
+
+async function readCgroupProcs(validPath: string): Promise<number[]> {
+  try {
+    const text = await readFile(`${CGROUP_ROOT}${validPath}/cgroup.procs`, 'utf8')
+    return text
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map(Number)
+      .filter((n) => Number.isInteger(n))
+  } catch {
+    return [] // unreadable is treated the same as legitimately empty (see the caller)
+  }
+}
+
+const PPID_RE = /^PPid:\s*(\d+)/m
+
+async function readPPid(pid: number): Promise<number | null> {
+  try {
+    const text = await readFile(`/proc/${pid}/status`, 'utf8')
+    const m = PPID_RE.exec(text)
+    return m ? Number(m[1]) : null
+  } catch {
+    return null // exited, or unreadable
+  }
+}
+
+/**
+ * Pure: given each candidate pid's own current PPid (or null if it could
+ * not be read), the unit's main process is the one whose parent is NOT
+ * itself a member of the same cgroup — everything else in the set is a
+ * worker forked *by* something already in it. The lowest pid breaks a tie
+ * between more than one process satisfying that (rare, but a unit with more
+ * than one top-level process is possible), which is at least deterministic
+ * even when it isn't more meaningful than that. `ppidOf` is injected so a
+ * unit test can drive this with no real /proc at all — see
+ * `resolveMainProcess`, the one real caller, for the cached reader it
+ * builds `ppidOf` from.
+ */
+export function selectMainProcess(
+  pids: readonly number[],
+  ppidOf: ReadonlyMap<number, number | null>,
+): number | null {
+  const pidSet = new Set(pids)
+  let best: number | null = null
+  for (const pid of pids) {
+    const ppid = ppidOf.get(pid)
+    if (ppid === null || ppid === undefined) continue
+    if (!pidSet.has(ppid) && (best === null || pid < best)) best = pid
+  }
+  return best
+}
+
+/**
+ * Async wrapper around `selectMainProcess`, with the pid -> PPid reader
+ * injected — mirrors `attributeInodes`'s own shape so a unit test can drive
+ * this with no real /proc at all. The one real caller (`applyServiceAttribution`)
+ * passes a reader cached across the whole request; this function does not
+ * cache anything itself, since a single unit's own pid list is small and
+ * never revisited within one call.
+ */
+export async function resolveMainProcess(
+  pids: readonly number[],
+  readPPidFor: (pid: number) => Promise<number | null>,
+): Promise<number | null> {
+  const ppidOf = new Map<number, number | null>()
+  for (const pid of pids) ppidOf.set(pid, await readPPidFor(pid))
+  return selectMainProcess(pids, ppidOf)
+}
+
+/**
+ * For every still-unattributed entry with a validated cgroup path
+ * (`cgroupPathByEntry`), attributes it to its unit's main process. Reads
+ * are cached per request — `cgroup.procs` once per distinct path, `PPid`/
+ * `comm` once per distinct pid — because the same unit (and the same pid
+ * within it) legitimately recurs across many sockets on one request (every
+ * postgres backend socket shares postgres's own postmaster's cgroup, for
+ * instance).
+ *
+ * An entry whose `unit` came back null (see `parseCgroup` — a bare slice
+ * with no `.service`/`.socket`/`.scope` segment at all) is skipped rather
+ * than read: there is no unit here to name a "main process" *of*, and
+ * reading an arbitrary slice's `cgroup.procs` could hold dozens of
+ * unrelated units' processes with no meaningful "main" among them.
+ */
+async function applyServiceAttribution(
+  entries: readonly PortEntry[],
+  cgroupPathByEntry: CgroupPathByEntry,
+): Promise<void> {
+  const procsCache = new Map<string, number[]>()
+  const ppidCache = new Map<number, number | null>()
+  const commCache = new Map<number, string | null>()
+
+  const cachedReadPPid = async (pid: number): Promise<number | null> => {
+    if (!ppidCache.has(pid)) ppidCache.set(pid, await readPPid(pid))
+    return ppidCache.get(pid) ?? null
+  }
+  const cachedReadComm = async (pid: number): Promise<string | null> => {
+    if (!commCache.has(pid)) commCache.set(pid, await readProcComm(pid))
+    return commCache.get(pid) ?? null
+  }
+
+  for (const entry of entries) {
+    if (entry.unit === null) continue
+    const validPath = cgroupPathByEntry.get(entry)
+    if (!validPath) continue
+
+    let pids = procsCache.get(validPath)
+    if (pids === undefined) {
+      pids = await readCgroupProcs(validPath)
+      procsCache.set(validPath, pids)
+    }
+
+    if (pids.length > 0) {
+      const mainPid = await resolveMainProcess(pids, cachedReadPPid)
+      if (mainPid === null) continue
+      const comm = await cachedReadComm(mainPid)
+      if (comm === null) continue
+      entry.attribution = 'service'
+      entry.pid = mainPid
+      entry.processName = comm
+      entry.processKnown = true
+    } else if (entry.unit.endsWith('.socket')) {
+      // Socket activation: systemd (pid 1) itself holds the listener until
+      // the unit it activates has actually started, so an empty
+      // `cgroup.procs` here is the expected steady state, not a miss.
+      const comm = await cachedReadComm(1)
+      if (comm === null) continue
+      entry.attribution = 'service'
+      entry.pid = 1
+      entry.processName = comm
+      entry.processKnown = true
+    }
+  }
+}
+
+/** Runs the `docker` then `service` passes over whatever is still
+ * `'none'` after the socket-inode attribution pass. First match wins, so an
+ * entry `applyDockerAttribution` already promoted is never reconsidered by
+ * `applyServiceAttribution`. A no-op, with no /proc scan and no docker
+ * query, when nothing is unattributed at all (the fast path on a box where
+ * the inode scan resolves most rows itself, or an empty ports table). */
+async function enrichUnattributed(
+  entries: PortEntry[],
+  cgroupPathByEntry: CgroupPathByEntry,
+  rawCgroupPathByEntry: RawCgroupPathByEntry,
+  cli: DockerCli,
+  allowMissingCgroupFallback: boolean,
+): Promise<void> {
+  const unresolved = entries.filter((e) => e.attribution === 'none')
+  if (unresolved.length === 0) return
+
+  await applyDockerAttribution(unresolved, cli, rawCgroupPathByEntry, allowMissingCgroupFallback)
+
+  const stillUnresolved = unresolved.filter((e) => e.attribution === 'none')
+  if (stillUnresolved.length > 0) await applyServiceAttribution(stillUnresolved, cgroupPathByEntry)
+}
+
+/** Inodes worth asking `attributeInodes` about — every line/row's own
+ * inode, except `0` (and `null`, which the ss reader's `ino` can be when
+ * `-e` carried no such token at all): `0` is ss's own sentinel for a
+ * kernel-held orphan socket with no owning process (see `ownerForLine`),
+ * so asking about it could only ever attribute some UNRELATED process's fd
+ * whose /proc readlink happens to print the literal string `socket:[0]` —
+ * which the kernel never assigns to a real socket, but there is nothing to
+ * gain by ever forming the request either way. Shared by both readers. */
+function collectAttributableInodes(values: Iterable<number | null>): Set<number> {
+  const inodes = new Set<number>()
+  for (const value of values) if (value) inodes.add(value)
+  return inodes
+}
+
+async function collectFromSs(
+  scope: PortScope,
+  cli: DockerCli,
+  passwdMap: ReadonlyMap<number, string>,
+): Promise<SsAttempt> {
   const argv = SS_ARGS[scope]
 
   // Local, non-generic function so `ReturnType<typeof spawnSs>` captures the
@@ -549,7 +1498,35 @@ async function collectFromSs(scope: PortScope): Promise<SsAttempt> {
     return { ok: false, reason: '`ss` output did not match the expected format' }
   }
 
-  const entries = await buildVerifiedEntries(lines, readCommForVerification)
+  const inodes = collectAttributableInodes(lines.map((line) => line.ino))
+  const attribution = await attributeInodes(inodes)
+
+  const cgroupPathByEntry = new Map<PortEntry, string>()
+  const rawCgroupPathByEntry = new Map<PortEntry, string>()
+  const entries: PortEntry[] = []
+  for (const line of lines) {
+    const byPid = line.ino ? attribution.get(line.ino) : undefined
+    const { validPath } = parseCgroup(line.cgroupPath)
+
+    if (!byPid || byPid.size === 0) {
+      const entry = toUnknownEntry(line, passwdMap)
+      if (validPath) cgroupPathByEntry.set(entry, validPath)
+      if (line.cgroupPath) rawCgroupPathByEntry.set(entry, line.cgroupPath)
+      entries.push(entry)
+      continue
+    }
+    for (const [pid, name] of byPid) {
+      const entry = toKnownEntry(line, pid, name, passwdMap)
+      if (validPath) cgroupPathByEntry.set(entry, validPath)
+      if (line.cgroupPath) rawCgroupPathByEntry.set(entry, line.cgroupPath)
+      entries.push(entry)
+    }
+  }
+
+  // No cgroup on the ss path is never treated as "this reader has none by
+  // design" — see applyDockerAttribution's own doc comment — only the
+  // /proc/net reader (collectFromProc) passes `true` here.
+  await enrichUnattributed(entries, cgroupPathByEntry, rawCgroupPathByEntry, cli, false)
   return { ok: true, entries }
 }
 
@@ -562,6 +1539,10 @@ export interface ProcNetRow {
   peerPort: number
   state: string
   inode: number
+  /** From /proc/net's own `uid` column — always known (unlike ss's `-e`
+   * uid, this is not conditional on any flag), null only if the field
+   * itself failed to parse as an integer. */
+  uid: number | null
 }
 
 /** Decodes one little-endian hex IPv4 address, e.g. '0100007F' -> '127.0.0.1'. */
@@ -683,6 +1664,7 @@ export function parseProcNet(text: string, protocol: Protocol): ProcNetRow[] {
     const localRaw = fields[1] ?? ''
     const remRaw = fields[2] ?? ''
     const stateRaw = fields[3] ?? ''
+    const uidRaw = fields[7] ?? ''
     const inodeRaw = fields[9] ?? ''
     const local = splitHexAddrPort(localRaw)
     const peer = splitHexAddrPort(remRaw)
@@ -690,6 +1672,7 @@ export function parseProcNet(text: string, protocol: Protocol): ProcNetRow[] {
 
     const inode = Number(inodeRaw)
     if (!Number.isFinite(inode)) continue
+    const uid = Number(uidRaw)
 
     rows.push({
       localAddress: local.address,
@@ -698,6 +1681,7 @@ export function parseProcNet(text: string, protocol: Protocol): ProcNetRow[] {
       peerPort: peer.port,
       state: stateTable[stateRaw.toUpperCase()] ?? 'UNKNOWN',
       inode,
+      uid: Number.isInteger(uid) ? uid : null,
     })
   }
 
@@ -738,27 +1722,72 @@ async function readProcNetFiles(): Promise<{
   return { rows, failures }
 }
 
-/** How long the /proc/<pid>/fd scan is allowed to run. A box with an enormous
- * process table must not turn one GET into a multi-second hang — past this,
- * whatever rows are left unattributed just stay that way. */
+/** How long the /proc/<pid>/fd scan (and, on the ss path, the docker-proxy
+ * comm scan) is allowed to run. A box with an enormous process table must
+ * not turn one GET into a multi-second hang — past this, whatever rows are
+ * left unattributed just stay that way. */
 const PROC_SCAN_BUDGET_MS = 2_000
 
 const SOCKET_FD_RE = /^socket:\[(\d+)\]$/
 
 /**
+ * The filesystem calls `attributeInodes` needs, factored out so a unit test
+ * can drive the whole scan against fabricated pids/fds/comms with no real
+ * `/proc` at all — the same reasoning as `verifyDockerProxyCandidate`'s
+ * injected `readUids`/`readCgroup`. `REAL_PROC_FD_READERS` is what every
+ * production caller actually gets (the default parameter below).
+ */
+export interface ProcFdReaders {
+  /** `readdir('/proc')` — every pid directory currently present. */
+  listPids: () => Promise<string[]>
+  /** `readdir('/proc/<pid>/fd')` — every fd number currently open for
+   * `pid`. Rejects (EACCES) for a pid this account does not own; the one
+   * caller (`attributeInodes`) treats that as "nothing to see here", not
+   * an error worth logging, since it is the expected outcome for almost
+   * every pid on almost every request (see the module comment). */
+  listFds: (pid: number) => Promise<string[]>
+  /** `readlink('/proc/<pid>/fd/<fd>')` — what that one fd points at. */
+  readFdLink: (pid: number, fd: string) => Promise<string>
+  /** `/proc/<pid>/comm`, byte-exact past the one trailing-newline strip —
+   * see `readProcComm`. Null when the pid has already exited. */
+  readComm: (pid: number) => Promise<string | null>
+}
+
+const REAL_PROC_FD_READERS: ProcFdReaders = {
+  listPids: () => readdir('/proc'),
+  listFds: (pid) => readdir(`/proc/${pid}/fd`),
+  readFdLink: (pid, fd) => readlink(`/proc/${pid}/fd/${fd}`),
+  readComm: readProcComm,
+}
+
+/**
  * inode -> (pid -> comm), for exactly the inodes asked for. Scans
- * /proc/<pid>/fd, which throws EACCES on every pid this service account
+ * `/proc/<pid>/fd`, which throws EACCES on every pid this service account
  * does not own — the normal case on this deployment (see the module
  * comment), skipped silently rather than logged, since it would otherwise
- * log on almost every pid on every request.
+ * log on almost every pid on every request. Reused by both readers
+ * (`collectFromSs` and `collectFromProc`): this IS the `'socket'`
+ * attribution pass (see `Attribution`) — the one and only place a pid is
+ * ever attached to a socket in this module, and it happens with zero bytes
+ * of process-controlled text ever entering a parse step (see the module
+ * comment).
+ *
+ * One `listPids()` (`readdir('/proc')`) per call, bounded by
+ * `PROC_SCAN_BUDGET_MS` overall so a box with an enormous process table
+ * cannot turn one request into a multi-second hang, and `comm` is read at
+ * most once per distinct pid (`commCache`) no matter how many of its fds
+ * turn out to hold a requested inode.
  */
-async function attributeInodes(inodes: Set<number>): Promise<Map<number, Map<number, string>>> {
+export async function attributeInodes(
+  inodes: ReadonlySet<number>,
+  readers: ProcFdReaders = REAL_PROC_FD_READERS,
+): Promise<Map<number, Map<number, string>>> {
   const result = new Map<number, Map<number, string>>()
   if (inodes.size === 0) return result
 
   let pidDirs: string[]
   try {
-    pidDirs = await readdir('/proc')
+    pidDirs = await readers.listPids()
   } catch {
     return result
   }
@@ -773,7 +1802,7 @@ async function attributeInodes(inodes: Set<number>): Promise<Map<number, Map<num
 
     let fds: string[]
     try {
-      fds = await readdir(`/proc/${entry}/fd`)
+      fds = await readers.listFds(pid)
     } catch {
       continue
     }
@@ -781,9 +1810,9 @@ async function attributeInodes(inodes: Set<number>): Promise<Map<number, Map<num
     for (const fd of fds) {
       let link: string
       try {
-        link = await readlink(`/proc/${entry}/fd/${fd}`)
+        link = await readers.readFdLink(pid, fd)
       } catch {
-        continue // fd closed between the readdir and this readlink
+        continue // fd closed between the listing and this readlink
       }
       const match = SOCKET_FD_RE.exec(link)
       if (!match) continue
@@ -792,12 +1821,10 @@ async function attributeInodes(inodes: Set<number>): Promise<Map<number, Map<num
 
       let name = commCache.get(pid)
       if (name === undefined) {
-        // Strip only the one trailing newline `comm` is terminated with — a
-        // real comm can end in a space, which a plain `.trim()` would eat.
-        name = await readCommForVerification(pid)
+        name = await readers.readComm(pid)
         commCache.set(pid, name)
       }
-      if (name === null) continue
+      if (name === null) continue // exited between the scan and this read — nothing to attribute
 
       let byPid = result.get(inode)
       if (!byPid) {
@@ -811,7 +1838,11 @@ async function attributeInodes(inodes: Set<number>): Promise<Map<number, Map<num
   return result
 }
 
-async function collectFromProc(scope: PortScope): Promise<PortEntry[]> {
+async function collectFromProc(
+  scope: PortScope,
+  cli: DockerCli,
+  passwdMap: ReadonlyMap<number, string>,
+): Promise<PortEntry[]> {
   const { rows, failures } = await readProcNetFiles()
   if (failures.length === PROC_NET_FILES.length) {
     const codes = [...new Set(failures.map((f) => f.code))].join(', ')
@@ -826,13 +1857,22 @@ async function collectFromProc(scope: PortScope): Promise<PortEntry[]> {
         : row.state === 'UNCONN',
   )
 
-  const inodes = new Set(filtered.map((row) => row.inode).filter((inode) => inode !== 0))
+  const inodes = collectAttributableInodes(filtered.map((row) => row.inode))
   const attribution = await attributeInodes(inodes)
 
+  // No cgroup at all in this reader (/proc/net carries no such column), so
+  // `service` attribution never applies here — only `socket` (this scan) and
+  // `docker` (port-based, tried below) can resolve a row. See the module
+  // comment on the two readers' differing detail.
   const entries: PortEntry[] = []
   for (const row of filtered) {
     const peer = normalizePeer(row.peerAddress, row.peerPort)
     const byPid = row.inode !== 0 ? attribution.get(row.inode) : undefined
+    // ino 0 is the same orphan-socket sentinel here as in the ss reader's
+    // `ino:0` — see `ownerForLine` — even though this reader's `uid` column
+    // is always genuinely present rather than root-by-omission: an orphan
+    // socket still has no real owning process to report one for.
+    const owner = row.inode === 0 ? null : ownerForUid(row.uid, passwdMap)
 
     if (!byPid || byPid.size === 0) {
       entries.push({
@@ -845,6 +1885,10 @@ async function collectFromProc(scope: PortScope): Promise<PortEntry[]> {
         pid: null,
         processName: 'unknown',
         processKnown: false,
+        attribution: 'none',
+        unit: null,
+        container: null,
+        owner,
       })
       continue
     }
@@ -860,10 +1904,18 @@ async function collectFromProc(scope: PortScope): Promise<PortEntry[]> {
         pid,
         processName: name,
         processKnown: true,
+        attribution: 'socket',
+        unit: null,
+        container: null,
+        owner,
       })
     }
   }
 
+  // No raw cgroup for `docker` attribution's own socket-cgroup check to
+  // compare against — it falls back to its own proxy-cgroup-is-docker.service
+  // rule instead (see `verifyDockerProxyCandidate`, `allowMissingCgroupFallback: true`).
+  await enrichUnattributed(entries, new Map(), new Map(), cli, true)
   return entries
 }
 
@@ -911,14 +1963,18 @@ function buildResult(
     runningAsRoot: process.geteuid?.() === 0,
     total,
     truncated,
-    unattributedCount: truncatedPorts.filter((p) => !p.processKnown).length,
+    unattributedCount: truncatedPorts.filter((p) => p.attribution === 'none').length,
+    inferredCount: truncatedPorts.filter(
+      (p) => p.attribution === 'docker' || p.attribution === 'service',
+    ).length,
     ports: truncatedPorts,
   }
 }
 
-async function collectPorts(scope: PortScope): Promise<PortsResult> {
+async function collectPorts(scope: PortScope, cli: DockerCli): Promise<PortsResult> {
   const collectedAt = new Date().toISOString()
-  const ssAttempt = await collectFromSs(scope)
+  const passwdMap = await loadPasswdOwners()
+  const ssAttempt = await collectFromSs(scope, cli, passwdMap)
 
   if (ssAttempt.ok) {
     return buildResult(scope, 'ss', collectedAt, ssAttempt.entries)
@@ -926,7 +1982,7 @@ async function collectPorts(scope: PortScope): Promise<PortsResult> {
 
   logger.warn(`ss unavailable for the ports endpoint (${ssAttempt.reason}) — falling back to /proc`)
   try {
-    const procPorts = await collectFromProc(scope)
+    const procPorts = await collectFromProc(scope, cli, passwdMap)
     return buildResult(scope, 'proc', collectedAt, procPorts)
   } catch (procError) {
     throw serviceUnavailable(
@@ -937,14 +1993,20 @@ async function collectPorts(scope: PortScope): Promise<PortsResult> {
 
 // Deduped per scope, not TTL-cached: a manual "Refresh" on the dashboard must
 // see the current table, not a stale one, but several requests landing in
-// the same tick (e.g. two browser tabs) should still share one read.
+// the same tick (e.g. two browser tabs) should still share one read. Keyed
+// on scope alone — `cli` is never anything but `realDockerCli` in production
+// (routes.ts never passes one), so a second key component here would only
+// ever have one real value anyway.
 const inFlight: Partial<Record<PortScope, Promise<PortsResult>>> = {}
 
-export async function getPorts(scope: PortScope): Promise<PortsResult> {
+export async function getPorts(
+  scope: PortScope,
+  cli: DockerCli = realDockerCli,
+): Promise<PortsResult> {
   const existing = inFlight[scope]
   if (existing) return existing
 
-  const promise = collectPorts(scope)
+  const promise = collectPorts(scope, cli)
   inFlight[scope] = promise
   try {
     return await promise

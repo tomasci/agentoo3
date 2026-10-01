@@ -19,6 +19,7 @@ import { Button } from '@/shared/ui/button'
 import { Empty, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
 import { Input } from '@/shared/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '@/shared/ui/toggle-group'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import { type PortEntry, type PortScope, usePorts } from '../hooks/use-ports'
 import { formatHostPort } from '../lib/format'
 
@@ -35,12 +36,13 @@ const EMPTY_PORTS: PortEntry[] = []
 
 /** Case-insensitive substring, across every field a reader would plausibly
  * search this table by — not just the two the brief names (port, process
- * name), since PID and the local address are free to match too and nothing
- * about a global filter should surprise a reader by ignoring what they typed
- * matches. Deliberately over the row's own data rather than a pre-filtered
- * copy of it: TanStack's `globalFilter` state is what drives the "Showing N
- * of M" count below, and a second filtered array here would just be a second
- * source of truth for the same question.
+ * name), since PID, the local address and the row's own attribution details
+ * (its systemd unit, its Docker container, its owning user) are all free to
+ * match too, and nothing about a global filter should surprise a reader by
+ * ignoring what they typed matches. Deliberately over the row's own data
+ * rather than a pre-filtered copy of it: TanStack's `globalFilter` state is
+ * what drives the "Showing N of M" count below, and a second filtered array
+ * here would just be a second source of truth for the same question.
  *
  * Takes the translated "unknown process" label rather than reading
  * `processName` straight off the row for an unresolved one: that raw value
@@ -61,6 +63,9 @@ function createMatchesQuery(unknownProcessLabel: string) {
       port.processKnown ? port.processName : unknownProcessLabel,
       port.pid != null ? String(port.pid) : '',
       port.localAddress,
+      port.unit ?? '',
+      port.container ?? '',
+      port.owner ?? '',
     ]
       .join(' ')
       .toLowerCase()
@@ -95,6 +100,49 @@ function pidSortingFn(sorting: SortingState) {
     }
     return a - b
   }
+}
+
+/**
+ * The `processName` column's `sortingFn`, closed over the live `sorting`
+ * state — the same technique as `pidSortingFn` above, and for the same
+ * reason: a row with no known process (`processKnown: false`, the literal
+ * string `'unknown'` underneath) must sort last in both directions rather
+ * than first on `desc`, which is what a plain string comparator would do
+ * with `'unknown'` sitting alphabetically among real names.
+ */
+function processNameSortingFn(sorting: SortingState) {
+  return (rowA: Row<PortEntry>, rowB: Row<PortEntry>): number => {
+    const a = rowA.original
+    const b = rowB.original
+    if (!a.processKnown && !b.processKnown) return 0
+    if (!a.processKnown || !b.processKnown) {
+      const desc = sorting.find((s) => s.id === 'processName')?.desc ?? false
+      const cmp = !a.processKnown ? 1 : -1
+      return desc ? -cmp : cmp
+    }
+    return a.processName.localeCompare(b.processName)
+  }
+}
+
+/**
+ * The Process Name cell's muted second line: the systemd unit or Docker
+ * container behind an inferred name, the owning user, or both — mirroring
+ * the Local Address column's own peer line.
+ *
+ * `docker` prefers `container` over `unit` (a container name is the more
+ * useful fact for that row; `unit` there is always just `docker.service`),
+ * everything else shows `unit` — which the backend fills whenever it knows
+ * it, regardless of which attribution actually won, so even an exactly
+ * `socket`-attributed row can carry one. `owner` appends after either with
+ * ` · `, and stands alone when neither `unit` nor `container` is known: a
+ * `none` row naming its owner (`root`) is more useful than a bare "unknown"
+ * with nothing under it. Returns `null` — not rendered at all — only when
+ * every one of those is unknown.
+ */
+function processAttributionSecondLine(port: PortEntry): string | null {
+  const primary = port.attribution === 'docker' ? (port.container ?? port.unit) : port.unit
+  if (primary && port.owner) return `${primary} · ${port.owner}`
+  return primary ?? port.owner ?? null
 }
 
 /**
@@ -166,12 +214,54 @@ export function PortsPage() {
         header: ({ column }) => (
           <SortableHeader label={t('ports.table.processName')} column={column} />
         ),
+        sortingFn: processNameSortingFn(sorting),
         cell: (info) => {
           const port = info.row.original
-          return port.processKnown ? (
-            info.getValue()
-          ) : (
-            <span className="text-muted-foreground">{t('ports.unknownProcess')}</span>
+          // `processKnown` is false exactly when `attribution` is `'none'`
+          // (the generated type's own doc comment on it), so a marker —
+          // which only ever means `'service'` or `'docker'` — never has to
+          // be considered for an unknown row.
+          const inferred = port.attribution === 'service' || port.attribution === 'docker'
+          const secondLine = processAttributionSecondLine(port)
+          return (
+            <div className="flex flex-col">
+              {port.processKnown ? (
+                inferred ? (
+                  <span className="flex items-center gap-1">
+                    {info.getValue()}
+                    <Tooltip>
+                      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a
+                          read-only marker with nothing to activate — see
+                          app/status-bar.tsx's `HostMetric` for the same
+                          reason: Base UI opens a tooltip on trigger focus,
+                          not on an unfocusable one made focusable for it.
+                          The label itself sits on the icon below rather than
+                          here: a bare span has no ARIA role of its own to
+                          support `aria-label` on (it resolves to "generic"),
+                          the same reason `ui/spinner.tsx` puts its own
+                          `aria-label` on the icon rather than a wrapper. */}
+                      <TooltipTrigger render={<span tabIndex={0} />}>
+                        <InfoIcon
+                          role="img"
+                          aria-label={t('ports.attribution.label')}
+                          className="size-3.5 text-muted-foreground"
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {port.attribution === 'service'
+                          ? t('ports.attribution.serviceTooltip', { unit: port.unit })
+                          : t('ports.attribution.dockerTooltip', { container: port.container })}
+                      </TooltipContent>
+                    </Tooltip>
+                  </span>
+                ) : (
+                  info.getValue()
+                )
+              ) : (
+                <span className="text-muted-foreground">{t('ports.unknownProcess')}</span>
+              )}
+              {secondLine && <span className="text-xs text-muted-foreground">{secondLine}</span>}
+            </div>
           )
         },
       }),
@@ -285,25 +375,37 @@ export function PortsPage() {
             </Alert>
           )}
 
-          {ports.data.unattributedCount > 0 && (
+          {((ports.data.inferredCount > 0 && !ports.data.runningAsRoot) ||
+            ports.data.unattributedCount > 0) && (
             <Alert role="status">
               <InfoIcon />
               <AlertDescription>
-                {ports.data.runningAsRoot
-                  ? t('ports.unattributed.root', {
+                {/* `runningAsRoot`: as root the backend can read every fd
+                    table directly, so nothing on this page is ever actually
+                    inferred rather than read — the sentence naming that
+                    trade-off would be describing a limit that does not
+                    apply, even on the rare row still counted as `inferred`
+                    (a docker-proxy match, say) rather than `socket`. */}
+                {ports.data.inferredCount > 0 && !ports.data.runningAsRoot && (
+                  <p>
+                    {ports.data.user
+                      ? t('ports.notice.inferredWithUser', {
+                          count: ports.data.inferredCount,
+                          user: ports.data.user,
+                        })
+                      : t('ports.notice.inferredWithoutUser', {
+                          count: ports.data.inferredCount,
+                        })}
+                  </p>
+                )}
+                {ports.data.unattributedCount > 0 && (
+                  <p>
+                    {t('ports.notice.unattributed', {
                       count: ports.data.unattributedCount,
                       total: totalRows,
-                    })
-                  : ports.data.user
-                    ? t('ports.unattributed.withUser', {
-                        count: ports.data.unattributedCount,
-                        total: totalRows,
-                        user: ports.data.user,
-                      })
-                    : t('ports.unattributed.withoutUser', {
-                        count: ports.data.unattributedCount,
-                        total: totalRows,
-                      })}
+                    })}
+                  </p>
+                )}
               </AlertDescription>
             </Alert>
           )}
