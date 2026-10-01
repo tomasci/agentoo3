@@ -3,11 +3,10 @@ import { ArrowLeftIcon, CircleAlertIcon, InfoIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { ConfirmDialog, Loading, PageHeader, StatusBadge } from '@/shared/components'
+import { ConfirmDialog, Loading, MarkdownField, PageHeader, StatusBadge } from '@/shared/components'
 import { Alert, AlertDescription } from '@/shared/ui/alert'
 import { Button } from '@/shared/ui/button'
-import { Field, FieldDescription, FieldLabel } from '@/shared/ui/field'
-import { Textarea } from '@/shared/ui/textarea'
+import { Field, FieldDescription } from '@/shared/ui/field'
 import { usePrompt, useResetPrompt, useUpdatePrompt } from '../hooks/use-prompts'
 
 /**
@@ -85,14 +84,11 @@ export function PromptEditorPage({ name }: { name: string }) {
           )}
 
           <Field>
-            <FieldLabel htmlFor="prompt-body">{t('prompts.body')}</FieldLabel>
-            <Textarea
+            <MarkdownField
               id="prompt-body"
-              className="field-sizing-fixed font-mono"
-              rows={20}
+              label={t('prompts.body')}
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              spellCheck={false}
+              onChange={setDraft}
             />
             <FieldDescription>{t('prompts.bodyHint')}</FieldDescription>
           </Field>

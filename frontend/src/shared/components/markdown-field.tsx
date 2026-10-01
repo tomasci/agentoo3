@@ -23,17 +23,17 @@ export interface MarkdownFieldProps {
 }
 
 /**
- * A whole markdown *document* — an agent's prompt, a skill's body — edited
- * the same way the session composer's visual mode does: CodeMirror plus the
- * Obsidian-style live-preview layer (`markdown-editor.tsx`, `shared/lib/
- * markdown-live-preview.ts`), with a toggle back to a plain monospace
- * `Textarea` for a reader who wants the raw source. Unlike the composer this
- * is a document-sized field, not a chat-sized box: fixed height, its own
- * border standing in for the `Textarea` it replaces rather than an
- * `InputGroup`, and no caret handoff between surfaces on toggle — a plain
- * remount reading `value` is enough here, since switching modes mid-edit on
- * a multi-paragraph document is rare enough not to warrant the composer's
- * `CaretHandoff` machinery.
+ * A whole markdown *document* — an agent's prompt, a skill's body, a system
+ * prompt's body — edited the same way the session composer's visual mode
+ * does: CodeMirror plus the Obsidian-style live-preview layer
+ * (`markdown-editor.tsx`, `shared/lib/markdown-live-preview.ts`), with a
+ * toggle back to a plain monospace `Textarea` for a reader who wants the raw
+ * source. Unlike the composer this is a document-sized field, not a
+ * chat-sized box: fixed height, its own border standing in for the
+ * `Textarea` it replaces rather than an `InputGroup`, and no caret handoff
+ * between surfaces on toggle — a plain remount reading `value` is enough
+ * here, since switching modes mid-edit on a multi-paragraph document is rare
+ * enough not to warrant the composer's `CaretHandoff` machinery.
  *
  * The mode preference (`documentEditorModeAtom`) is shared by every page
  * that renders this component, deliberately separate from the composer's own

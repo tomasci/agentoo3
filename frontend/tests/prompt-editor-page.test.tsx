@@ -1,12 +1,19 @@
 // A render smoke test: PromptEditorPage fetches the operator's saved (or
-// default) instruction and puts it in the textarea a save button sits next
+// default) instruction and puts it in the body editor a save button sits next
 // to — the one thing worth pinning here is that the loaded body actually
-// reaches the DOM, since everything else (mutation wiring, invalidation) is
-// the generated client's own contract, not this page's.
+// reaches the editor, since everything else (mutation wiring, invalidation) is
+// the generated client's own contract, not this page's. The body is a
+// `MarkdownField`, whose default (visual) mode is a CodeMirror editor rather
+// than a textarea, so it is read from the `EditorView`'s own document — see
+// tests/library-editor-markdown.test.tsx, which covers editing and saving.
+// A fresh jotai store and a cleared localStorage per test keep the field's
+// visual/raw mode from leaking in from another test or file.
 
 import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { EditorView } from '@codemirror/view'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from '@tanstack/react-router'
+import { createStore, Provider as JotaiProvider } from 'jotai'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { mockModule } from './mock-module'
@@ -76,9 +83,11 @@ async function mount() {
   await router.load()
   await act(async () => {
     root.render(
-      <QueryClientProvider client={client}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>,
+      <JotaiProvider store={createStore()}>
+        <QueryClientProvider client={client}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </JotaiProvider>,
     )
   })
   // The query resolves over its own chain of microtasks; several real timer
@@ -97,9 +106,19 @@ const unmount = async () => {
   })
   container.remove()
   client.clear()
+  localStorage.clear()
+}
+
+/** The body editor's current document, read from CodeMirror itself. */
+const editorDoc = () => {
+  const el = container.querySelector('.cm-editor') as HTMLElement | null
+  const view = el && EditorView.findFromDOM(el)
+  if (!view) throw new Error('no CodeMirror view mounted')
+  return view.state.doc.toString()
 }
 
 beforeEach(() => {
+  localStorage.clear()
   getResult = DEFAULT_FIXTURE
   putCalls = []
   deleteCalls = []
@@ -107,16 +126,13 @@ beforeEach(() => {
 
 afterEach(unmount)
 
-test('renders the loaded body in the textarea', async () => {
+test('renders the loaded body in the editor', async () => {
   await mount()
-  const textarea = container.querySelector('textarea')
-  expect(textarea).not.toBeNull()
-  expect(textarea?.value).toBe(getResult.body)
+  expect(editorDoc()).toBe(getResult.body)
 })
 
-test('a saved custom instruction round-trips into the textarea too', async () => {
+test('a saved custom instruction round-trips into the editor too', async () => {
   getResult = { ...getResult, body: 'Be terse. Always name the file you mean.', source: 'file' }
   await mount()
-  const textarea = container.querySelector('textarea')
-  expect(textarea?.value).toBe('Be terse. Always name the file you mean.')
+  expect(editorDoc()).toBe('Be terse. Always name the file you mean.')
 })
