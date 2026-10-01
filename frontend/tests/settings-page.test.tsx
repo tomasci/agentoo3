@@ -74,6 +74,13 @@ async function mount(path: string) {
   client.setQueryData([{ url: '/api/ssh-keys' }], [])
   client.setQueryData([{ url: '/api/health' }], { claudeCredential: true, version: '0.1.41' })
   client.setQueryData([{ url: '/api/docker/detection' }], { enabled: true, projects: [] })
+  // SettingsPage's SessionLimitCard queries this on every visit to /settings.
+  // Unseeded, it went out as a real GET to http://localhost/ from this file;
+  // the card's own behaviour is covered by tests/session-limit-card.test.tsx.
+  client.setQueryData(
+    [{ url: '/api/system/settings' }],
+    { maxConcurrentSessions: { value: 2, source: 'default', defaultValue: 2 } },
+  )
   for (const p of PROJECTS) {
     client.setQueryData([{ url: '/api/projects/:id/sessions', params: { id: p.id } }], [])
   }

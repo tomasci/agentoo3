@@ -41,6 +41,7 @@ import { sessionUploadsDir } from '@/lib/paths'
 // same as the queue rejecting the call.
 import * as queueIndex from './index'
 import { enqueueSessionRun, QUEUE_SESSION_RUN, redisConnection, type SessionRunJob } from './index'
+import { startUnderSessionConcurrency } from './session-concurrency'
 
 /**
  * Allocate the next position in the transcript.
@@ -863,7 +864,7 @@ function isLockConflict(error: unknown): boolean {
  * case (project-setup.worker.ts's `isRepo` check) — and such a project's
  * sessions get no per-session worktree at all, so they fall back to running
  * straight in the shared repo checkout (`workingDir: row.worktreePath ??
- * repoPath` in features/sessions/service.ts). At WORKER_CONCURRENCY 1 that
+ * repoPath` in features/sessions/service.ts). At a concurrency of 1 that
  * could never bite; above it, two non-isolated turns in the same project
  * would edit that one working tree and git index at the same time and
  * silently stomp each other's work. So a non-isolated session (no worktree)
@@ -1486,12 +1487,37 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
 }
 
 export function startSessionRunWorker() {
+  // env.WORKER_CONCURRENCY here is only ever the construction-time value —
+  // startUnderSessionConcurrency below replaces it before BullMQ ever fetches
+  // a job, with the effective max_concurrent_sessions setting (an admin's
+  // saved override, or this same default if none is saved). Kept as the
+  // literal construction value anyway, rather than pre-reading the setting
+  // here, because session-claim-db-child.ts's test asserts on exactly this
+  // value and reads it synchronously, before the first async tick could ever
+  // run.
+  //
+  // `autorun: false` is load-bearing, not cosmetic: BullMQ's default
+  // (`autorun: true`) starts fetching jobs the instant this constructor
+  // returns, at the concurrency given right here — before
+  // startUnderSessionConcurrency's first tick has even begun its Postgres
+  // read, let alone reached Redis. A turn already queued at process start
+  // could then be claimed under env.WORKER_CONCURRENCY rather than a lower
+  // saved cap; see startUnderSessionConcurrency's own comment for the
+  // measured frequency. Calling `worker.run()` only ourselves, after that
+  // first tick's apply actually lands, is what closes the gap.
   const worker = new Worker<SessionRunJob>(QUEUE_SESSION_RUN, (job) => runTurn(job.data), {
     connection: redisConnection(),
     concurrency: env.WORKER_CONCURRENCY,
+    autorun: false,
   })
   worker.on('failed', (job, error) => {
     logger.error(`Session turn ${job?.data.sessionId} failed: ${error.message}`)
   })
+  // Reached through the namespace import above, not a destructured
+  // `sessionRunQueue` from '@/queue' — see this file's own comment on
+  // `queueIndex` for why a second, destructuring import of './index' would
+  // break the bullmq mock several tests already hand-write.
+  const stop = startUnderSessionConcurrency(worker, queueIndex.sessionRunQueue)
+  worker.on('closing', stop)
   return worker
 }

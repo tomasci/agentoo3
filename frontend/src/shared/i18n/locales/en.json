@@ -467,13 +467,29 @@
   },
   "settings": {
     "heading": "Configuration",
-    "lead": "Preferences for this installation, stored in your browser.",
+    "lead": "Preferences for this installation — language and theme stay in your browser, the session limit lives on the server.",
     "language": "Language",
     "languageHint": "The language of the interface.",
     "theme": "Theme",
     "themeHint": "Light or dark colours throughout the app.",
     "themeDark": "Dark",
-    "themeLight": "Light"
+    "themeLight": "Light",
+    "sessionsHeading": "Session limit",
+    "sessionsLead": "This applies to the whole server, not just this browser.",
+    "maxConcurrentSessions": "Max concurrent sessions",
+    "maxConcurrentSessionsHint": "How many session turns may run at once across the whole server. A saved change takes effect within a few seconds; a turn that is already running is never stopped.",
+    "maxConcurrentSessionsUsingDefault": "Using the default of {{value}}.",
+    "maxConcurrentSessionsOverridden": "Overriding the default of {{value}}.",
+    "resetToDefault": "Reset to default",
+    "saved": "Saved",
+    "reset": "Reset to the default",
+    "saveFailed": "Could not save",
+    "resetFailed": "Could not reset",
+    "loadFailed": "Could not load the current setting",
+    "errors": {
+      "maxConcurrentSessionsInvalid": "Enter a whole number of 1 or more",
+      "maxConcurrentSessionsTooHigh": "Limit is too high"
+    }
   },
   "storage": {
     "heading": "Storage",

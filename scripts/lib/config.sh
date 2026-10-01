@@ -81,13 +81,20 @@ ATTACHMENTS_DIR="${ATTACHMENTS_DIR:-$REPO_ROOT/attachments}"
 # one. Pinned here and written into .env so it never depends on $HOME again.
 SSH_KEYS_DIR="${SSH_KEYS_DIR:-$REPO_ROOT/keys}"
 
-# A machine-wide cap on how many session turns run at once, across every
-# project on the box — not the rule that keeps one session's own turns from
-# overlapping. That rule is a conditional UPDATE in the database and does not
-# read this value at all. Pinning this at 1 conflated the two: it also
-# serialised every *other* project's sessions behind whichever one happened to
-# be running, so a second project's session sat at "1 message waiting" with no
-# visible cause until the first one's turn finished.
+# The *default* for max_concurrent_sessions — the admin-configurable cap on
+# how many session turns run at once, across every project on the box — not
+# the rule that keeps one session's own turns from overlapping. That rule is
+# a conditional UPDATE in the database and does not read this value at all.
+# Pinning this at 1 conflated the two: it also serialised every *other*
+# project's sessions behind whichever one happened to be running, so a second
+# project's session sat at "1 message waiting" with no visible cause until the
+# first one's turn finished.
+#
+# An admin can override the effective cap on the Settings page without
+# touching this var or restarting anything, and that override sticks across
+# this script running again: it changes only what this default falls back to,
+# never a value already saved there. Resetting the Settings-page value is
+# what hands control back to whatever this resolves to below.
 #
 # Empty means "decide from RAM", the same shape SWAP_SIZE_MB uses below:
 # derived in scripts/68-setup-backend.sh from CLAUDE_CODE_MIN_RAM_MB, floored
