@@ -6,6 +6,7 @@
 
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from '@tanstack/react-router'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { mockModule } from './mock-module'
@@ -54,7 +55,7 @@ await mockModule(DELETE_CLIENT, () => ({
 
 // Dynamic, so the CSS-module loader above is registered before the barrel
 // resolves.
-const { PromptEditorPage } = await import('../src/features/system/components/prompt-editor-page')
+const { PromptEditorPage } = await import('../src/features/library/components/prompt-editor-page')
 
 let client: QueryClient
 let container: HTMLDivElement
@@ -65,10 +66,18 @@ async function mount() {
   container = document.createElement('div')
   document.body.append(container)
   root = createRoot(container)
+  // A one-route router is enough for the page's back-to-library <Link> — same
+  // idiom as tests/project-library-page.test.tsx's agent editor case.
+  const rootRoute = createRootRoute({ component: () => <PromptEditorPage name={NAME} /> })
+  const router = createRouter({
+    routeTree: rootRoute,
+    history: createMemoryHistory({ initialEntries: ['/'] }),
+  })
+  await router.load()
   await act(async () => {
     root.render(
       <QueryClientProvider client={client}>
-        <PromptEditorPage name={NAME} />
+        <RouterProvider router={router} />
       </QueryClientProvider>,
     )
   })

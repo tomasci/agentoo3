@@ -281,9 +281,10 @@ test('the system sidebar lists Sessions first, and its brand link goes to /sessi
   const menu = [...(sidebar()?.querySelectorAll('[data-slot="sidebar-content"] a') ?? [])]
   expect(menu.map((a) => a.getAttribute('href'))[0]).toBe('/sessions')
   expect(text(menu[0])).toBe('Sessions')
-  // The brand link plus nine menu items — the existing ones kept, after
+  // The brand link plus eight menu items — the existing ones kept, after
   // Sessions, with Docker between Sessions and Library and Ports and Usage
-  // between Storage and Prompts.
+  // between Storage and Configuration. Prompts moved into the Library page
+  // itself (library-page.tsx), so it is no longer a sidebar item of its own.
   expect(links.map((a) => a.getAttribute('href'))).toEqual([
     '/sessions',
     '/sessions',
@@ -293,7 +294,6 @@ test('the system sidebar lists Sessions first, and its brand link goes to /sessi
     '/storage',
     '/ports',
     '/usage',
-    '/prompts/idea-to-prompt',
     '/settings',
   ])
 })

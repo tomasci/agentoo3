@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { deleteApiSystemPromptsNameMutationOptions } from '@/shared/api/generated/hooks/useDeleteApiSystemPromptsName'
 import {
   getApiSystemPromptsNameQueryKey,
@@ -13,6 +13,15 @@ export function usePrompt(name: string) {
   return useQuery({
     ...getApiSystemPromptsNameQueryOptions({ path: { name } }),
     enabled: Boolean(name),
+  })
+}
+
+// One GET per known prompt, in `names`' order — there is no list endpoint
+// (see backend/src/features/system/prompts.ts), so the library page's table
+// reads each row's source (custom vs built-in default) this way instead.
+export function usePrompts(names: readonly string[]) {
+  return useQueries({
+    queries: names.map((name) => getApiSystemPromptsNameQueryOptions({ path: { name } })),
   })
 }
 

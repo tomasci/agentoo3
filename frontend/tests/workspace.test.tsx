@@ -216,10 +216,11 @@ test('the workspace opens as one system tab, showing system navigation only', as
 
   expect(tabs()).toEqual(['System'])
   expect(activeTab()).toBe('System')
-  // Sessions, docker, library, ssh keys, storage, ports, usage, prompts, configuration —
+  // Sessions, docker, library, ssh keys, storage, ports, usage, configuration —
   // and nothing about any project. The brand heading link and the Sessions
   // item both point at `/sessions` now — see shared/store/tabs.ts's
-  // `SYSTEM_HOME`.
+  // `SYSTEM_HOME`. Prompts moved into the Library page itself (library-page.tsx),
+  // so it is no longer a sidebar item of its own.
   expect(navLinks()).toEqual([
     '/sessions',
     '/sessions',
@@ -229,7 +230,6 @@ test('the workspace opens as one system tab, showing system navigation only', as
     '/storage',
     '/ports',
     '/usage',
-    '/prompts/idea-to-prompt',
     '/settings',
   ])
   expect(navLinks().some((href) => href?.startsWith('/projects'))).toBe(false)
