@@ -14,8 +14,15 @@
 // tests/prompt-editor-page.test.tsx fakes them. The fake GET reads a single
 // "server-side" record that the fake PUT writes, so the Library table can only
 // learn about a save by refetching it.
+//
+// The editor's body is a `MarkdownField`, visual (CodeMirror) by default, so
+// it is read from and edited through the `EditorView` — `view.dispatch(...)`
+// inside `act`, never DOM input events, per tests/markdown-editor.test.tsx.
+// localStorage is cleared per test and each mount gets its own jotai
+// Provider, so the field's visual/raw mode never leaks in.
 
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
+import { EditorView } from '@codemirror/view'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
 import { Provider as JotaiProvider } from 'jotai'
@@ -139,7 +146,12 @@ const sidebarHrefs = () =>
 const sidebarLink = (href: string) =>
   container.querySelector(`[data-slot="sidebar-content"] a[href="${href}"]`) as HTMLAnchorElement | null
 const main = () => container.querySelector('main') ?? container
-const textarea = () => main().querySelector('textarea') as HTMLTextAreaElement | null
+/** The prompt body's CodeMirror view, or null when none is mounted. */
+const editorView = () => {
+  const el = main().querySelector('.cm-editor') as HTMLElement | null
+  return el ? EditorView.findFromDOM(el) : null
+}
+const editorDoc = () => editorView()?.state.doc.toString()
 const buttonLabels = () => [...main().querySelectorAll('button')].map((b) => b.textContent?.trim())
 const button = (label: string) => {
   const b = [...main().querySelectorAll('button')].find((el) => el.textContent?.trim() === label)
@@ -161,13 +173,13 @@ const librarySourceCell = () => {
     ?.textContent?.trim()
 }
 
-/** Types into a React-controlled textarea: the native value setter, then an
- *  `input` event, which is what React's onChange listens for. */
-async function typeInto(el: HTMLTextAreaElement, value: string) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+/** Replaces the whole document in the editor, as a typed user edit would. */
+async function replaceDoc(view: EditorView, value: string) {
   await act(async () => {
-    setter?.call(el, value)
-    el.dispatchEvent(new Event('input', { bubbles: true }))
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: value },
+      userEvent: 'input.type',
+    })
   })
 }
 
@@ -191,7 +203,7 @@ test('/library/prompts/idea-to-prompt renders the editor with a back link, and L
   await mount('/library/prompts/idea-to-prompt')
   expect(router.state.location.pathname).toBe('/library/prompts/idea-to-prompt')
   expect(notFoundShown()).toBe(false)
-  expect(textarea()?.value).toBe(DEFAULT_BODY)
+  expect(editorDoc()).toBe(DEFAULT_BODY)
   expect(buttonLabels()).toContain('Save')
   expect(buttonLabels()).toContain('Reset to default')
 
@@ -222,7 +234,7 @@ test('the old /prompts/idea-to-prompt redirects to /library/prompts/idea-to-prom
   await mount('/prompts/idea-to-prompt')
   expect(router.state.location.pathname).toBe('/library/prompts/idea-to-prompt')
   expect(notFoundShown()).toBe(false)
-  expect(textarea()?.value).toBe(DEFAULT_BODY)
+  expect(editorDoc()).toBe(DEFAULT_BODY)
   expect(sidebarLink('/library')?.getAttribute('aria-current')).toBe('page')
   expect(problems).toEqual([])
 })
@@ -245,7 +257,7 @@ test('a system tab persisted at the old /prompts path lands on the editor when r
   })
   await settle()
   expect(router.state.location.pathname).toBe('/library/prompts/idea-to-prompt')
-  expect(textarea()?.value).toBe(DEFAULT_BODY)
+  expect(editorDoc()).toBe(DEFAULT_BODY)
   expect(notFoundShown()).toBe(false)
 })
 
@@ -277,9 +289,9 @@ test('saving in the editor makes the Library table show "Custom" afterwards', as
   })
   await settle()
   expect(router.state.location.pathname).toBe('/library/prompts/idea-to-prompt')
-  const ta = textarea()
-  if (!ta) throw new Error('no editor textarea')
-  await typeInto(ta, 'Be terse. Always name the file you mean.')
+  const view = editorView()
+  if (!view) throw new Error('no CodeMirror editor for the prompt body')
+  await replaceDoc(view, 'Be terse. Always name the file you mean.')
   await act(async () => {
     button('Save').click()
   })

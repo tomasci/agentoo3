@@ -10,8 +10,11 @@
 // tests/mock-module.ts exactly as tests/prompt-editor-page.test.tsx does.
 // Language is pinned to English (as tests/transcript-model-render.test.tsx
 // does), because the labels themselves are part of what is being checked.
+// The editor's body is a `MarkdownField`, visual (CodeMirror) by default, so
+// the one test that lands there reads it from the `EditorView`.
 
 import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test'
+import { EditorView } from '@codemirror/view'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRouter, RouterProvider } from '@tanstack/react-router'
 import { Provider as JotaiProvider } from 'jotai'
@@ -212,7 +215,8 @@ test('the row actions menu offers only Edit, and Edit navigates to the editor', 
   })
   await settle()
   expect(router.state.location.pathname).toBe('/library/prompts/idea-to-prompt')
-  expect((container.querySelector('textarea') as HTMLTextAreaElement | null)?.value).toBe(
+  const cm = container.querySelector('.cm-editor') as HTMLElement | null
+  expect(cm && EditorView.findFromDOM(cm)?.state.doc.toString()).toBe(
     'The built-in default instruction.',
   )
   expect(problems).toEqual([])
