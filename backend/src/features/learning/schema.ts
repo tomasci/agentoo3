@@ -89,7 +89,8 @@ export const librarySuggestionSummarySchema = z
         "'modify': whether the target still exists; 'create': false unless the name is now taken",
     }),
     stale: z.boolean().openapi({
-      description: "'modify' only: whether the live markdown has changed since baseMarkdown",
+      description:
+        "True only for a pending 'modify' whose live markdown has changed since baseMarkdown; always false once applied or rejected, and for 'create'",
     }),
   })
   .openapi('LibrarySuggestionSummary')
