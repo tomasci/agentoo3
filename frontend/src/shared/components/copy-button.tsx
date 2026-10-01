@@ -74,6 +74,7 @@ export function CopyButton({
         type="button"
         variant="ghost"
         size="icon-sm"
+        className="text-muted-foreground"
         aria-label={text}
         title={text}
         onClick={() => void copy()}
