@@ -183,7 +183,12 @@ for (const bad of ['', 'not-a-date', 'NaN', '2026-13-45T99:99:99Z', 'Invalid Dat
 
     expect(new Date(bad).getTime()).toBeNaN()
     expect(stamps(container)).toHaveLength(0)
-    expect(container.querySelectorAll('[title]')).toHaveLength(0)
+    // `[title]` is no longer unique to a timestamp: every row with text now
+    // carries a copy button, and its aria-label/title live on a `<button>`,
+    // never a `<span>` — `stamps()` above is the real "no timestamp"
+    // assertion. What stays provable here is that nothing *else* picks up a
+    // stray title: no span, no leftover placeholder, from a bad createdAt.
+    expect(container.querySelectorAll('[title]:not(button)')).toHaveLength(0)
     expect(container.textContent).not.toContain('Invalid Date')
     expect(container.textContent).not.toContain('NaN')
     expect(container.textContent).not.toContain('null')
@@ -192,12 +197,16 @@ for (const bad of ['', 'not-a-date', 'NaN', '2026-13-45T99:99:99Z', 'Invalid Dat
     const [prompt, task, answer, result] = rows(container)
     if (!prompt || !task || !answer || !result) throw new Error('expected four top-level rows')
 
-    // The prompt caption keeps only its "you" label — no second, empty span.
+    // The prompt caption keeps its "you" label and, since this prompt has
+    // text, a copy button next to where the timestamp would have gone — no
+    // further, empty span beyond those two.
     const caption = prompt.firstElementChild
-    expect(caption?.children).toHaveLength(1)
+    expect(caption?.children).toHaveLength(2)
 
-    // The answer keeps only its markdown body.
-    expect(answer.children).toHaveLength(1)
+    // The answer always has text (markAnswers only ever promotes a message
+    // that does), so its copy button's wrapper span is here even with no
+    // timestamp and no model — plus the markdown body.
+    expect(answer.children).toHaveLength(2)
 
     // No meta slot on either disclosure trigger: indicator, [badge,] title.
     const resultTrigger = triggers(result)[0]
