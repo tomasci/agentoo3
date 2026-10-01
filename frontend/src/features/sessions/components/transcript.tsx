@@ -9,7 +9,14 @@ import {
 import { memo, type ReactNode, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { formatBytes } from '@/features/system'
-import { Code, DefinitionList, Markdown, StatusBadge, type Tone } from '@/shared/components'
+import {
+  Code,
+  CopyButton,
+  DefinitionList,
+  Markdown,
+  StatusBadge,
+  type Tone,
+} from '@/shared/components'
 import { Alert, AlertDescription } from '@/shared/ui/alert'
 import {
   Attachment,
@@ -196,8 +203,20 @@ function MessageBody({
           <AlertDescription>{notice}</AlertDescription>
         </Alert>
       )}
-      {/* Agent output is markdown, and reads as noise without it. */}
-      {text && <Markdown compact>{text}</Markdown>}
+      {/* Agent output is markdown, and reads as noise without it. The copy
+          button sits beside the rendered body rather than in the
+          `CollapsibleTrigger` above — a button nested inside a trigger
+          button is invalid HTML — so `min-w-0` on the markdown's own flex
+          item keeps a long reply from pushing the button out of the row
+          instead of wrapping. */}
+      {text && (
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <Markdown compact>{text}</Markdown>
+          </div>
+          <CopyButton value={text} compact />
+        </div>
+      )}
       {thinking && (
         <div className="border-l-2 pl-3 text-muted-foreground italic">
           <span className="mb-2 block text-[0.6875rem] font-normal not-italic uppercase tracking-wide">
@@ -416,18 +435,38 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
   const { t } = useTranslation()
 
   if (node.kind === 'prompt') {
+    // Gates the time/copy group the same way the answer branch below gates
+    // its own meta span: an unparsable createdAt and an empty, attachment-only
+    // prompt must produce no second, empty span next to the "you" label.
+    const promptTime = formatTime(node.createdAt) && (
+      <Timestamp
+        createdAt={node.createdAt}
+        className="text-[0.6875rem] text-muted-foreground tabular-nums"
+      />
+    )
     return (
-      <div className="ml-auto max-w-[min(46rem,100%)] rounded-lg border bg-primary/5 px-3 py-2 whitespace-pre-wrap wrap-anywhere">
+      <div className="ml-auto max-w-[min(46rem,100%)] rounded-lg border bg-primary/5 px-3 py-2 wrap-anywhere">
         <span className="mb-1 flex items-baseline justify-between gap-2">
           <span className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide">
             {t('sessions.transcript.you')}
           </span>
-          <Timestamp
-            createdAt={node.createdAt}
-            className="text-[0.6875rem] text-muted-foreground tabular-nums"
-          />
+          {(promptTime || node.text) && (
+            <span className="flex items-center gap-1.5">
+              {promptTime}
+              {node.text && <CopyButton value={node.text} compact />}
+            </span>
+          )}
         </span>
-        {node.text}
+        {/* The composer writes markdown now (markdown-editor.tsx), so the
+            prompt renders through the same component as a reply instead of
+            as plain text. `breaks` is on here, and only here: the composer's
+            live preview shows one Enter as one line, but CommonMark folds a
+            single newline into a space, which would otherwise collapse a
+            multi-line prompt into one paragraph on send. No
+            `whitespace-pre-wrap` on the bubble any more either — react-markdown
+            emits its own `\n` text nodes between block elements, which
+            `pre-wrap` turned into stray blank lines. */}
+        {node.text && <Markdown breaks>{node.text}</Markdown>}
         {node.files.length > 0 && <PromptAttachments sessionId={sessionId} files={node.files} />}
       </div>
     )
@@ -441,23 +480,26 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
         className="text-[0.6875rem] text-muted-foreground tabular-nums"
       />
     )
-    // An unparsable createdAt and an absent model must produce no wrapper at
-    // all, not an empty one — an always-rendered meta span would itself be a
-    // second child of the answer's single-column grid even with nothing
-    // visible inside it.
+    // markAnswers only ever promotes a message that has text (see its own
+    // comment), so this answer always has something for the copy button to
+    // copy, and the condition below is effectively always true. It stays
+    // explicit anyway, for the same reason the old time-or-model check did:
+    // an always-rendered meta span would itself be a second child of the
+    // answer's single-column grid even with nothing visible inside it.
     return (
       <div className="grid grid-cols-1 gap-1 rounded-lg border bg-background px-3 py-2">
-        {(time || node.model) && (
-          <span className="justify-self-end">
+        {(time || node.model || node.text) && (
+          <span className="flex items-center justify-self-end gap-2">
             {time}
             {node.model && (
               <span
-                className="ml-2 text-[0.6875rem] text-muted-foreground"
+                className="text-[0.6875rem] text-muted-foreground"
                 title={t('sessions.transcript.model', { model: node.model })}
               >
                 {node.model}
               </span>
             )}
+            {node.text && <CopyButton value={node.text} compact />}
           </span>
         )}
         <Markdown>{node.text}</Markdown>

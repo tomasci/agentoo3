@@ -139,7 +139,9 @@ test('an answer with a model shows it once, as its own element beside the time',
   // Exactly the meta wrapper and the markdown body — the model did not add a
   // third child to the answer's single-column grid.
   expect(answer.children).toHaveLength(2)
-  expect(answer.children[0]?.children).toHaveLength(2)
+  // Time, model label, and the copy button this answer's text always gets —
+  // three children in the meta wrapper, not a fourth row of its own.
+  expect(answer.children[0]?.children).toHaveLength(3)
 })
 
 test('an answer with no model renders no label, no empty element and no separator', async () => {
@@ -154,10 +156,11 @@ test('an answer with no model renders no label, no empty element and no separato
   if (!answer) throw new Error('expected an answer row')
 
   expect(labels(answer)).toHaveLength(0)
-  // The meta wrapper holds the timestamp and nothing else: no placeholder
-  // span waiting to be filled.
+  // The meta wrapper holds the timestamp and the copy button this answer's
+  // text always gets — no placeholder span waiting on a model that never
+  // arrives.
   expect(answer.children).toHaveLength(2)
-  expect(answer.children[0]?.children).toHaveLength(1)
+  expect(answer.children[0]?.children).toHaveLength(2)
   // And nothing punctuates the gap where a model would have gone.
   expect(answer.textContent).toBe(`${hhmm(AT)}All fixes landed.`)
   expect(answer.textContent).not.toContain('undefined')

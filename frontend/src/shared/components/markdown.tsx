@@ -1,4 +1,5 @@
 import ReactMarkdown, { type Components } from 'react-markdown'
+import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import { cn } from '@/shared/lib/utils'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/ui/table'
@@ -149,8 +150,23 @@ const components: Components = {
  * `innerHTML`. remark-gfm adds the parts of GitHub's dialect that actually
  * show up in this output — tables above all, plus task lists and
  * strikethrough.
+ *
+ * `breaks` turns on remark-breaks, which treats a single newline as a `<br>`
+ * instead of folding it into the paragraph the way CommonMark does. Off by
+ * default — an agent's reply is prose, and a model that wants a line break
+ * already writes a blank line. On, it is for the composer's own prompts: its
+ * live preview shows one Enter as one line, so without this a multi-line
+ * prompt would silently collapse into a single paragraph once sent.
  */
-export function Markdown({ children, compact = false }: { children: string; compact?: boolean }) {
+export function Markdown({
+  children,
+  compact = false,
+  breaks = false,
+}: {
+  children: string
+  compact?: boolean
+  breaks?: boolean
+}) {
   return (
     <div
       className={cn(
@@ -158,7 +174,10 @@ export function Markdown({ children, compact = false }: { children: string; comp
         compact ? 'text-sm' : 'text-base',
       )}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={breaks ? [remarkGfm, remarkBreaks] : [remarkGfm]}
+        components={components}
+      >
         {children}
       </ReactMarkdown>
     </div>
