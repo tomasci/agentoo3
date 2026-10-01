@@ -196,7 +196,10 @@ if ! enable_swapfile; then
     log_warn "Not fatal, but the machine now has no headroom: a heavy test run or"
     log_warn "build can get OOM-killed. Give the box more RAM, or lower the derived"
     log_warn "session cap: WORKER_CONCURRENCY=2 $INSTALL_SH --only backend (sticky —"
-    log_warn "it survives the next upgrade)."
+    log_warn "it survives the next upgrade). That only moves the *default* an admin"
+    log_warn "has not overridden — if max concurrent sessions is pinned on the"
+    log_warn "Settings page, lower it there instead; this env var does nothing while"
+    log_warn "that override is stored."
     exit 0
   fi
 fi

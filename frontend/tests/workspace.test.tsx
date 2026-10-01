@@ -81,6 +81,14 @@ async function mount(path: string, projects = PROJECTS) {
     [{ url: '/api/sessions/overview' }, { window: '1d' }],
     { running: [], unchecked: [], recent: [], window: '1d' },
   )
+  // SettingsPage's SessionLimitCard queries this on every visit to the
+  // system tab's /settings page — seeded for the same reason as every other
+  // query above, not because this file has anything of its own to say about
+  // that card.
+  client.setQueryData(
+    [{ url: '/api/system/settings' }],
+    { maxConcurrentSessions: { value: 2, source: 'default', defaultValue: 2 } },
+  )
 
   const root = createRoot(container)
   roots.push(root)

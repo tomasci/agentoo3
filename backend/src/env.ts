@@ -28,13 +28,19 @@ const schema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   CLAUDE_CODE_OAUTH_TOKEN: z.string().optional(),
 
-  // Machine-wide cap on how many turns may run at once — not a per-session
-  // rule. Per-session serialization is enforced separately, by the conditional
-  // claim in session-run.worker.ts's runTurn (a turn is only ever taken out of
-  // 'queued'), and stays enforced regardless of what this number is. The
-  // installer derives the real value from host RAM (each Claude Code instance
-  // wants ~4GB) and pins it in .env; this default is only the fallback for
-  // running without the installer.
+  // The *default* for max_concurrent_sessions (features/system/settings.ts),
+  // the admin-configurable cap on how many session turns may run at once —
+  // not a per-session rule; per-session serialization is enforced
+  // separately, by the conditional claim in session-run.worker.ts's runTurn
+  // (a turn is only ever taken out of 'queued'), and stays enforced
+  // regardless of what this number is. An admin can override the effective
+  // value on the Settings page without touching this var or restarting
+  // anything — queue/session-concurrency.ts polls the override and applies
+  // it to the live worker — so this is only what a deployment falls back to
+  // when nothing has been saved there yet. The installer still derives this
+  // value from host RAM (each Claude Code instance wants ~4GB) and pins it
+  // in .env; re-running the installer only ever changes this default, never
+  // a saved override.
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(2),
 
   // Where generated ssh keys live. Empty falls back to ~/.ssh/agentoo.

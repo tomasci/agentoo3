@@ -6,6 +6,7 @@ import { themeAtom } from '@/shared/store/ui'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/shared/ui/field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { SessionLimitCard } from './session-limit-card'
 
 const LANGUAGE_NAMES: Record<string, string> = { en: 'English', ru: 'Русский' }
 
@@ -19,8 +20,14 @@ interface Option {
  * changing the language of the whole app, which is why this page lives in the
  * system tab rather than in a corner of every sidebar.
  *
- * Both settings are held in the browser rather than on the server: they describe
- * how one reader wants to see this installation, not how it is configured.
+ * Language and theme stay in the browser: they describe how one reader wants
+ * to see this installation, not how it is configured, so there is nothing
+ * here worth a round trip to the server. The session limit below them is the
+ * opposite — it configures the installation itself, for every reader and
+ * every tab, so it lives on the server and `SessionLimitCard` owns its own
+ * query/loading/error states for it. That card is deliberately not awaited
+ * here: this page must still render the language/theme controls even if the
+ * settings API is unreachable or slow, so nothing above gates on its query.
  */
 export function SettingsPage() {
   const { t, i18n } = useTranslation()
@@ -89,6 +96,8 @@ export function SettingsPage() {
           </FieldGroup>
         </CardContent>
       </Card>
+
+      <SessionLimitCard />
     </div>
   )
 }

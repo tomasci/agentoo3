@@ -43,16 +43,33 @@ mock.module('bullmq', () => ({
       return { id: `job-${enqueued.length}` }
     }
     async upsertJobScheduler() {}
+    // startSessionRunWorker's startUnderSessionConcurrency calls this on
+    // every tick (queue/session-concurrency.ts) — a no-op here is enough,
+    // since nothing in this file asserts on the global concurrency BullMQ
+    // itself enforces, only on the local `workerOptions.concurrency` below.
+    async setGlobalConcurrency() {}
     async close() {}
   },
   Worker: class {
+    closing: Promise<void> | undefined = undefined
+
     constructor(_name: string, _processor: unknown, options: Record<string, unknown>) {
       workerOptions = options
     }
     on() {
       return this
     }
-    async close() {}
+    // startUnderSessionConcurrency calls this once its first tick applies —
+    // never awaited there (it would otherwise block every later tick for as
+    // long as the worker "ran"), so a promise that never settles is enough:
+    // nothing in this file asserts on BullMQ's own fetch loop, only on the
+    // claim's own SQL and the queue calls above.
+    run() {
+      return new Promise<void>(() => {})
+    }
+    async close() {
+      this.closing = Promise.resolve()
+    }
   },
 }))
 

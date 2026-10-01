@@ -8,10 +8,13 @@ import {
   portScopeSchema,
   portsResponseSchema,
   promptSchema,
+  systemSettingsSchema,
   updatePromptSchema,
+  updateSystemSettingsSchema,
   usageResponseSchema,
 } from './schema'
 import { systemStats } from './service'
+import { getSystemSettings, updateSystemSettings } from './settings'
 import { getUsage } from './usage'
 
 const systemSchema = z.object({
@@ -218,4 +221,65 @@ systemRouter.openapi(
     },
   }),
   async (c) => c.json(await getPorts(c.req.valid('query').scope), 200),
+)
+
+// --- settings ---------------------------------------------------------------
+//
+// An admin-configurable surface, today exactly one key (max_concurrent
+// sessions — see features/system/settings.ts's own header for why "no row"
+// means "use env.WORKER_CONCURRENCY" rather than an error, and
+// queue/session-concurrency.ts for how the worker picks a saved override up
+// without a restart).
+
+systemRouter.openapi(
+  createRoute({
+    method: 'get',
+    path: '/system/settings',
+    tags: ['system'],
+    summary: 'Admin-configurable settings and their current effective values',
+    description:
+      "Every setting reports `source`: 'override' when an admin has saved a value for it, " +
+      "'default' when none has and `value` is simply `defaultValue`. A box with nothing ever " +
+      'saved here reports every setting as its default — the normal starting state, not an ' +
+      'error.',
+    responses: {
+      200: json(systemSettingsSchema, 'Current settings'),
+    },
+  }),
+  async (c) => c.json(await getSystemSettings(), 200),
+)
+
+systemRouter.openapi(
+  createRoute({
+    method: 'patch',
+    path: '/system/settings',
+    tags: ['system'],
+    summary: 'Save, or reset, one or more settings',
+    description:
+      'A sparse patch: a key left out of the body is untouched. Setting a key to a value saves ' +
+      "it as an override — including a value equal to that key's own default, which still " +
+      'pins it rather than being treated as a no-op. Setting a key to `null` resets it, ' +
+      'deleting the saved override rather than writing the default back in, so the default ' +
+      'stays one thing instead of a copy that can drift from it. The body must name at least ' +
+      'one key.',
+    request: {
+      body: {
+        // required: true, unlike the `json()` helper above: without it,
+        // @hono/zod-openapi only validates a body whose content-type is
+        // application/json, and hands the handler `{}` for anything else —
+        // a missing body or a text/plain one included — so the schema's own
+        // "Nothing to update" refine never ran and a client got a silent 200
+        // that saved nothing. See sessions/routes.ts's identical body shape
+        // for the same reason.
+        content: { 'application/json': { schema: updateSystemSettingsSchema } },
+        description: 'Keys to save or reset',
+        required: true,
+      },
+    },
+    responses: {
+      200: json(systemSettingsSchema, 'Settings after the patch was applied'),
+      400: json(errorSchema, 'A value failed validation, or the body named no key at all'),
+    },
+  }),
+  async (c) => c.json(await updateSystemSettings(c.req.valid('json')), 200),
 )

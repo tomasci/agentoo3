@@ -20,7 +20,10 @@ import { startProjectSetupWorker } from '@/queue/project-setup.worker'
 import { startSessionRunWorker } from '@/queue/session-run.worker'
 import { reconcileTurns, startTurnReconcileWorker } from '@/queue/turn-reconcile.worker'
 
-logger.info(`Worker starting (concurrency ${env.WORKER_CONCURRENCY})`)
+// What max_concurrent_sessions falls back to absent a saved override;
+// startUnderSessionConcurrency (started inside startSessionRunWorker) logs the
+// effective value — that override, if one exists — right after this.
+logger.info(`Worker starting (default concurrency ${env.WORKER_CONCURRENCY})`)
 
 const workers = [
   startProjectSetupWorker(),

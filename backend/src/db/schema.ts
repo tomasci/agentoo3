@@ -729,6 +729,22 @@ export const ideaFiles = pgTable(
   ],
 )
 
+// --- system settings -----------------------------------------------------
+
+// A small key/value store for admin-configurable overrides that do not merit
+// a column or a table of their own — see features/system/settings.ts for the
+// one key that lives here today (max_concurrent_sessions). "No row" means
+// "use the built-in default" rather than an invalid state, following the same
+// absent-means-default model features/system/prompts.ts already uses for a
+// saved-file-vs-fallback prompt: a reset deletes the row instead of writing
+// the default value back into it, so the default stays one thing (a constant
+// in the code / an env var) rather than a copy that can drift from it.
+export const systemSettings = pgTable('system_settings', {
+  key: text('key').primaryKey(),
+  value: jsonb('value').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 // --- relations ----------------------------------------------------------------
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({

@@ -1,4 +1,13 @@
-import { z } from 'zod'
+// `@hono/zod-openapi`'s own `z`, not bare 'zod': importing it is what runs
+// that package's module-level `extendZodWithOpenApi(z)` (its dist/index.mjs,
+// at the bottom), which is what makes `.openapi()` exist at all on the
+// schemas below. Every other schema file in this app gets that for free —
+// each is only ever reached through a route file that imports OpenAPIHono
+// first — but settings.ts (below) is imported by queue/session-concurrency.ts
+// too, which the worker reaches with no router, and so no OpenAPIHono, ever
+// in its own import graph. A bare 'zod' import here left `.openapi()` missing
+// at the moment this file's own top-level schemas ran, in exactly that path.
+import { z } from '@hono/zod-openapi'
 
 /**
  * Which text a prompt response actually carries: the operator's own saved
@@ -458,3 +467,77 @@ export const usageResponseSchema = z
   })
   .openapi('UsageResponse')
 export type UsageResponseDto = z.infer<typeof usageResponseSchema>
+
+// --- system settings, mirroring db/schema.ts's systemSettings table --------
+//
+// A small admin-configurable surface. Today exactly one key exists —
+// max_concurrent_sessions, read and written by features/system/settings.ts —
+// but the shape below (GET returns the effective value plus where it came
+// from, PATCH accepts a sparse partial) is meant to generalise to a second
+// one without reshaping either endpoint.
+//
+// "No row for a key" means "use the built-in default", the identical
+// absent-means-default model promptSchema's own `source` already follows for
+// the prompt registry above: `source` here plays the same role, telling the
+// operator which number a turn would actually run under rather than just
+// echoing back whatever the stored row happens to say.
+
+/**
+ * Nothing on a box sized for this app is sane anywhere near this number: at
+ * ~4GB per Claude Code instance and db/client.ts's own Postgres pool (10
+ * connections per process), a value even half this high would already be
+ * past what either resource could support. This exists purely as a typo
+ * guard — a stray extra digit should 400 loudly, not be quietly accepted and
+ * then explain itself as an OOM three turns later.
+ */
+export const MAX_CONCURRENT_SESSIONS_CEILING = 64
+
+export const maxConcurrentSessionsSchema = z
+  .number({ error: 'Must be a whole number' })
+  .int('Must be a whole number')
+  .min(1, 'Must be at least 1')
+  .max(MAX_CONCURRENT_SESSIONS_CEILING, 'Must be at most 64')
+
+export const systemSettingsSourceSchema = z.enum(['override', 'default']).openapi({
+  description:
+    "'override' when an admin has saved a value for this key (see PATCH below) — including a " +
+    "value equal to defaultValue, which still counts as a saved override, not 'default'; " +
+    "'default' when no override is stored and `value` is simply `defaultValue` below.",
+})
+
+export const systemSettingsSchema = z
+  .object({
+    maxConcurrentSessions: z.object({
+      value: z
+        .number()
+        .int()
+        .openapi({
+          description:
+            'The effective cap a new turn is claimed under right now: the stored ' +
+            'override if one exists, else defaultValue.',
+        }),
+      source: systemSettingsSourceSchema,
+      defaultValue: z
+        .number()
+        .int()
+        .openapi({
+          description:
+            'env.WORKER_CONCURRENCY as this process parsed it at boot — independent of any saved ' +
+            'override, and what `value` reverts to on reset.',
+        }),
+    }),
+  })
+  .openapi('SystemSettings')
+export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>
+
+// `null` resets a key back to its default (deletes the stored row, rather
+// than writing the default value back into it — the same reasoning
+// resetPrompt gives for its own delete-not-overwrite above); a key left out
+// of the body entirely leaves that setting untouched. The refine is what
+// turns a body with nothing recognisable in it — `{}`, or only unknown keys,
+// which an OpenAPIHono object schema strips before this refine ever runs —
+// into a 400 instead of a silent no-op PATCH.
+export const updateSystemSettingsSchema = z
+  .object({ maxConcurrentSessions: maxConcurrentSessionsSchema.nullable().optional() })
+  .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update' })
+export type UpdateSystemSettingsInput = z.infer<typeof updateSystemSettingsSchema>

@@ -768,14 +768,16 @@ sudo /opt/agentoo/install.sh --only swap,backend
 (`--only backend` alone is enough for the two knobs below — `swap` is only
 needed if the swapfile itself should also be resized.)
 
-`WORKER_CONCURRENCY` — how many session turns run at once, machine-wide, across
-every project — is derived from RAM rather than pinned:
+`WORKER_CONCURRENCY` sets the *default* for how many session turns run at
+once, machine-wide, across every project — the cap an admin sees on the
+Settings page as "max concurrent sessions" until they save an override of
+their own. The env var's own value is derived from RAM rather than pinned:
 `clamp(floor(MemTotal / 4GB), 2, 8)`. A pinned `1` used to mean a second
 project's session sat at "1 message waiting" until the first one's turn
 finished, with nothing to say why; the floor is 2, not 1, because on a small
 box two sessions competing for RAM degrade to throttling or a recoverable
 SIGKILL the worker resumes from on its own, and either beats a session that
-looks silently hung. Raise or lower it explicitly with
+looks silently hung. Raise or lower the default explicitly with
 
 ```bash
 WORKER_CONCURRENCY=6 sudo /opt/agentoo/install.sh --only backend
@@ -783,14 +785,21 @@ WORKER_CONCURRENCY=6 sudo /opt/agentoo/install.sh --only backend
 
 which is now sticky — remembered across a later plain re-run, the same way
 `NGINX_DOMAIN` and `UFW_TAILSCALE_ONLY` already are, so tuning it once is not
-undone by the next upgrade. `WORKER_MEMORY_HIGH` defaults to `80%`: no
-arithmetic, scales with whatever box this lands on, and leaves headroom for
-postgres, redis, nginx and the frontend, none of which live in the worker's
-cgroup and all of which have to survive an agent's test suite. It takes
-systemd's syntax (`3G`, `80%`, `infinity` to disable it) and only ever
-throttles and reclaims, never kills — so the agent slows down instead of the
-OOM killer choosing a victim elsewhere on the machine, where losing postgres
-costs far more than a slow test run.
+undone by the next upgrade. An admin who instead saves a value on the
+Settings page gets a cap that takes effect live, with no restart and no
+install run at all — the worker polls it and re-applies it within seconds —
+and that saved override stays in force across this installer running again:
+re-running it (with or without `WORKER_CONCURRENCY` set) only ever changes
+what the *default* falls back to, never a value an admin has explicitly
+saved. Resetting the Settings-page value is what hands control back to this
+env var. `WORKER_MEMORY_HIGH` defaults to `80%`: no arithmetic, scales with
+whatever box this lands on, and leaves headroom for postgres, redis, nginx
+and the frontend, none of which live in the worker's cgroup and all of which
+have to survive an agent's test suite. It takes systemd's syntax (`3G`,
+`80%`, `infinity` to disable it) and only ever throttles and reclaims, never
+kills — so the agent slows down instead of the OOM killer choosing a victim
+elsewhere on the machine, where losing postgres costs far more than a slow
+test run.
 
 If the box keeps hitting this on 4GB, the honest fix is still more RAM: Claude
 Code alone asks for 4GB, so the floor of 2 concurrent sessions there is real
