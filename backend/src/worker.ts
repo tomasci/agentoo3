@@ -36,7 +36,7 @@ const workers = [
   startIdeaTurnEndedWorker(),
   startDockerOpWorker(),
   startEditorOpWorker(),
-  // Round 2: processes the daily schedule's own trigger job, and runs the
+  // Processes the daily learning-schedule trigger job, and runs the
   // reconcile loop that keeps BullMQ's job scheduler matching the saved
   // setting — see queue/learning-schedule.worker.ts's own header.
   startLearningScheduleWorker(),

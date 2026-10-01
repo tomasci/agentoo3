@@ -11,10 +11,10 @@ export const QUEUE_IDEA_PROMPT = 'idea-prompt'
 export const QUEUE_IDEA_HANDOFF_SWEEP = 'idea-handoff-sweep'
 export const QUEUE_DOCKER_OP = 'docker-op'
 export const QUEUE_EDITOR_OP = 'editor-op'
-// Round 2's own queue: the daily tick that decides *whether* a learning run is
-// due and calls createLearningRun (features/learning/runs.ts) if so. See
-// queue/learning-schedule.worker.ts for the reconcile loop that upserts/
-// removes its one BullMQ job scheduler, and for the trigger job's own
+// The learning-schedule queue: the daily tick that decides *whether* a
+// learning run is due and calls createLearningRun (features/learning/runs.ts)
+// if so. See queue/learning-schedule.worker.ts for the reconcile loop that
+// upserts/removes its one BullMQ job scheduler, and for the trigger job's own
 // processor.
 export const QUEUE_LEARNING_SCHEDULE = 'learning-schedule'
 
@@ -158,9 +158,9 @@ export async function enqueueProjectSetup(job: ProjectSetupJob) {
  * (session-concurrency.ts's setGlobalConcurrency) as a session turn, and
  * waits behind running sessions the same way a queued turn does, rather than
  * bypassing that cap on a queue of its own. The processor that actually
- * switches on job name/data shape is round 2's own addition to
- * session-run.worker.ts — this round only widens the type so both job shapes
- * can be enqueued without breaking `SessionRunJob`-typed callers.
+ * switches on job name/data shape lives in session-run.worker.ts — the type
+ * here only widens to admit both job shapes, so they can be enqueued without
+ * breaking `SessionRunJob`-typed callers.
  */
 export const sessionRunQueue = new Queue<SessionRunJob | LearningRunJob>(QUEUE_SESSION_RUN, {
   connection: redisConnection(),
@@ -192,7 +192,7 @@ export async function enqueueSessionRun(job: SessionRunJob, opts?: { delayMs?: n
 /**
  * A learning run, enqueued as job name 'learning' on `sessionRunQueue` — see
  * that export's own comment for why it is this queue and not a dedicated one.
- * The worker-side processor for this job name is round 2's addition to
+ * The worker-side processor for this job name lives in
  * session-run.worker.ts; nothing here consumes it yet.
  *
  * `jobId` is deterministic (`learning-<runId>`), not a random id: BullMQ
@@ -200,7 +200,7 @@ export async function enqueueSessionRun(job: SessionRunJob, opts?: { delayMs?: n
  * existing job rather than creating a second one), which is what makes a
  * double call to this function — createLearningRun's own insert succeeding
  * twice for the same run id should never be possible, but a retried HTTP
- * request or a redelivered round-2 scheduler tick both could — safe to repeat
+ * request or a redelivered learning-schedule tick both could — safe to repeat
  * rather than something that needs its own idempotency check above it.
  */
 export async function enqueueLearningRun(job: LearningRunJob) {

@@ -14,8 +14,8 @@
 // settings.ts gives for its own import: this schema is embedded in
 // /system/settings's response, so it has to carry `.openapi()`, but whether
 // *this* module happens to be reached through a route first, or through
-// round 2's worker-side scheduler first (no OpenAPIHono anywhere in that
-// chain), is not something this file controls.
+// queue/learning-schedule.worker.ts's reconcile loop first (no OpenAPIHono
+// anywhere in that chain), is not something this file controls.
 
 import { z } from '@hono/zod-openapi'
 import { CronExpressionParser } from 'cron-parser'
@@ -95,8 +95,8 @@ async function readLearningScheduleOverride(): Promise<LearningSchedule | undefi
 
 /** The effective schedule right now: a saved override if one exists, else the
  * built-in default. Reads the database fresh on every call, like
- * getMaxConcurrentSessions — round 2's worker polls this the same way
- * queue/session-concurrency.ts polls that one. */
+ * getMaxConcurrentSessions — queue/learning-schedule.worker.ts polls this the
+ * same way queue/session-concurrency.ts polls that one. */
 export async function getLearningSchedule(): Promise<{
   value: LearningSchedule
   source: 'override' | 'default'
@@ -174,8 +174,9 @@ export function nextRunAt(schedule: LearningSchedule, now: Date): Date | null {
 
 /**
  * The most recent instant at or before `at` matching the schedule — null when
- * disabled. Round 2 uses this to compute a *scheduled* run's reviewed window
- * when the trigger fires late (the worker was down, or a prior run overran):
+ * disabled. queue/learning-schedule.worker.ts uses this to compute a
+ * *scheduled* run's reviewed window when the trigger fires late (the worker
+ * was down, or a prior run overran):
  * the window should end at the tick that was actually due, not at whatever
  * moment the worker happened to notice it.
  *

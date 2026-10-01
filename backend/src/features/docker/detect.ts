@@ -27,14 +27,15 @@ async function isFile(path: string): Promise<boolean> {
 /**
  * Override basenames matching the *family* of a detected base file.
  *
- * Passing `-f` explicitly (which this feature always does — see the brief on
- * why relying on compose's own defaults is unsafe once any `-f` is given at
- * all) disables compose's automatic override discovery. So a bare `docker
- * compose up` a human runs by hand and the run this feature drives would
- * silently diverge unless the override is looked for and passed too — and the
- * override has to come from the same `compose.*` vs `docker-compose.*` family
- * as the base file compose actually picked, or a `docker-compose.yml` project
- * would incorrectly pick up an unrelated `compose.override.yaml`.
+ * Passing `-f` explicitly (which this feature always does, so the base file
+ * is never guessed at) disables compose's own automatic override discovery
+ * entirely — once any `-f` is given, compose stops looking for
+ * `compose.override.*` by itself. So a bare `docker compose up` a human runs
+ * by hand and the run this feature drives would silently diverge unless the
+ * override is looked for and passed too — and the override has to come from
+ * the same `compose.*` vs `docker-compose.*` family as the base file compose
+ * actually picked, or a `docker-compose.yml` project would incorrectly pick
+ * up an unrelated `compose.override.yaml`.
  */
 function overrideBasenamesFor(base: string): string[] {
   return base.startsWith('docker-compose')

@@ -1,9 +1,9 @@
 // The learning job itself: `runLearning`, the function
 // queue/session-run.worker.ts dispatches a `'learning'`-named job to (see
 // that file's own header for why it rides the session-run queue rather than
-// a queue of its own). Everything from here down is round 2's actual
-// analysis — reading the library and the window's sessions, batching their
-// digests, the per-batch review call, dedupe, and inserting survivors as
+// a queue of its own). Everything from here down is the actual analysis —
+// reading the library and the window's sessions, batching their digests, the
+// per-batch review call, dedupe, and inserting survivors as
 // `library_suggestions` rows. See backend/README.md's "Session learning"
 // section for the shape of the whole feature; this file is the engine room.
 //
@@ -185,7 +185,7 @@ function buildReviewPrompt(
 }
 
 /** Every session created in [windowStart, windowEnd), oldest first, joined to
- * its project name — this round's own brief, verbatim. */
+ * its project name — exactly the window a run is defined to cover. */
 async function loadWindowSessions(windowStart: Date, windowEnd: Date) {
   return db
     .select({
@@ -259,6 +259,15 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
   const notes: string[] = []
   let costSoFar = 0
   let settled = false
+  // Whether any batch actually produced a parsed review answer — tracked
+  // separately from `notes`/`counters` because a run can reach `completed`
+  // with zero suggestions for two very different reasons: the model looked
+  // and genuinely found nothing worth proposing (every batch answered), or
+  // every batch's review call failed or came back unparseable, so nothing
+  // was ever actually reviewed. Only the first of those is a real success;
+  // the second must not read as one just because it also ends with zero
+  // suggestions.
+  let anyBatchReviewed = false
 
   const heartbeat = setInterval(() => {
     db.update(learningRuns)
@@ -336,8 +345,7 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
     const pendingRejectedText = renderPendingRejectedList(pendingAndRejected)
 
     // Grows as this run accepts candidates, so a later batch's dedupe (both
-    // layers) sees what an earlier batch in this same run already inserted —
-    // this round's own brief, verbatim.
+    // layers) sees what an earlier batch in this same run already inserted.
     const acceptedThisRun: DedupeTarget[] = pendingAndRejected.map(toDedupeTarget)
 
     const batches = packBatches(digests, env.LEARNING_BATCH_CHARS)
@@ -377,6 +385,7 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
         )
         continue
       }
+      anyBatchReviewed = true
 
       const validated: ValidatedCandidate[] = []
       for (const raw of parsedAnswer.data.suggestions) {
@@ -389,15 +398,35 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
       }
 
       // Deterministic layer first: free, and shrinks what the judge call
-      // (below) has to consider.
+      // (below) has to consider. Checked against both `acceptedThisRun` (what
+      // earlier batches, and earlier runs, already have on file) and
+      // `thisBatchTargets` (what this same batch has already let through) —
+      // acceptedThisRun only gains an entry once insertSuggestion has
+      // actually run, which is too late for two candidates proposed in the
+      // very same review answer to catch each other.
       const survivorsAfterDeterministic: ValidatedCandidate[] = []
+      const thisBatchTargets: DedupeTarget[] = []
       for (const candidate of validated) {
-        const duplicate = isDeterministicDuplicate(candidate, acceptedThisRun)
+        const duplicate =
+          isDeterministicDuplicate(candidate, acceptedThisRun) ??
+          isDeterministicDuplicate(candidate, thisBatchTargets)
         if (duplicate) {
           counters.duplicatesSkipped++
           continue
         }
         survivorsAfterDeterministic.push(candidate)
+        // Synthetic id matches the index `judgeDuplicates` (dedupe.ts) will
+        // show this same candidate under, so a `candidate:<index>` the judge
+        // names for a later candidate in this batch resolves to this entry.
+        thisBatchTargets.push({
+          id: `candidate:${survivorsAfterDeterministic.length - 1}`,
+          kind: candidate.kind,
+          action: candidate.action,
+          name: candidate.name,
+          title: candidate.title,
+          rationale: candidate.rationale,
+          proposedMarkdown: candidate.proposedMarkdown,
+        })
       }
 
       if (survivorsAfterDeterministic.length === 0) continue
@@ -413,8 +442,9 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
       await chargeAndRecord(judgeResult.costUsd)
 
       if (!judgeResult.ok) {
-        // Fail closed, per this round's own brief: nothing from this batch is
-        // inserted when the judge call itself could not be trusted.
+        // Fail closed: an unverified duplicate on file is worse than a missed
+        // suggestion, so nothing from this batch is inserted when the judge
+        // call itself could not be trusted.
         notes.push(
           `Batch of ${batch.length} session(s): dedupe judge call failed, so ${survivorsAfterDeterministic.length} candidate(s) were not inserted: ${judgeResult.reason}`,
         )
@@ -467,7 +497,15 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
       }
     }
 
-    await finishRun(claimed.id, 'completed', counters, notes.length ? notes.join(' | ') : null)
+    // A run that reaches here with batches but not one of them successfully
+    // reviewed must not read as `completed`: zero suggestions from a run that
+    // never got a usable answer out of the model is a failure, not a quiet
+    // success, and this is the one place that distinction is still visible
+    // (every batch's own note is already folded into `notes` below). This
+    // also covers the run budget being exhausted before the first batch was
+    // ever reviewed, since that path never sets `anyBatchReviewed` either.
+    const status = anyBatchReviewed ? 'completed' : 'failed'
+    await finishRun(claimed.id, status, counters, notes.length ? notes.join(' | ') : null)
     settled = true
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)

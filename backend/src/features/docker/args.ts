@@ -139,7 +139,9 @@ export function psAllArgs(): string[] {
   return ['ps', '-aq']
 }
 
-/** Cap at 200 ids per the brief: one inspect call, not one per container. */
+/** One inspect call for up to 200 ids, not one call per container — the cap
+ * keeps a single request a sane size without needing a second round trip for
+ * the common case. */
 export function inspectArgs(containerIds: string[]): string[] {
   return ['inspect', '--type', 'container', '--format', '{{json .}}', ...containerIds.slice(0, 200)]
 }

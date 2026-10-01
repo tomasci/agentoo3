@@ -529,7 +529,8 @@ export const systemSettingsSchema = z
     }),
     // When the learning job (backend/README.md) next runs on its own
     // schedule — see features/learning/schedule.ts for the cron-shaped value
-    // this wraps and the round-2 worker that actually reads it off Redis.
+    // this wraps and queue/learning-schedule.worker.ts, the worker that
+    // actually reads it off Redis.
     learningSchedule: z.object({
       value: learningScheduleSchema,
       source: systemSettingsSourceSchema,

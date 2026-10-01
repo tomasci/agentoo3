@@ -18,7 +18,7 @@
 // one schedule, one place an operator looks for "what silently got stuck".
 //
 // A fourth and fifth predicate are not about a turn or an idea_run at all:
-// round 2's own learning_runs row can be left `running` by a dead worker, or
+// a learning_runs row can be left `running` by a dead worker, or
 // `queued` with a BullMQ job that is gone - either one would block every
 // future learning run forever, because at most one may be queued or running
 // at a time (db/schema.ts's learning_runs_single_active_key). See

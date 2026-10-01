@@ -747,7 +747,7 @@ export const systemSettings = pgTable('system_settings', {
 
 // --- learning: runs, suggestions, versions ---------------------------------
 //
-// A background job (round 2) reviews every session in a rolling 24h window
+// A background job reviews every session in a rolling 24h window
 // and proposes library changes. Nothing here ever writes agents/skills
 // directly — see library_suggestions below — this is purely "what the job
 // found" plus the human decision over it.
@@ -780,9 +780,9 @@ export const learningRuns = pgTable(
     duplicatesSkipped: integer('duplicates_skipped').notNull().default(0),
     costUsd: doublePrecision('cost_usd').notNull().default(0),
     error: text('error'),
-    // Round 2's own liveness signal, mirroring sessions.heartbeatAt — not
-    // read by anything in this round, but the column belongs on the row that
-    // will need it, not bolted on by a later migration.
+    // The learning run's own liveness signal, mirroring sessions.heartbeatAt
+    // — nothing reads it yet, but the column belongs on the row that will
+    // need it, not bolted on by a later migration.
     heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
     startedAt: timestamp('started_at', { withTimezone: true }),
     finishedAt: timestamp('finished_at', { withTimezone: true }),
@@ -826,7 +826,8 @@ export const librarySuggestions = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     // ON DELETE SET NULL, not CASCADE: a suggestion outlives the run that
     // proposed it — a human may review and act on it long after the run
-    // itself has aged out of whatever retention round 2 gives learning_runs.
+    // itself has aged out of whatever retention policy learning_runs ends up
+    // with.
     runId: uuid('run_id').references(() => learningRuns.id, { onDelete: 'set null' }),
     kind: libraryKindEnum('kind').notNull(),
     action: librarySuggestionActionEnum('action').notNull(),

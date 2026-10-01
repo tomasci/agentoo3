@@ -47,9 +47,8 @@ export const LEARNING_SCHEDULE_REFRESH_MS = 30_000
  * own `upsertJobScheduler` is idempotent regardless, but doing it every 30s
  * forever for a setting nobody touched is needless Redis traffic and log
  * noise). `undefined` means "nothing applied yet", which is also what makes
- * the very first tick after boot always apply once, per this round's own
- * brief, regardless of whether that first value happens to equal the
- * built-in default. */
+ * the very first tick after boot always apply once, regardless of whether
+ * that first value happens to equal the built-in default. */
 interface AppliedSchedule {
   enabled: boolean
   pattern: string
@@ -197,8 +196,7 @@ export function scheduledWindowEnd(
  * duplicate for the same scheduled occurrence, then starts a run exactly as
  * the manual "run now" button does (createLearningRun) — the trigger's whole
  * job is creating the row and enqueueing it; the actual analysis runs on the
- * session-run queue, behind whatever sessions are already running, per this
- * round's own brief.
+ * session-run queue, behind whatever sessions are already running.
  */
 export async function handleLearningScheduleTrigger(opts: {
   prevMillis?: number

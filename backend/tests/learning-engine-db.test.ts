@@ -82,7 +82,7 @@ test('the scenarios ran at all', () => {
     return
   }
   expect(setupError).toBe('')
-  expect(Object.keys(facts).length).toBeGreaterThan(3)
+  expect(Object.keys(facts).length).toBeGreaterThan(6)
 })
 
 // --- window boundaries, >=2 projects, prompt contains the library -----------
@@ -159,4 +159,34 @@ dbTest('zero sessions in the window: completed, zero counters, and no SDK call',
   expect(f.costUsd).toBe(0)
   expect(f.error).toBeNull()
   expect(f.noNewCalls).toBe(true)
+})
+
+// --- a run with no reviewed batch must not read as completed -----------------
+
+dbTest('every review call failing: the run ends failed, not completed with zero suggestions', () => {
+  const f = fact('allReviewCallsFail')
+  expect(f.status).toBe('failed')
+  expect(f.suggestionsCreated).toBe(0)
+  expect(f.duplicatesSkipped).toBe(0)
+  expect(f.errorMentionsReviewFailure).toBe(true)
+})
+
+dbTest('one of two batches failing its review call: still completed, with a note', () => {
+  const f = fact('oneOfTwoBatchesFails')
+  expect(f.status).toBe('completed')
+  expect(f.sessionsAnalyzed).toBe(6)
+  expect(f.suggestionsCreated).toBe(0)
+  expect(f.duplicatesSkipped).toBe(0)
+  expect(f.errorMentionsReviewFailure).toBe(true)
+})
+
+// --- two byte-identical candidates in one batch: caught within the batch ----
+
+dbTest('two byte-identical candidates in the same batch: the second is a duplicate of the first, caught deterministically', () => {
+  const f = fact('withinBatchDuplicate')
+  expect(f.status).toBe('completed')
+  expect(f.suggestionsCreated).toBe(1)
+  expect(f.duplicatesSkipped).toBe(1)
+  expect(f.pendingCount).toBe(1)
+  expect(f.insertedTitle).toBe('Add an echo agent')
 })

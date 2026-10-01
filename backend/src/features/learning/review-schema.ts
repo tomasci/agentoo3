@@ -1,10 +1,12 @@
 // Wire shapes for the two structured-output model calls the engine makes —
 // the per-batch review call and the dedupe judge call (features/learning/
-// engine.ts, dedupe.ts). Both a zod schema (what actually gets trusted — see
-// this round's own brief: "never trust the steer") and a JSON Schema mirror
-// (handed to the SDK as `outputFormat`, a strong hint the model is steered
-// toward, never an enforcement) exist for each, the same split
-// features/ideas/prompt-service.ts already uses for its own answer shape.
+// engine.ts, dedupe.ts). Both a zod schema (what actually gets trusted — a
+// model's output is steered toward `outputJsonSchema` below, never guaranteed
+// to match it, so nothing downstream ever trusts the JSON Schema by itself)
+// and a JSON Schema mirror (handed to the SDK as `outputFormat`, a strong
+// hint the model is steered toward, never an enforcement) exist for each, the
+// same split features/ideas/prompt-service.ts already uses for its own
+// answer shape.
 
 import { z } from 'zod'
 

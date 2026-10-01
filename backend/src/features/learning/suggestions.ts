@@ -200,7 +200,7 @@ export async function getSuggestion(id: string): Promise<LibrarySuggestionDto> {
   return detailFromRow(row)
 }
 
-// --- writing (round 2's own entry point) -------------------------------------
+// --- writing (the learning engine's only entry point for a new suggestion) --
 
 export interface InsertSuggestionInput {
   runId: string | null
@@ -371,9 +371,9 @@ export async function rejectSuggestion(id: string): Promise<LibrarySuggestionDto
 
 /**
  * Hard delete, only once rejected — this is what makes a rejected suggestion
- * "free to be proposed again": the job's own dedupe (round 2) only ever sees
- * rows that still exist, so removing this one is indistinguishable from it
- * never having been proposed at all.
+ * "free to be proposed again": the job's own dedupe (features/learning/
+ * dedupe.ts) only ever sees rows that still exist, so removing this one is
+ * indistinguishable from it never having been proposed at all.
  */
 export async function deleteRejectedSuggestion(id: string): Promise<void> {
   const [row] = await db

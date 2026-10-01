@@ -87,6 +87,14 @@ function successStream(answer: unknown, costUsd = 0.01) {
   })()
 }
 
+/** A review or judge call that failed outright — same shape
+ * tests/learning-dedupe.test.ts's own failureStream uses. */
+function failureStream(subtype = 'error_during_execution', errors: string[] = ['boom']) {
+  return (async function* () {
+    yield { type: 'result', subtype, is_error: true, errors, total_cost_usd: 0.005 }
+  })()
+}
+
 const { eq } = await import('drizzle-orm')
 const { closeDb, db } = await import(`${SRC}/db/client.ts`)
 const { learningRuns, librarySuggestions, messages, projects, sessions } = await import(
@@ -127,6 +135,23 @@ async function newSession(projectId: string, title: string, createdAt: Date): Pr
  * non-null content for this session. */
 async function addPrompt(sessionId: string, text: string): Promise<void> {
   await db.insert(messages).values({ sessionId, seq: 0, type: 'prompt', payload: { text } })
+}
+
+/** `count` operator-prompt rows, each long enough on its own to hit
+ * digest.ts's own DIGEST_ITEM_MAX_CHARS (500) cap — used to pad a session's
+ * digest up near DIGEST_SESSION_MAX_CHARS (12,000) so a handful of these
+ * sessions, packed by features/learning/batching.ts's packBatches, reliably
+ * split across more than one batch under the generous LEARNING_BATCH_CHARS
+ * (60,000) this child's own env sets. */
+async function addManyPrompts(sessionId: string, count: number): Promise<void> {
+  await db.insert(messages).values(
+    Array.from({ length: count }, (_, i) => ({
+      sessionId,
+      seq: i,
+      type: 'prompt' as const,
+      payload: { text: 'x'.repeat(600) },
+    })),
+  )
 }
 
 /** Queues a learning run directly against a real row (createLearningRun's own
@@ -337,12 +362,138 @@ async function zeroSessionsScenario() {
   }
 }
 
+// --- 5. every batch's review call fails: the run must not read as completed
+
+async function allReviewCallsFailScenario() {
+  const project = await newProject('learning-engine-all-fail')
+  const windowEnd = new Date('2026-02-05T04:00:00.000Z')
+  const session = await newSession(project, 'The only session this run ever sees', new Date(windowEnd.getTime() - 60_000))
+  await addPrompt(session, 'Please help with something, anything at all.')
+
+  const runId = await queueRun(windowEnd)
+  responseQueue.push(() => failureStream())
+  await runLearning({ learningRunId: runId })
+
+  const row = await runRow(runId)
+  facts.allReviewCallsFail = {
+    status: row?.status,
+    sessionsAnalyzed: row?.sessionsAnalyzed,
+    suggestionsCreated: row?.suggestionsCreated,
+    duplicatesSkipped: row?.duplicatesSkipped,
+    errorMentionsReviewFailure: (row?.error ?? '').includes('review call failed'),
+  }
+}
+
+// --- 6. one of two batches' review calls fails: completed, with a note ------
+
+async function oneOfTwoBatchesFailsScenario() {
+  const project = await newProject('learning-engine-partial-fail')
+  const windowEnd = new Date('2026-02-06T04:00:00.000Z')
+  const windowStart = windowEnd.getTime() - 24 * 60 * 60 * 1000
+
+  // Six sessions, each padded past DIGEST_SESSION_MAX_CHARS (12,000, digest.ts)
+  // so every digest truncates to exactly that length. Packed by packBatches
+  // (features/learning/batching.ts) against this child's own LEARNING_BATCH_CHARS
+  // (60,000), five of them fit exactly into the first batch (5 * 12,000 =
+  // 60,000, not over the cap) before it closes, leaving the sixth alone in a
+  // second batch — the two-batch split this scenario needs, built entirely
+  // from real fixture data rather than a second env configuration.
+  const sessionIds: string[] = []
+  for (let i = 0; i < 6; i++) {
+    const id = await newSession(project, `Padding session ${i}`, new Date(windowStart + 1000 + i * 1000))
+    await addManyPrompts(id, 24)
+    sessionIds.push(id)
+  }
+
+  const runId = await queueRun(windowEnd)
+  // Batch 1 (5 sessions): the model looked and found nothing.
+  responseQueue.push(() => successStream({ suggestions: [] }, 0.01))
+  // Batch 2 (1 session): the review call itself fails.
+  responseQueue.push(() => failureStream())
+  await runLearning({ learningRunId: runId })
+
+  const row = await runRow(runId)
+  facts.oneOfTwoBatchesFails = {
+    status: row?.status,
+    sessionsAnalyzed: row?.sessionsAnalyzed,
+    suggestionsCreated: row?.suggestionsCreated,
+    duplicatesSkipped: row?.duplicatesSkipped,
+    errorMentionsReviewFailure: (row?.error ?? '').includes('review call failed'),
+  }
+}
+
+// --- 7. two byte-identical candidates in one batch: the deterministic layer
+//        catches the second, the judge only ever sees the first ------------
+
+async function withinBatchDuplicateScenario() {
+  const project = await newProject('learning-engine-batch-dup')
+  const windowEnd = new Date('2026-02-07T04:00:00.000Z')
+  const session = await newSession(project, 'Two sessions worth of the same idea, condensed into one', new Date(windowEnd.getTime() - 60_000))
+  await addPrompt(session, 'Multiple sessions converged on wanting a dedicated echo agent.')
+
+  // A brand new agent name, not anything already in the library snapshot —
+  // keeps this scenario's dedupe entirely about the two candidates below,
+  // with nothing pending/rejected from an earlier scenario able to match it.
+  const proposedBody = {
+    role: 'subagent',
+    team: false,
+    description: 'A new agent two sessions both suggested the same way.',
+    prompt: 'Prompt body shared by both duplicate candidates, word for word.',
+  }
+  const modelProposal = {
+    suggestions: [
+      {
+        kind: 'agent',
+        action: 'create',
+        name: 'echo',
+        title: 'Add an echo agent',
+        rationale: 'Two sessions converged on the same new agent.',
+        sourceSessionIds: [session],
+        proposed: proposedBody,
+      },
+      {
+        // Byte-identical to the candidate above: the model proposing the
+        // same change twice within one answer.
+        kind: 'agent',
+        action: 'create',
+        name: 'echo',
+        title: 'Add an echo agent (duplicate)',
+        rationale: 'Same proposal, seen a second time in this batch.',
+        sourceSessionIds: [session],
+        proposed: proposedBody,
+      },
+    ],
+  }
+
+  const runId = await queueRun(windowEnd)
+  responseQueue.push(() => successStream(modelProposal, 0.02))
+  // Exactly one judge call: the second candidate never reaches it at all —
+  // the deterministic layer already dropped it against the first.
+  responseQueue.push(() =>
+    successStream({ results: [{ candidateIndex: 0, duplicateOfId: null, reason: 'nothing to match' }] }, 0.01),
+  )
+  await runLearning({ learningRunId: runId })
+
+  const row = await runRow(runId)
+  const pending = (await pendingSuggestionsFor('echo')).filter((s) => s.status === 'pending')
+  facts.withinBatchDuplicate = {
+    status: row?.status,
+    suggestionsCreated: row?.suggestionsCreated,
+    duplicatesSkipped: row?.duplicatesSkipped,
+    pendingCount: pending.length,
+    insertedTitle: pending[0]?.title,
+  }
+}
+
 async function main() {
   await mkdir(env.LIBRARY_DIR, { recursive: true })
   await seedLibrary()
   await windowBoundaryScenario()
   await dedupeAndUntouchedFileScenario()
   await zeroSessionsScenario()
+  await allReviewCallsFailScenario()
+  await oneOfTwoBatchesFailsScenario()
+  await withinBatchDuplicateScenario()
   console.log(`__FACTS__${JSON.stringify(facts)}`)
 }
 

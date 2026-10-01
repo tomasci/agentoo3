@@ -1496,7 +1496,8 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
  * Dispatches one job off `sessionRunQueue` by its BullMQ job *name* — `'turn'`
  * (a session turn, enqueueSessionRun) runs exactly as before,
  * `'learning'` (a learning run, enqueueLearningRun in queue/index.ts) runs
- * round 2's own analysis (features/learning/engine.ts's `runLearning`).
+ * the learning job's own analysis (features/learning/engine.ts's
+ * `runLearning`).
  *
  * This single dispatch point, inside the one BullMQ `Worker` this queue has,
  * is what puts a learning run under the identical global concurrency cap a

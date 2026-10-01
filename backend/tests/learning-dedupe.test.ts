@@ -1,8 +1,9 @@
 // features/learning/dedupe.ts: the deterministic layer (free, exact), the
 // judge call (mocked SDK, same style tests/idea-prompt-worker.test.ts already
 // uses for a one-shot structured-output call), honouring the judge's answer,
-// treating an unknown id as null, and failing closed when the judge call
-// itself fails.
+// treating an unknown id as null, failing closed when the judge call itself
+// fails, and — both layers — catching a duplicate within the same batch via
+// the synthetic `candidate:<index>` id.
 
 import { afterEach, expect, mock, test } from 'bun:test'
 import './setup-env'
@@ -106,6 +107,24 @@ test('deterministic: no existing targets at all is never a duplicate', () => {
   expect(isDeterministicDuplicate(candidate(), [])).toBeUndefined()
 })
 
+test('deterministic: an earlier survivor in the same batch (a synthetic `candidate:<index>` target) is caught the same way a database row would be', () => {
+  // engine.ts builds exactly this shape for a batch's own earlier survivors —
+  // the id format is irrelevant to this function, only kind/action/name/
+  // proposedMarkdown are compared, so this proves the within-batch call site
+  // needs no special-casing here.
+  const earlierSurvivor: DedupeTarget = {
+    id: 'candidate:0',
+    kind: 'agent',
+    action: 'modify',
+    name: 'scout',
+    title: 'Clarify scout',
+    rationale: 'Sessions kept asking scout for X',
+    proposedMarkdown: candidate().proposedMarkdown,
+  }
+  const dup = isDeterministicDuplicate(candidate(), [earlierSurvivor])
+  expect(dup?.id).toBe('candidate:0')
+})
+
 // --- the judge call -----------------------------------------------------------
 
 test('no candidates: the judge is not called at all', async () => {
@@ -191,4 +210,59 @@ test('judges independently across multiple candidates', async () => {
   expect(result.ok).toBe(true)
   if (!result.ok) return
   expect(result.duplicateOf).toEqual(['existing-1', null])
+})
+
+// --- the judge call: duplicates within the same batch ------------------------
+
+test('the prompt given to the judge exposes each candidate under its own candidate:<index> id', async () => {
+  turnBehaviour = () => successStream({ results: [] })
+  await judgeDuplicates([candidate({ name: 'scout' }), candidate({ name: 'ranger' })], [])
+  const prompt = queryCalls.at(-1)?.prompt ?? ''
+  expect(prompt).toContain('id=candidate:0')
+  expect(prompt).toContain('id=candidate:1')
+})
+
+test('judge marks a candidate as a duplicate of an earlier candidate in the same list via candidate:<index>', async () => {
+  turnBehaviour = () =>
+    successStream({
+      results: [
+        { candidateIndex: 0, duplicateOfId: null, reason: 'genuinely new' },
+        { candidateIndex: 1, duplicateOfId: 'candidate:0', reason: 'same idea as candidate 0' },
+      ],
+    })
+  const result = await judgeDuplicates(
+    [candidate({ name: 'scout' }), candidate({ name: 'ranger' })],
+    [],
+  )
+  expect(result.ok).toBe(true)
+  if (!result.ok) return
+  expect(result.duplicateOf).toEqual([null, 'candidate:0'])
+})
+
+test('a candidate:<index> pointing forward, or at itself, counts as null — same fail-closed-to-null treatment an unknown id gets', async () => {
+  turnBehaviour = () =>
+    successStream({
+      results: [
+        { candidateIndex: 0, duplicateOfId: 'candidate:1', reason: 'forward reference, invalid' },
+        { candidateIndex: 1, duplicateOfId: 'candidate:1', reason: 'self reference, invalid' },
+      ],
+    })
+  const result = await judgeDuplicates(
+    [candidate({ name: 'scout' }), candidate({ name: 'ranger' })],
+    [],
+  )
+  expect(result.ok).toBe(true)
+  if (!result.ok) return
+  expect(result.duplicateOf).toEqual([null, null])
+})
+
+test('a malformed candidate:<index> id counts as null', async () => {
+  turnBehaviour = () =>
+    successStream({
+      results: [{ candidateIndex: 0, duplicateOfId: 'candidate:not-a-number', reason: 'malformed' }],
+    })
+  const result = await judgeDuplicates([candidate()], [])
+  expect(result.ok).toBe(true)
+  if (!result.ok) return
+  expect(result.duplicateOf).toEqual([null])
 })

@@ -4,8 +4,9 @@
 // library snapshot, the batch's own session ids) and unit-tested
 // (tests/learning-candidates.test.ts); no I/O of its own.
 //
-// This is the second validation stage round 1's own insertSuggestion already
-// documents needing: that function re-validates `proposed` again at insert
+// This is the second validation stage insertSuggestion (features/learning/
+// suggestions.ts) already documents needing: that function re-validates
+// `proposed` again at insert
 // time regardless of what passed here, so the two-stage shape (loose here,
 // strict again right before the write) is deliberate, not redundant — the
 // same "validate at every boundary" rule this project already applies
@@ -53,8 +54,8 @@ export type CandidateResult =
 
 /** Exactly suggestions.ts's own (private) renderProposedMarkdown — kept as a
  * second, small copy rather than an import: that function takes the row
- * shape stored in the database, not a freshly-validated zod body, and this
- * round's engine must never write to LIBRARY_DIR or import anything that
+ * shape stored in the database, not a freshly-validated zod body, and the
+ * learning engine must never write to LIBRARY_DIR or import anything that
  * could tempt it to. */
 export function renderMarkdown(
   kind: 'agent' | 'skill',

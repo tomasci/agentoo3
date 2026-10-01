@@ -666,10 +666,10 @@ restarts the editor and lands the tab back on the workbench.
 A background job reviews every session created in a rolling 24-hour window
 and proposes changes to the shared agent/skill library — the one place craft
 learned in one project can help every other project that uses the same
-agents and skills. Round 1 (the data model, the HTTP API at `/library/learning`
-and `/library/suggestions`, and the admin-configurable schedule setting) is
-described by that API's own OpenAPI docs; this section is round 2 — the
-worker side that actually runs the review.
+agents and skills. The data model, the HTTP API at `/library/learning` and
+`/library/suggestions`, and the admin-configurable schedule setting are
+described by that API's own OpenAPI docs; this section covers the worker
+side — the background job that actually runs the review.
 
 ### It rides the session-run queue, not a queue of its own
 
@@ -780,7 +780,7 @@ and the next run's dedupe pass genuinely has nothing left to compare against.
 The engine never writes to `LIBRARY_DIR`. Every surviving candidate becomes a
 `library_suggestions` row with `status: 'pending'`, through the identical
 `insertSuggestion` entry point a human-curated suggestion would use were
-there one. Applying a suggestion (round 1's own `POST
+there one. Applying a suggestion (`POST
 /library/suggestions/{id}/apply`) is the only path that ever touches a
 library file, and it runs through the same `createAgent`/`updateAgent`/
 `createSkill`/`updateSkill` calls the Library UI's own forms use — so every

@@ -14,8 +14,8 @@ export interface SessionDigest {
  * added to the batch being built if it fits, else that batch closes and a new
  * one starts with this digest. A single digest at or over `maxChars` on its
  * own (digest.ts's own per-session cap bounds how large that can ever get)
- * still becomes a batch of exactly one, rather than being split or dropped —
- * "already capped", per this round's own brief.
+ * still becomes a batch of exactly one, rather than being split or dropped:
+ * there is nothing left to cut once digest.ts has already capped it.
  */
 export function packBatches(digests: SessionDigest[], maxChars: number): SessionDigest[][] {
   const batches: SessionDigest[][] = []

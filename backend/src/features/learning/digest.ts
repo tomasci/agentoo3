@@ -10,8 +10,9 @@
 // review instruction (library/learning-prompt.ts) actually asks about —
 // operator prompts, what the orchestrator (and any subagent) said and did,
 // tool errors, delegation prompts, and how the session ended. Left out on
-// purpose: successful tool *output* (the "bulky tool output" the brief for
-// this round names explicitly), extended thinking, and every bookkeeping
+// purpose: successful tool *output* (the bulky payload a tool call returns —
+// often file contents or command output a model never needs to relitigate
+// once the call already succeeded), extended thinking, and every bookkeeping
 // message type (`stream_event`, `rate_limit_event`, `tool_use_summary`, and
 // every `system` subtype besides `task_started` — `init`, `task_progress`,
 // `task_updated`, `task_notification` all repeat facts this digest gets more
@@ -71,11 +72,11 @@ function addLine(lines: string[], text: string): void {
 const str = (obj: Record<string, unknown>, key: string): string | undefined =>
   typeof obj[key] === 'string' ? (obj[key] as string) : undefined
 
-/** `tool name + the salient input` — see this round's own brief for the exact
- * phrase. A heuristic, not a parser of a fixed tool schema: a tool this
- * installation's library adds later (a new skill's own MCP tool, say) still
- * gets a legible one-liner from whichever of these common field names it
- * happens to carry, rather than nothing until this file is updated for it. */
+/** Produces a one-line `name(salient value)` summary. A heuristic, not a
+ * parser of a fixed tool schema: a tool this installation's library adds
+ * later (a new skill's own MCP tool, say) still gets a legible one-liner from
+ * whichever of these common field names it happens to carry, rather than
+ * nothing until this file is updated for it. */
 function summarizeToolInput(name: string, input: unknown): string {
   const obj = input && typeof input === 'object' ? (input as Record<string, unknown>) : {}
   if (name === 'Task' || name === 'Agent') {
@@ -113,7 +114,7 @@ function toolResultText(content: unknown): string {
  * The digest for one session, or `null` when it has nothing a review call
  * needs to see — an idle session nobody ever sent a prompt to, say. `null`
  * is what lets the engine's own `sessionsAnalyzed` count exactly the sessions
- * actually sent to the model, per this round's brief.
+ * actually sent to the model.
  */
 export function digestSession(
   header: DigestSessionHeader,
@@ -153,8 +154,8 @@ export function digestSession(
       const taskType = str(payload, 'task_type')
       // Only a real delegation — not the CLI's own ambient housekeeping, and
       // not a backgrounded shell command (`local_bash`), which carries no
-      // subagent_type/prompt at all and is not what this round's brief means
-      // by "delegation prompts".
+      // subagent_type/prompt at all and so is not a "delegation prompt" in
+      // the sense this digest cares about.
       if (!ambient && toolUseId && subagentType && taskType !== 'local_bash') {
         tasks.set(toolUseId, subagentType)
         const description = str(payload, 'description') ?? ''

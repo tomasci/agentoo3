@@ -26,8 +26,9 @@ import type { PromptDto, UpdatePromptInput } from './schema'
 
 const KNOWN_PROMPTS: Record<string, { fallback: string }> = {
   'idea-to-prompt': { fallback: IDEA_PROMPT_INSTRUCTION_FALLBACK },
-  // Round 2's session-learning review (features/learning/engine.ts) — see
-  // library/learning-prompt.ts for the loader and the built-in fallback.
+  // The session-learning review's own instruction (features/learning/
+  // engine.ts) — see library/learning-prompt.ts for the loader and the
+  // built-in fallback.
   'session-learning': { fallback: SESSION_LEARNING_INSTRUCTION_FALLBACK },
 }
 

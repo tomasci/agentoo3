@@ -1,9 +1,9 @@
 // Starting and listing learning runs — see db/schema.ts's own comment on
 // learning_runs for why at most one may be queued or running at a time, and
-// backend/README.md for what a run actually does (round 2).
+// backend/README.md for what a run actually does.
 //
 // Kept free of HTTP concerns on purpose: routes.ts is the only caller today,
-// but round 2's own scheduler (the learning-schedule queue/worker) calls
+// but the learning-schedule queue/worker's own scheduler calls
 // createLearningRun directly too, and neither should have to go through Hono
 // to start a run.
 
