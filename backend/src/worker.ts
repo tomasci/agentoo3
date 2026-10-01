@@ -16,6 +16,7 @@ import { startDockerOpWorker } from '@/queue/docker-op.worker'
 import { startEditorOpWorker } from '@/queue/editor-op.worker'
 import { startIdeaHandoffSweepWorker, startIdeaTurnEndedWorker } from '@/queue/idea-handoff.worker'
 import { startIdeaPromptWorker } from '@/queue/idea-prompt.worker'
+import { startLearningScheduleWorker } from '@/queue/learning-schedule.worker'
 import { startProjectSetupWorker } from '@/queue/project-setup.worker'
 import { startSessionRunWorker } from '@/queue/session-run.worker'
 import { reconcileTurns, startTurnReconcileWorker } from '@/queue/turn-reconcile.worker'
@@ -35,6 +36,10 @@ const workers = [
   startIdeaTurnEndedWorker(),
   startDockerOpWorker(),
   startEditorOpWorker(),
+  // Round 2: processes the daily schedule's own trigger job, and runs the
+  // reconcile loop that keeps BullMQ's job scheduler matching the saved
+  // setting — see queue/learning-schedule.worker.ts's own header.
+  startLearningScheduleWorker(),
 ]
 
 // Idempotent — see ensureAttachmentsGcSchedule's own comment — so running it

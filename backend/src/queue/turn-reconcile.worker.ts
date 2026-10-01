@@ -17,6 +17,14 @@
 // reconciler for the same reason the first two share this file — one sweep,
 // one schedule, one place an operator looks for "what silently got stuck".
 //
+// A fourth and fifth predicate are not about a turn or an idea_run at all:
+// round 2's own learning_runs row can be left `running` by a dead worker, or
+// `queued` with a BullMQ job that is gone - either one would block every
+// future learning run forever, because at most one may be queued or running
+// at a time (db/schema.ts's learning_runs_single_active_key). See
+// features/learning/stale.ts for both predicates; they live in their own file
+// for the identical import-boundary reason run-close.ts's own header gives.
+//
 // Two triggers run the same reconciliation, at two different cadences: once
 // at worker boot (backend/src/worker.ts), for whatever piled up while nothing
 // was sweeping at all — most likely because this very process is the one that
@@ -38,6 +46,7 @@ import { db } from '@/db/client'
 import { sanitizeForDb } from '@/db/sanitize'
 import { messages, sessions } from '@/db/schema'
 import { reconcileOrphanedIdeaRuns } from '@/features/ideas/run-close'
+import { reconcileStaleLearningRuns } from '@/features/learning/stale'
 import { logger } from '@/lib/logger'
 import type { TurnReconcileJob } from './index'
 // Imported as a namespace, not destructured — see session-run.worker.ts's own
@@ -168,17 +177,24 @@ export async function reconcileTurns(): Promise<{
   stranded: number
   abandoned: number
   orphanedIdeaRuns: number
+  staleLearningRuns: number
 }> {
   const stranded = await reconcileStrandedTurns()
   const abandoned = await reconcileAbandonedPrompts()
   const orphanedIdeaRuns = await reconcileOrphanedIdeaRuns()
-  if (stranded > 0 || abandoned > 0 || orphanedIdeaRuns > 0) {
+  // Guarded end to end already, inside reconcileStaleLearningRuns itself - see
+  // that module's own header for why a DB/Redis failure there must degrade to
+  // "try again next sweep" rather than take this whole tick down.
+  const learning = await reconcileStaleLearningRuns()
+  const staleLearningRuns = learning.staleHeartbeats + learning.lostJobs
+  if (stranded > 0 || abandoned > 0 || orphanedIdeaRuns > 0 || staleLearningRuns > 0) {
     logger.info(
       `Turn reconciler: recovered ${stranded} stranded turn(s), recorded ${abandoned} abandoned ` +
-        `prompt(s), closed ${orphanedIdeaRuns} idea run(s) whose session was deleted`,
+        `prompt(s), closed ${orphanedIdeaRuns} idea run(s) whose session was deleted, recovered ` +
+        `${staleLearningRuns} stale learning run(s)`,
     )
   }
-  return { stranded, abandoned, orphanedIdeaRuns }
+  return { stranded, abandoned, orphanedIdeaRuns, staleLearningRuns }
 }
 
 export function startTurnReconcileWorker() {

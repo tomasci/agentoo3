@@ -20,11 +20,15 @@ import { ensureDir } from '@/lib/git'
 import { logger } from '@/lib/logger'
 import { PROMPTS_DIR, promptPath } from '@/library'
 import { IDEA_PROMPT_INSTRUCTION_FALLBACK } from '@/library/idea-prompt'
+import { SESSION_LEARNING_INSTRUCTION_FALLBACK } from '@/library/learning-prompt'
 import { checkLibraryName } from '@/library/types'
 import type { PromptDto, UpdatePromptInput } from './schema'
 
 const KNOWN_PROMPTS: Record<string, { fallback: string }> = {
   'idea-to-prompt': { fallback: IDEA_PROMPT_INSTRUCTION_FALLBACK },
+  // Round 2's session-learning review (features/learning/engine.ts) — see
+  // library/learning-prompt.ts for the loader and the built-in fallback.
+  'session-learning': { fallback: SESSION_LEARNING_INSTRUCTION_FALLBACK },
 }
 
 /** A 400 naming the rule beats a 500 from promptPath's path guard. */

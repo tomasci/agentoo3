@@ -12,10 +12,15 @@ export const QUEUE_IDEA_HANDOFF_SWEEP = 'idea-handoff-sweep'
 export const QUEUE_DOCKER_OP = 'docker-op'
 export const QUEUE_EDITOR_OP = 'editor-op'
 // Round 2's own queue: the daily tick that decides *whether* a learning run is
-// due and calls createLearningRun (features/learning/runs.ts) if so. Named
-// here, not constructed here — this round adds no Queue/Worker for it, only
-// the job shape `enqueueLearningRun` below actually uses.
+// due and calls createLearningRun (features/learning/runs.ts) if so. See
+// queue/learning-schedule.worker.ts for the reconcile loop that upserts/
+// removes its one BullMQ job scheduler, and for the trigger job's own
+// processor.
 export const QUEUE_LEARNING_SCHEDULE = 'learning-schedule'
+
+/** The one job scheduler id this queue ever registers — see
+ * queue/learning-schedule.worker.ts's `reconcileLearningSchedule`. */
+export const LEARNING_DAILY_SCHEDULER_ID = 'learning-daily'
 
 export interface ProjectSetupJob {
   projectId: string
@@ -31,6 +36,18 @@ export interface SessionRunJob {
  */
 export interface LearningRunJob {
   learningRunId: string
+}
+
+/**
+ * The job the daily job scheduler produces (name `'trigger'`, on
+ * `learningScheduleQueue` below) — carries nothing beyond `reason`, the same
+ * shape `TurnReconcileJob`/`IdeaHandoffSweepJob` already use for a job whose
+ * entire point is "the schedule ticked", not any payload of its own. The
+ * processor (queue/learning-schedule.worker.ts) reads the *scheduled* fire
+ * time off the job's own BullMQ `opts` (`prevMillis`), not off this type.
+ */
+export interface LearningScheduleTriggerJob {
+  reason: 'scheduled'
 }
 
 export interface AttachmentsGcJob {
@@ -189,6 +206,30 @@ export async function enqueueSessionRun(job: SessionRunJob, opts?: { delayMs?: n
 export async function enqueueLearningRun(job: LearningRunJob) {
   return sessionRunQueue.add('learning', job, { jobId: `learning-${job.learningRunId}` })
 }
+
+/**
+ * The daily schedule's own queue — `concurrency: 1` on its worker
+ * (queue/learning-schedule.worker.ts), since there is only ever one job
+ * scheduler to manage and one trigger to process at a time; nothing about
+ * this queue's cadence has anything to do with `WORKER_CONCURRENCY`, the same
+ * reasoning every other queue here gives for its own independent knob.
+ *
+ * `attempts: 1`: a trigger job's whole body is "read the scheduled time off
+ * this job, then call createLearningRun" — a few small, idempotent-by-
+ * construction reads and one insert that is itself guarded by
+ * learning_runs_single_active_key, nothing a retry would do differently.
+ */
+export const learningScheduleQueue = new Queue<LearningScheduleTriggerJob>(
+  QUEUE_LEARNING_SCHEDULE,
+  {
+    connection: redisConnection(),
+    defaultJobOptions: {
+      attempts: 1,
+      removeOnComplete: { count: 50 },
+      removeOnFail: { count: 50 },
+    },
+  },
+)
 
 // A third queue rather than a second job type on session-run: gc walks the
 // whole storage tree, not one session, and concurrency: 1 below only makes

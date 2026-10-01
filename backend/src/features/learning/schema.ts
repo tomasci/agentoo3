@@ -22,7 +22,8 @@ export const learningRunSchema = z
     sessionsAnalyzed: z.number().int(),
     suggestionsCreated: z.number().int(),
     duplicatesSkipped: z.number().int().openapi({
-      description: 'Proposals the job generated but matched an existing pending suggestion',
+      description:
+        'Proposals the job generated but matched an existing pending or rejected suggestion',
     }),
     costUsd: z.number(),
     error: z.string().nullable(),

@@ -661,6 +661,166 @@ still 502 — and sends it a `303` (`Cache-Control: no-store`) to
 `editorLauncherPath`, the same launcher route the Editor button opens, which
 restarts the editor and lands the tab back on the workbench.
 
+## Session learning
+
+A background job reviews every session created in a rolling 24-hour window
+and proposes changes to the shared agent/skill library — the one place craft
+learned in one project can help every other project that uses the same
+agents and skills. Round 1 (the data model, the HTTP API at `/library/learning`
+and `/library/suggestions`, and the admin-configurable schedule setting) is
+described by that API's own OpenAPI docs; this section is round 2 — the
+worker side that actually runs the review.
+
+### It rides the session-run queue, not a queue of its own
+
+A learning run is enqueued as job name `'learning'` on `sessionRunQueue` —
+the exact queue a session turn's `'turn'` job already runs on — and
+`session-run.worker.ts`'s single `Worker` dispatches on that job name:
+`'learning'` runs the engine (`features/learning/engine.ts`'s `runLearning`),
+anything else runs an ordinary turn. That is deliberate, not incidental: the
+whole point is that a learning run is subject to the identical global
+concurrency cap (`queue/session-concurrency.ts`'s `setGlobalConcurrency`) a
+session turn is, and waits behind running sessions the same way a queued turn
+does. A background review of yesterday's work has no business competing with
+an operator's own session for the handful of concurrent Claude Code slots a
+box affords — it can wait. No separate queue or worker is allowed to execute
+the analysis instead; that would reintroduce exactly the resource contention
+this design avoids.
+
+### The schedule: once a day, worker-applied
+
+The default is 04:00 Europe/Moscow — a fixed UTC+3 with no DST transition
+ever to land that run on the wrong side of (see `DEFAULT_LEARNING_SCHEDULE`'s
+own comment in `features/learning/schedule.ts` for why Moscow specifically,
+among the three UTC+3 candidates the reference point named). An admin can
+change the time, the IANA zone, or disable it entirely from the Library UI;
+that write only ever touches `system_settings` in Postgres. The worker is the
+only thing that ever touches Redis for it: `queue/learning-schedule.worker.ts`
+runs a reconcile loop (tick at boot, then every ~30s) that reads the saved
+schedule and, only when it actually changed since the last successful apply,
+upserts or removes a single BullMQ job scheduler (`'learning-daily'`) on its
+own `learning-schedule` queue — the identical API-writes-DB /
+worker-applies-to-Redis split `queue/session-concurrency.ts`'s own header
+documents for `max_concurrent_sessions`. Upserting never fires an immediate
+run (BullMQ's own job scheduler only does that when asked to with
+`immediately: true`, which this call never passes).
+
+The scheduler's own job (name `'trigger'`) carries no payload of substance —
+its whole point is "the schedule ticked". Its handler's only job is to turn
+that tick into a `learning_runs` row: `windowEnd` is read off the BullMQ job's
+own `opts.prevMillis` (the scheduled occurrence time, in epoch ms — BullMQ
+stamps every job a job scheduler produces with this, verified against the
+installed version's own source), not whenever the worker happened to get
+around to processing the job, which can be much later if it was queued behind
+running sessions. A `timestamp + delay` fallback covers a job that somehow
+lacks that field; asking the current schedule what was last due
+(`latestOccurrenceAtOrBefore`) is the last resort. A scheduled run for a
+`windowEnd` that already has a row is skipped and logged rather than
+duplicated — guards against a redelivered trigger — and a trigger that fires
+while a run is already active (manual or scheduled) gets the same `{conflict}`
+the manual "run now" button would, logged and skipped rather than retried.
+The trigger only creates the row and enqueues it (`createLearningRun`,
+features/learning/runs.ts); the actual analysis is what waits on the
+session-run queue, per the section above.
+
+### The window: sessions *created* in `[windowEnd − 24h, windowEnd)`
+
+`windowEnd` is either the scheduled occurrence above, or — for a manual run —
+the instant the "run now" button was pressed. The window is a session's
+`createdAt`, start inclusive and end exclusive: a session created exactly at
+`windowEnd` belongs to *tomorrow's* run, not this one, and a session created
+exactly at `windowStart` is the oldest one this run will ever see. Sessions
+with nothing worth reading — no operator prompt, no assistant output, no tool
+call, nothing (`features/learning/digest.ts`'s own per-session reduction
+returns null for these) — are skipped, and `sessionsAnalyzed` on the run row
+counts only the sessions whose digest actually reached the model, which can
+be fewer than "everything in the window" if a run budget cutoff
+(`LEARNING_RUN_BUDGET_USD`) stopped it from starting every batch.
+
+### Reads the whole library before it proposes anything
+
+Every agent's and every skill's full current markdown, straight off disk —
+never re-rendered, never a summary — goes into the review call, alongside a
+compact list of the pending and rejected suggestions already on file (so the
+model does not re-propose something already waiting for a human, or already
+declined). That is what lets the model tell "this pattern belongs inside an
+existing agent's remit" from "nothing here covers this yet", and it is also
+why an agent or skill proposal that encodes a fact true of only one project
+is wrong on its face: the library is global, assigned to many projects, and
+this review call sees every one of them in the same pass (see "Agent files
+say nothing about any one project" earlier in this document — the same rule
+the review instruction itself is told to hold every candidate against).
+Session digests are packed into batches under a character budget
+(`features/learning/batching.ts`), each batch becoming one review call; one
+oversized session's digest (already capped by `digest.ts`'s own per-item and
+per-session truncation) gets a batch of its own rather than being split.
+
+### Dedupe is semantic, and fails closed
+
+A model-proposed candidate is checked against every current `pending` and
+`rejected` `library_suggestions` row, plus every candidate this same run has
+already accepted, in two layers. The first is free and exact: the same kind,
+action, target name and byte-identical proposed markdown is an obvious
+duplicate. The second is a dedicated judge call — a second one-shot,
+tool-less model call, structured output, asked only "does this duplicate one
+of these existing items, worded differently or not" — because a real
+duplicate rarely arrives in identical words. If that judge call itself fails
+for any reason (a bad answer, a budget cutoff, the SDK erroring out), the
+engine fails *closed*: nothing from that batch is inserted, and why is
+recorded in the run's own `error` — the alternative, inserting on a dedupe
+check that could not actually run, risks a duplicate reaching a human's
+review queue, which is worse than a candidate simply waiting for the next
+run. A `rejected` suggestion blocks resurfacing the same idea for exactly as
+long as its row exists; deleting it (`DELETE /library/suggestions/{id}`, only
+ever available once rejected) is what the UI calls "free to propose again",
+and the next run's dedupe pass genuinely has nothing left to compare against.
+
+### Suggestions only — nothing changes without a human
+
+The engine never writes to `LIBRARY_DIR`. Every surviving candidate becomes a
+`library_suggestions` row with `status: 'pending'`, through the identical
+`insertSuggestion` entry point a human-curated suggestion would use were
+there one. Applying a suggestion (round 1's own `POST
+/library/suggestions/{id}/apply`) is the only path that ever touches a
+library file, and it runs through the same `createAgent`/`updateAgent`/
+`createSkill`/`updateSkill` calls the Library UI's own forms use — so every
+invariant that already holds for a hand-edited item (path safety, name
+validation, a project's plugin sync on its next read) holds for a
+model-proposed one too. Applying also records a `library_item_versions` row,
+which is what lets a reviewer see exactly what changed and, if it turns out
+wrong, read back what the file said before.
+
+### A stuck run cannot block every future one
+
+At most one `learning_runs` row may be `queued` or `running` at a time
+(`learning_runs_single_active_key`), which is what makes a stuck row
+dangerous: left alone, it would silently block every run after it, scheduled
+or manual, forever. Two independent sweeps guard against that
+(`features/learning/stale.ts`, run at worker boot and on the existing
+turn-reconcile schedule, `queue/turn-reconcile.worker.ts`): a `running` row
+whose heartbeat (touched every ~30s while `runLearning` is actually working,
+mirroring a session turn's own heartbeat) has gone stale for three ticks is
+marked `failed` — the worker holding it almost certainly died mid-run, and
+nothing is re-run, the same "never retry, it already spent money" policy a
+session turn's own recovery follows. A `queued` row whose BullMQ job no
+longer exists, or already settled without the row ever having been claimed,
+is marked `failed` too; a job still legitimately waiting its turn behind
+running sessions is left alone; that is normal, not stuck.
+
+### Everything else about how a run spends money
+
+`LEARNING_MODEL` (unset = the SDK's own default), `LEARNING_MAX_TURNS`,
+`LEARNING_CALL_BUDGET_USD` and `LEARNING_CALL_TIMEOUT_MS` bound one review or
+judge call in isolation, mirroring the Idea Manager's own `IDEA_PROMPT_*`
+knobs for the identical reason: a tool-less, structured-output SDK call,
+nothing like a session turn. `LEARNING_RUN_BUDGET_USD` bounds a whole run,
+summed across every call it makes; once reached, the run stops *starting*
+new calls (whatever it already produced stays) and says so in its own
+`error`, rather than failing outright. `LEARNING_BATCH_CHARS` is the packing
+budget batching.ts packs session digests against. See `.env.example` for
+every default.
+
+
 ## Commands
 
 ```
