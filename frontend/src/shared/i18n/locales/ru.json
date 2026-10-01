@@ -1169,5 +1169,10 @@
         "confirm": "Убрать «{{name}}» из этой идеи?"
       }
     }
+  },
+  "markdownField": {
+    "source": "Исходный Markdown",
+    "showSource": "Редактировать исходный Markdown",
+    "showFormatted": "Вернуться к оформленному виду"
   }
 }

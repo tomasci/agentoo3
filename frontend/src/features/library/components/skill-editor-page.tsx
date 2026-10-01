@@ -3,13 +3,12 @@ import { ArrowLeftIcon, CircleAlertIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
-import { Code, ConfirmDialog, Loading, PageHeader } from '@/shared/components'
+import { Code, ConfirmDialog, Loading, MarkdownField, PageHeader } from '@/shared/components'
 import { Alert, AlertDescription } from '@/shared/ui/alert'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Field, FieldDescription, FieldLabel } from '@/shared/ui/field'
 import { Input } from '@/shared/ui/input'
-import { Textarea } from '@/shared/ui/textarea'
 import { useCreateSkill, useDeleteSkill, useSkill, useUpdateSkill } from '../hooks/use-library'
 
 export function SkillEditorPage({ name }: { name?: string }) {
@@ -101,14 +100,11 @@ export function SkillEditorPage({ name }: { name?: string }) {
       </Card>
 
       <Field>
-        <FieldLabel htmlFor="skill-body">{t('library.skill.body')}</FieldLabel>
-        <Textarea
+        <MarkdownField
           id="skill-body"
-          className="field-sizing-fixed font-mono"
-          rows={20}
+          label={t('library.skill.body')}
           value={draft.body}
-          onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
-          spellCheck={false}
+          onChange={(value) => setDraft((d) => ({ ...d, body: value }))}
         />
         <FieldDescription>{t('library.skill.bodyHint')}</FieldDescription>
       </Field>

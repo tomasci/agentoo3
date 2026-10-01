@@ -43,6 +43,12 @@ export interface MarkdownEditorProps {
   onPasteFiles?: (files: File[]) => void
   placeholder?: string
   'aria-label'?: string
+  /** Default `true` — matches a plain `<textarea>`'s own default, and keeps
+   * the composer (whose prompts are ordinary prose) spellchecked exactly as
+   * before. `MarkdownField` passes `false`: an agent prompt or a skill body
+   * is mostly identifiers and paths, the same reason the raw `Textarea` it
+   * replaces set `spellCheck={false}`. */
+  spellCheck?: boolean
   /** Forwarded to the contenteditable, not this wrapper — `input-group.tsx`'s
    * focus ring keys off `[data-slot=input-group-control]:focus-visible` on
    * the actual focusable control. */
@@ -138,6 +144,7 @@ export function MarkdownEditor({
   onPasteFiles,
   placeholder,
   'aria-label': ariaLabel,
+  spellCheck = true,
   'data-slot': dataSlot,
   initialSelection,
   autoFocus,
@@ -197,9 +204,9 @@ export function MarkdownEditor({
     placeholderExtension(placeholder ?? ''),
     livePreview(),
     EditorView.contentAttributes.of({
-      spellcheck: 'true',
-      autocorrect: 'on',
-      autocapitalize: 'sentences',
+      ...(spellCheck
+        ? { spellcheck: 'true', autocorrect: 'on', autocapitalize: 'sentences' }
+        : { spellcheck: 'false', autocorrect: 'off', autocapitalize: 'off' }),
       ...(ariaLabel ? { 'aria-label': ariaLabel } : {}),
       ...(dataSlot ? { 'data-slot': dataSlot } : {}),
     }),
