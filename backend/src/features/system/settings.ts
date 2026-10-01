@@ -1,18 +1,28 @@
-// The admin-configurable surface backing `/system/settings` — today exactly
-// one key, max_concurrent_sessions, read by both this API process and the
-// worker (queue/session-concurrency.ts polls getMaxConcurrentSessions on a
-// short interval so a save here takes effect without a worker restart).
+// The admin-configurable surface backing `/system/settings` — two keys today:
+// max_concurrent_sessions, read by both this API process and the worker
+// (queue/session-concurrency.ts polls getMaxConcurrentSessions on a short
+// interval so a save here takes effect without a worker restart), and
+// learning_schedule (features/learning/schedule.ts owns its own schema and
+// read/write pair; this file only composes it into the combined DTO below,
+// the same way it will for any future key).
 //
 // "No row for a key" means "use the built-in default" rather than an invalid
 // state — the identical absent-means-default model prompts.ts already uses
 // for a saved prompt file: resetting deletes the row instead of writing the
 // default value back into it, so the default stays one thing (env.ts's own
-// WORKER_CONCURRENCY) rather than a copy of it that could drift.
+// WORKER_CONCURRENCY, or learning/schedule.ts's own DEFAULT_LEARNING_SCHEDULE)
+// rather than a copy of it that could drift.
 
 import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { systemSettings } from '@/db/schema'
 import { env } from '@/env'
+import {
+  DEFAULT_LEARNING_SCHEDULE,
+  getLearningSchedule,
+  nextRunAt as nextLearningRunAt,
+  setLearningSchedule,
+} from '@/features/learning/schedule'
 import { logger } from '@/lib/logger'
 import {
   maxConcurrentSessionsSchema,
@@ -62,11 +72,18 @@ export async function getMaxConcurrentSessions(): Promise<number> {
 
 export async function getSystemSettings(): Promise<SystemSettingsDto> {
   const override = await readMaxConcurrentSessionsOverride()
+  const schedule = await getLearningSchedule()
   return {
     maxConcurrentSessions: {
       value: override ?? env.WORKER_CONCURRENCY,
       source: override === undefined ? 'default' : 'override',
       defaultValue: env.WORKER_CONCURRENCY,
+    },
+    learningSchedule: {
+      value: schedule.value,
+      source: schedule.source,
+      defaultValue: DEFAULT_LEARNING_SCHEDULE,
+      nextRunAt: nextLearningRunAt(schedule.value, new Date())?.toISOString() ?? null,
     },
   }
 }
@@ -102,6 +119,9 @@ export async function updateSystemSettings(
           set: { value, updatedAt: new Date() },
         })
     }
+  }
+  if ('learningSchedule' in body) {
+    await setLearningSchedule(body.learningSchedule)
   }
   return getSystemSettings()
 }

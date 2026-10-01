@@ -217,6 +217,7 @@ mock.module(`${B}/queue/index.ts`, () => ({
   enqueueSessionRun: async () => ({}),
   enqueueAttachmentsGc: async () => ({}),
   ensureAttachmentsGcSchedule: async () => {},
+  enqueueLearningRun: async () => ({}),
 }))
 
 const { exportSession, getSession, sessionExportFileName } = await import(

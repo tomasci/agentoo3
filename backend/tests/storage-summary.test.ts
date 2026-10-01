@@ -102,6 +102,7 @@ mock.module(`${B}/queue/index.ts`, () => ({
   enqueueSessionRun: async () => ({}),
   enqueueAttachmentsGc: async () => ({}),
   ensureAttachmentsGcSchedule: async () => {},
+  enqueueLearningRun: async () => ({}),
 }))
 
 const { storageSummary } = await import(`${B}/features/attachments/service.ts`)

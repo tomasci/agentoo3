@@ -215,6 +215,7 @@ mock.module(`${B}/queue/index.ts`, () => ({
   },
   ensureAttachmentsGcSchedule: async () => {},
   ensureTurnReconcileSchedule: async () => {},
+  enqueueLearningRun: async () => ({}),
 }))
 
 // The event bus is quietened, not replaced outright — forwarded to the real

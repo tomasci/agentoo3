@@ -2,7 +2,7 @@
   "name": "agentoo-backend",
   "private": true,
   "type": "module",
-  "version": "1.2.137",
+  "version": "1.2.138",
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "dev:worker": "bun --watch src/worker.ts",
@@ -23,6 +23,7 @@
     "@hono/zod-openapi": "1.6.1",
     "bullmq": "6.3.4",
     "consola": "3.4.2",
+    "cron-parser": "5.10.0",
     "drizzle-orm": "0.45.2",
     "gray-matter": "4.0.3",
     "hono": "4.13.5",

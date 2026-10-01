@@ -9,6 +9,7 @@
         "@hono/zod-openapi": "1.6.1",
         "bullmq": "6.3.4",
         "consola": "3.4.2",
+        "cron-parser": "5.10.0",
         "drizzle-orm": "0.45.2",
         "gray-matter": "4.0.3",
         "hono": "4.13.5",

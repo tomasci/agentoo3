@@ -235,6 +235,7 @@ mock.module(`${B}/queue/index.ts`, () => ({
   },
   enqueueAttachmentsGc: async () => ({}),
   ensureAttachmentsGcSchedule: async () => {},
+  enqueueLearningRun: async () => ({}),
 }))
 
 // Nothing here may reach Anthropic, a git worktree or the plugin directory.

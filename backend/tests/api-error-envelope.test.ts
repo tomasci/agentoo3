@@ -57,6 +57,7 @@ mock.module(`${B}/queue/index.ts`, () => ({
   enqueueSessionRun: async () => ({}),
   enqueueAttachmentsGc: async () => ({}),
   ensureAttachmentsGcSchedule: async () => {},
+  enqueueLearningRun: async () => ({}),
 }))
 
 const { sessionsRouter } = await import(`${B}/features/sessions/routes.ts`)

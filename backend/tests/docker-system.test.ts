@@ -277,6 +277,8 @@ mock.module(`${B}/queue/index.ts`, () => ({
   enqueueEditorStart: async () => ({}),
   enqueueEditorReap: async () => ({}),
   ensureEditorReapSchedule: async () => {},
+  QUEUE_LEARNING_SCHEDULE: 'learning-schedule',
+  enqueueLearningRun: async () => ({}),
 }))
 
 const { getSystemDockerState, stopSystemContainer } = await import(
