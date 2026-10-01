@@ -1,11 +1,20 @@
-import { z } from 'zod'
+// z comes from @hono/zod-openapi, not plain zod: its .openapi() is an
+// instance-level patch (extendZodWithOpenApi mutates ZodType.prototype as a
+// side effect of importing this module), so a schema built from this file's
+// own z is guaranteed patched by the time its own top-level code runs. Do not
+// call .openapi() on agentRoleSchema itself (built with plain zod in
+// library/types.ts, which the CLI-format loaders also read) — whether that
+// succeeds would depend on which module happened to import
+// '@hono/zod-openapi' first, and this file is now loaded by both the API
+// routes and the worker process, which load things in a different order.
+import { z } from '@hono/zod-openapi'
 import { agentRoleSchema } from '@/library/types'
 
 const effortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max'])
 
 export const agentSchema = z.object({
   name: z.string(),
-  role: agentRoleSchema.openapi({
+  role: z.enum(agentRoleSchema.options).openapi({
     description:
       'orchestrator agents may drive a session and delegate; subagents are only reachable by delegation',
   }),
