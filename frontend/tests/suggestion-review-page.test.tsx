@@ -71,9 +71,18 @@ let detail: ReturnType<typeof modifyDetail> | ReturnType<typeof createDetail> = 
 let applyCalls: { path: { id: string }; body: { expectedCurrentHash: string | null } }[] = []
 /** When set, Apply rejects with it. */
 let applyFailure: unknown = null
+/** How many times the detail GET actually ran — the review page's own
+ *  `useSuggestion(id)` fires it once on mount; a second call right after
+ *  Apply/Reject would mean the fix for the "API error: canceled" warning
+ *  (use-learning.ts's `refetchType: 'none'`) regressed, since that second
+ *  fetch is the one the navigation that follows goes on to cancel. */
+let detailFetchCount = 0
 
 await mockModule('@/shared/api/generated/clients/getApiLibrarySuggestionsId', () => ({
-  getApiLibrarySuggestionsId: async () => ({ data: detail }),
+  getApiLibrarySuggestionsId: async () => {
+    detailFetchCount++
+    return { data: detail }
+  },
 }))
 await mockModule('@/shared/api/generated/clients/postApiLibrarySuggestionsIdApply', () => ({
   postApiLibrarySuggestionsIdApply: async (opts: {
@@ -180,6 +189,7 @@ beforeEach(() => {
   detail = modifyDetail()
   applyCalls = []
   applyFailure = null
+  detailFetchCount = 0
 })
 
 afterEach(async () => {
@@ -284,4 +294,97 @@ test('a create suggestion’s Apply confirms adding the new item to the library'
   expect(text(document.body.querySelector('[role="alertdialog"]'))).toContain(
     'adds the new Skill "release-notes" to the library',
   )
+})
+
+test('a pending stale modify suggestion shows the stale banner', async () => {
+  detail = modifyDetail({ stale: true })
+  await mount()
+  expect(text(main())).toContain('This item changed after the suggestion was made')
+})
+
+test('an applied modify suggestion never shows the stale banner, even if stale is (wrongly) still true', async () => {
+  // The backend is only meant to report `stale: true` for a pending modify —
+  // this pins the UI's own guard in case that ever slips (see use-learning's
+  // own comment), rather than trusting the server never to send it.
+  detail = modifyDetail({
+    status: 'applied',
+    stale: true,
+    appliedVersion: 2,
+    decidedAt: '2026-09-21T04:00:00.000Z',
+  })
+  await mount()
+  expect(text(main())).not.toContain('This item changed after the suggestion was made')
+})
+
+test('a rejected modify suggestion never shows the stale banner', async () => {
+  detail = modifyDetail({ status: 'rejected', stale: true, decidedAt: '2026-09-21T04:00:00.000Z' })
+  await mount()
+  expect(text(main())).not.toContain('This item changed after the suggestion was made')
+})
+
+test('an applied modify suggestion compares the pre-apply version to what was applied, honestly captioned', async () => {
+  detail = modifyDetail({
+    status: 'applied',
+    appliedVersion: 2,
+    decidedAt: '2026-09-21T04:00:00.000Z',
+  })
+  await mount()
+  expect(text(main())).toContain(
+    "Comparing the version this replaced to what was applied — not the item's current content.",
+  )
+  // Still a real diff, from baseMarkdown to proposedMarkdown.
+  expect(main().querySelector('.font-mono')).not.toBeNull()
+  expect(text(main())).not.toContain('applying replaces it')
+})
+
+test('a rejected modify suggestion compares what was proposed, with no apply-related wording', async () => {
+  detail = modifyDetail({ status: 'rejected', decidedAt: '2026-09-21T04:00:00.000Z' })
+  await mount()
+  expect(text(main())).toContain('Comparing the version this was based on to what it proposed.')
+  expect(text(main())).not.toContain('applying replaces it')
+  expect(text(main())).not.toContain('Apply')
+})
+
+test('a pending create suggestion whose name is now taken disables Apply and warns', async () => {
+  detail = createDetail({ targetExists: true })
+  await mount('sug-2')
+  expect(button('Apply').disabled).toBe(true)
+  expect(text(main())).toContain(
+    'A library item named "release-notes" already exists, so this Skill can\'t be created',
+  )
+})
+
+test('a long unchanged run is collapsed behind the correct plural count', async () => {
+  // 89 identical lines after one changed line folds to a hidden run of
+  // 89 - 2*CONTEXT_RADIUS(3) = 83 — the same number the bug report's "Show
+  // 83 unchanged line" came from.
+  const context = Array.from({ length: 89 }, (_, i) => `line ${i}`)
+  const before = ['OLD', ...context].join('\n')
+  const after = ['NEW', ...context].join('\n')
+  detail = modifyDetail({
+    baseMarkdown: `---\nrole: subagent\n---\n${before}`,
+    currentMarkdown: before,
+    proposedMarkdown: `---\nrole: subagent\n---\n${after}`,
+  })
+  await mount()
+
+  const collapseButton = [...main().querySelectorAll('button')].find((b) =>
+    text(b).includes('unchanged'),
+  )
+  expect(collapseButton && text(collapseButton)).toBe('Show 83 unchanged lines')
+})
+
+test('Apply does not start a redundant refetch of the detail query it is about to navigate away from', async () => {
+  detail = modifyDetail()
+  await mount()
+  expect(detailFetchCount).toBe(1)
+
+  await click(button('Apply'))
+  await click(dialogButton('Apply'))
+
+  // Apply's own onSuccess invalidates this same detail query (so a reader
+  // who lands back on this id later gets a fresh fetch) — it must do that
+  // without actively refetching it here, since the page is about to unmount
+  // on the navigate() right below it in the same callback.
+  expect(detailFetchCount).toBe(1)
 })

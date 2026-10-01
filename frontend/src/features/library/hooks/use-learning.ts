@@ -108,8 +108,17 @@ export function useApplySuggestion(id: string) {
     ...postApiLibrarySuggestionsIdApplyMutationOptions(),
     onSuccess: (data: LibrarySuggestion) => {
       invalidateSuggestionLists(queryClient)
+      // `refetchType: 'none'`, not the default `invalidateQueries` refetch:
+      // the caller (the review page) is this query's only observer and is
+      // about to navigate away on this same success callback, so an active
+      // refetch here starts a request that the navigation's unmount aborts a
+      // moment later — a real request, cancelled, logged by the shared axios
+      // interceptor as "API error: canceled" on every Apply. Marking it
+      // invalid (without fetching) still means a reader who lands back on
+      // this id gets a fresh fetch rather than the pre-apply cache entry.
       void queryClient.invalidateQueries({
         queryKey: getApiLibrarySuggestionsIdQueryKey({ path: { id } }),
+        refetchType: 'none',
       })
       // The applied item's own list and version history, so the editor the
       // reader lands on next shows the new version straight away rather than
@@ -140,8 +149,13 @@ export function useRejectSuggestion(id?: string) {
     onSuccess: () => {
       invalidateSuggestionLists(queryClient)
       if (id) {
+        // `refetchType: 'none'` — see the identical comment on
+        // `useApplySuggestion`'s own detail invalidation: the review page is
+        // this query's only observer and navigates away right after reject
+        // succeeds too.
         void queryClient.invalidateQueries({
           queryKey: getApiLibrarySuggestionsIdQueryKey({ path: { id } }),
+          refetchType: 'none',
         })
       }
     },

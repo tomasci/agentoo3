@@ -154,7 +154,18 @@ export function SuggestionReviewPage({ id }: { id: string }) {
 
   const itemRoute = itemRouteFor(suggestion.kind)
   const targetMissing = suggestion.action === 'modify' && suggestion.currentMarkdown === null
-  const canApply = suggestion.status === 'pending' && !targetMissing
+  // 'create': targetExists is false unless the name is now taken — see
+  // LibrarySuggestionSummary's own doc comment.
+  const targetTaken = suggestion.action === 'create' && suggestion.targetExists
+  const canApply = suggestion.status === 'pending' && !targetMissing && !targetTaken
+  const isPendingModify = suggestion.action === 'modify' && suggestion.status === 'pending'
+  // Applied or rejected: the suggestion has already been decided, so the
+  // honest comparison is baseMarkdown (the target's own state at proposal
+  // time) against proposedMarkdown (what was proposed/applied) — not the
+  // live item, which `stale`'s "applying replaces it" wording does not fit
+  // (nothing is about to be applied) and which may since have moved on to
+  // changes this suggestion never touched at all.
+  const isDecidedModify = suggestion.action === 'modify' && suggestion.status !== 'pending'
 
   return (
     <div className="flex flex-col gap-5">
@@ -202,13 +213,27 @@ export function SuggestionReviewPage({ id }: { id: string }) {
         </span>
       </div>
 
-      {targetMissing && (
+      {suggestion.status === 'pending' && targetMissing && (
         <Alert variant="destructive">
           <CircleAlertIcon />
           <AlertDescription>{t('library.suggestions.detail.targetMissingBody')}</AlertDescription>
         </Alert>
       )}
-      {!targetMissing && suggestion.action === 'modify' && suggestion.stale && (
+      {suggestion.status === 'pending' && targetTaken && (
+        <Alert variant="destructive">
+          <CircleAlertIcon />
+          <AlertDescription>
+            {t('library.suggestions.detail.targetTakenBody', {
+              name: suggestion.name,
+              kind: t(`library.suggestions.kind.${suggestion.kind}`),
+            })}
+          </AlertDescription>
+        </Alert>
+      )}
+      {/* `stale` only means something for a suggestion still awaiting a
+          decision — the backend also only reports it true for a pending
+          modify, but this guard holds even if that ever slips. */}
+      {isPendingModify && !targetMissing && suggestion.stale && (
         <Alert>
           <CircleAlertIcon />
           <AlertDescription>{t('library.suggestions.detail.staleBody')}</AlertDescription>
@@ -216,9 +241,27 @@ export function SuggestionReviewPage({ id }: { id: string }) {
       )}
 
       {suggestion.action === 'modify' ? (
-        suggestion.currentMarkdown !== null && (
-          <SuggestionDiff before={suggestion.currentMarkdown} after={suggestion.proposedMarkdown} />
-        )
+        <>
+          {isPendingModify && suggestion.currentMarkdown !== null && (
+            <SuggestionDiff
+              before={suggestion.currentMarkdown}
+              after={suggestion.proposedMarkdown}
+            />
+          )}
+          {isDecidedModify && suggestion.baseMarkdown !== null && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">
+                {suggestion.status === 'applied'
+                  ? t('library.suggestions.detail.diffCaptionApplied')
+                  : t('library.suggestions.detail.diffCaptionRejected')}
+              </p>
+              <SuggestionDiff
+                before={suggestion.baseMarkdown}
+                after={suggestion.proposedMarkdown}
+              />
+            </div>
+          )}
+        </>
       ) : (
         <CreatePreview suggestion={suggestion} />
       )}

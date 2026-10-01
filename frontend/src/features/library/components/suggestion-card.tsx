@@ -48,6 +48,10 @@ export function SuggestionCard({ suggestion, onReject }: SuggestionCardProps) {
             {suggestion.action === 'modify' && !suggestion.targetExists && (
               <StatusBadge tone="danger">{t('library.suggestions.targetMissing')}</StatusBadge>
             )}
+            {/* 'create': targetExists is false unless the name is now taken. */}
+            {suggestion.action === 'create' && suggestion.targetExists && (
+              <StatusBadge tone="danger">{t('library.suggestions.targetTaken')}</StatusBadge>
+            )}
           </div>
         </div>
 

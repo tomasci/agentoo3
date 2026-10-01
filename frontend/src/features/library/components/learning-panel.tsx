@@ -1,13 +1,14 @@
 import { Link } from '@tanstack/react-router'
+import { CircleAlertIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import { DefinitionList, Loading, StatusBadge, toast } from '@/shared/components'
-import { Alert, AlertDescription } from '@/shared/ui/alert'
+import { Alert, AlertDescription, AlertTitle } from '@/shared/ui/alert'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Spinner } from '@/shared/ui/spinner'
 import { useLearningOverview, useRunLearningNow } from '../hooks/use-learning'
-import { formatDateTime } from '../lib/format'
+import { formatDateTime, formatTimezone } from '../lib/format'
 
 /**
  * The Suggested view's own panel: the schedule, a manual "Run learning now",
@@ -42,7 +43,7 @@ export function LearningPanel() {
             {schedule.value.enabled
               ? t('library.learning.scheduleOn', {
                   time: schedule.value.time,
-                  timezone: schedule.value.timezone,
+                  timezone: formatTimezone(schedule.value.timezone),
                 })
               : t('library.learning.scheduleOff')}{' '}
             <Link to="/settings" className="underline underline-offset-4 hover:no-underline">
@@ -87,51 +88,60 @@ export function LearningPanel() {
                 <p className="text-sm text-muted-foreground">{t('library.learning.noRuns')}</p>
               )}
               {lastRun && (
-                <DefinitionList
-                  items={[
-                    {
-                      id: 'when',
-                      term: t('library.learning.lastRunWhen'),
-                      description: formatDateTime(lastRun.finishedAt ?? lastRun.createdAt),
-                    },
-                    {
-                      id: 'sessions',
-                      term: t('library.learning.lastRunSessions'),
-                      description: lastRun.sessionsAnalyzed,
-                    },
-                    {
-                      id: 'created',
-                      term: t('library.learning.lastRunCreated'),
-                      description: lastRun.suggestionsCreated,
-                    },
-                    {
-                      id: 'duplicates',
-                      term: t('library.learning.lastRunDuplicates'),
-                      description: lastRun.duplicatesSkipped,
-                    },
-                    {
-                      id: 'cost',
-                      term: t('library.learning.lastRunCost'),
-                      description: `$${lastRun.costUsd.toFixed(2)}`,
-                    },
-                    ...(lastRun.status === 'failed' && lastRun.error
-                      ? [
-                          {
-                            id: 'error',
-                            term: t('library.learning.lastRunError'),
-                            description: lastRun.error,
-                          },
-                        ]
-                      : []),
-                  ]}
-                />
+                <>
+                  <DefinitionList
+                    items={[
+                      {
+                        id: 'when',
+                        term: t('library.learning.lastRunWhen'),
+                        description: formatDateTime(lastRun.finishedAt ?? lastRun.createdAt),
+                      },
+                      {
+                        id: 'sessions',
+                        term: t('library.learning.lastRunSessions'),
+                        description: lastRun.sessionsAnalyzed,
+                      },
+                      {
+                        id: 'created',
+                        term: t('library.learning.lastRunCreated'),
+                        description: lastRun.suggestionsCreated,
+                      },
+                      {
+                        id: 'duplicates',
+                        term: t('library.learning.lastRunDuplicates'),
+                        description: lastRun.duplicatesSkipped,
+                      },
+                      {
+                        id: 'cost',
+                        term: t('library.learning.lastRunCost'),
+                        description: `$${lastRun.costUsd.toFixed(2)}`,
+                      },
+                    ]}
+                  />
+                  {lastRun.error && (
+                    // `failed` keeps the destructive styling an actual failure
+                    // earns; `completed` can still carry an advisory note (a
+                    // budget cutoff, one batch of a run failing) that is not
+                    // itself a failure, so it gets the same Alert shape
+                    // without the alarming colour.
+                    <Alert variant={lastRun.status === 'failed' ? 'destructive' : 'default'}>
+                      <CircleAlertIcon />
+                      <AlertTitle>
+                        {lastRun.status === 'failed'
+                          ? t('library.learning.lastRunError')
+                          : t('library.learning.lastRunNote')}
+                      </AlertTitle>
+                      <AlertDescription>{lastRun.error}</AlertDescription>
+                    </Alert>
+                  )}
+                </>
               )}
             </div>
 
             {schedule?.nextRunAt && (
               <p className="text-sm text-muted-foreground">
                 {t('library.learning.scheduleNextRun', {
-                  when: new Date(schedule.nextRunAt).toLocaleString(),
+                  when: formatDateTime(schedule.nextRunAt),
                 })}
               </p>
             )}

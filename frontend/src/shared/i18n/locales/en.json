@@ -461,9 +461,10 @@
       "lastRunDuplicates": "Duplicates skipped",
       "lastRunCost": "Cost",
       "lastRunError": "Error",
+      "lastRunNote": "Note",
       "scheduleOn": "Daily at {{time}} ({{timezone}}).",
       "scheduleOff": "Scheduled runs are off.",
-      "scheduleNextRun": "Next run: {{when}}",
+      "scheduleNextRun": "Next run: {{when}} (your local time).",
       "scheduleLink": "Change in Settings",
       "loadFailed": "Could not load the learning status"
     },
@@ -481,6 +482,7 @@
       "rejectFailed": "Could not reject",
       "stale": "Changed since suggested",
       "targetMissing": "Target missing",
+      "targetTaken": "Name already exists",
       "createdAt": "Suggested {{date}}",
       "sourceSessions": "From:",
       "kind": {
@@ -501,6 +503,7 @@
       "table": {
         "kind": "Kind",
         "action": "Action",
+        "title": "Title",
         "rejectedAt": "Rejected"
       },
       "detail": {
@@ -513,11 +516,14 @@
         "applyConfirmCreate": "This adds the new {{kind}} \"{{name}}\" to the library.",
         "applyFailed": "Could not apply",
         "staleBody": "This item changed after the suggestion was made. The diff below is against the current version — applying replaces it.",
+        "diffCaptionApplied": "Comparing the version this replaced to what was applied — not the item's current content.",
+        "diffCaptionRejected": "Comparing the version this was based on to what it proposed.",
         "targetMissingBody": "This suggestion modifies an item that no longer exists, so it cannot be applied.",
+        "targetTakenBody": "A library item named \"{{name}}\" already exists, so this {{kind}} can't be created until the existing one is renamed or removed.",
         "preview": "Preview",
         "rawMarkdown": "Raw markdown",
-        "showUnchanged": "Show {{count}} unchanged line",
-        "showUnchanged_plural": "Show {{count}} unchanged lines",
+        "showUnchanged_one": "Show {{count}} unchanged line",
+        "showUnchanged_other": "Show {{count}} unchanged lines",
         "status": {
           "pending": "Pending",
           "applied": "Applied",

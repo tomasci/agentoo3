@@ -73,8 +73,25 @@ type ActiveRun = {
   finishedAt: string | null
 }
 
+type LastRun = {
+  id: string
+  trigger: 'scheduled' | 'manual'
+  status: 'completed' | 'failed'
+  windowStart: string
+  windowEnd: string
+  sessionsAnalyzed: number
+  suggestionsCreated: number
+  duplicatesSkipped: number
+  costUsd: number
+  error: string | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+}
+
 let suggestions: Suggestion[] = []
 let activeRun: ActiveRun | null = null
+let lastRun: LastRun | null = null
 let runNowCalls = 0
 /** When set, the POST rejects with it instead of starting a run. */
 let runNowFailure: unknown = null
@@ -82,7 +99,7 @@ let runNowFailure: unknown = null
 const OVERVIEW = () => ({
   schedule: { value: { enabled: true, time: '04:00', timezone: 'Europe/Moscow' }, nextRunAt: null },
   activeRun,
-  lastRun: null,
+  lastRun,
   recentRuns: [],
 })
 
@@ -206,6 +223,7 @@ beforeEach(() => {
   problems.length = 0
   suggestions = []
   activeRun = null
+  lastRun = null
   runNowCalls = 0
   runNowFailure = null
 })
@@ -310,4 +328,54 @@ test('a 409 from Run learning now shows the server message as a toast', async ()
   expect(toastTitles()).toContain('A learning run is already queued.')
   expect(runNowCalls).toBe(1)
   expect(problems).toEqual([])
+})
+
+test('a completed run with an advisory note shows it as a non-destructive notice', async () => {
+  lastRun = {
+    id: 'r9',
+    trigger: 'scheduled',
+    status: 'completed',
+    windowStart: '2026-09-19T04:00:00.000Z',
+    windowEnd: '2026-09-20T04:00:00.000Z',
+    sessionsAnalyzed: 12,
+    suggestionsCreated: 3,
+    duplicatesSkipped: 1,
+    costUsd: 0.42,
+    error: 'Stopped early: hit the per-run budget ceiling.',
+    createdAt: '2026-09-20T04:00:00.000Z',
+    startedAt: '2026-09-20T04:00:01.000Z',
+    finishedAt: '2026-09-20T04:05:00.000Z',
+  }
+  await mount()
+
+  const alert = [...main().querySelectorAll('[role="alert"]')].find((el) =>
+    text(el).includes('Stopped early: hit the per-run budget ceiling.'),
+  )
+  expect(alert).toBeDefined()
+  expect(alert?.className).not.toContain('text-destructive')
+})
+
+test('a failed run keeps the destructive styling for its error', async () => {
+  lastRun = {
+    id: 'r9',
+    trigger: 'scheduled',
+    status: 'failed',
+    windowStart: '2026-09-19T04:00:00.000Z',
+    windowEnd: '2026-09-20T04:00:00.000Z',
+    sessionsAnalyzed: 0,
+    suggestionsCreated: 0,
+    duplicatesSkipped: 0,
+    costUsd: 0,
+    error: 'Every batch in this run failed.',
+    createdAt: '2026-09-20T04:00:00.000Z',
+    startedAt: '2026-09-20T04:00:01.000Z',
+    finishedAt: '2026-09-20T04:05:00.000Z',
+  }
+  await mount()
+
+  const alert = [...main().querySelectorAll('[role="alert"]')].find((el) =>
+    text(el).includes('Every batch in this run failed.'),
+  )
+  expect(alert).toBeDefined()
+  expect(alert?.className).toContain('text-destructive')
 })

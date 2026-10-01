@@ -13,6 +13,7 @@
 // see tests/i18n-transcript-parity.test.ts.
 
 import { expect, test } from 'bun:test'
+import i18next from 'i18next'
 import en from '../src/shared/i18n/locales/en.json'
 import ru from '../src/shared/i18n/locales/ru.json'
 
@@ -49,6 +50,7 @@ const NEW_KEYS = [
   'library.learning.lastRunDuplicates',
   'library.learning.lastRunCost',
   'library.learning.lastRunError',
+  'library.learning.lastRunNote',
   'library.learning.scheduleOn',
   'library.learning.scheduleOff',
   'library.learning.scheduleNextRun',
@@ -68,6 +70,7 @@ const NEW_KEYS = [
   'library.suggestions.rejectFailed',
   'library.suggestions.stale',
   'library.suggestions.targetMissing',
+  'library.suggestions.targetTaken',
   'library.suggestions.createdAt',
   'library.suggestions.sourceSessions',
   'library.suggestions.kind.agent',
@@ -83,6 +86,7 @@ const NEW_KEYS = [
   'library.suggestions.deleteFailed',
   'library.suggestions.table.kind',
   'library.suggestions.table.action',
+  'library.suggestions.table.title',
   'library.suggestions.table.rejectedAt',
   'library.suggestions.detail.loadFailed',
   'library.suggestions.detail.apply',
@@ -93,7 +97,10 @@ const NEW_KEYS = [
   'library.suggestions.detail.applyConfirmCreate',
   'library.suggestions.detail.applyFailed',
   'library.suggestions.detail.staleBody',
+  'library.suggestions.detail.diffCaptionApplied',
+  'library.suggestions.detail.diffCaptionRejected',
   'library.suggestions.detail.targetMissingBody',
+  'library.suggestions.detail.targetTakenBody',
   'library.suggestions.detail.preview',
   'library.suggestions.detail.rawMarkdown',
   'library.suggestions.detail.showUnchanged',
@@ -138,6 +145,37 @@ const NEW_KEYS = [
 const placeholders = (value: unknown) =>
   [...String(value).matchAll(/\{\{\s*([\w.]+)\s*(?:,[^}]*)?\}\}/g)].map((m) => m[1]).sort()
 
+/** i18next v26 resolves a key used with `{{count}}` through its CLDR-suffixed
+ *  siblings (`_one`, `_other`, â€¦), not the bare name — a key that has moved
+ *  there (as `showUnchanged` did) no longer exists as that literal property,
+ *  so a check that wants "the string for this key" has to follow the same
+ *  resolution, or it is just checking whether a property that was deliberately
+ *  removed still exists. Only redirects when the bare key is actually gone
+ *  and a `_one` sibling has taken its place — every other NEW_KEYS entry
+ *  still resolves to itself. */
+function resolveKey(bundle: unknown, key: string): string {
+  const parts = key.split('.')
+  const leaf = parts.pop() as string
+  const parent = parts.length ? lookup(bundle, parts.join('.')) : bundle
+  const hasLeaf = parent !== null && typeof parent === 'object' && leaf in (parent as object)
+  const hasOne = parent !== null && typeof parent === 'object' && `${leaf}_one` in (parent as object)
+  return !hasLeaf && hasOne ? `${key}_one` : key
+}
+
+/** The sibling property names actually present for `key`'s leaf in `bundle` —
+ *  the bare leaf (if still there) plus every `leaf_*` suffix — read off the
+ *  key's own parent object rather than assembled by hand, so a stray or
+ *  missing suffix shows up here too. */
+function pluralSiblings(bundle: unknown, key: string): string[] {
+  const parts = key.split('.')
+  const leaf = parts.pop() as string
+  const parent = parts.length ? lookup(bundle, parts.join('.')) : bundle
+  if (parent === null || typeof parent !== 'object') return []
+  return Object.keys(parent as Record<string, unknown>).filter(
+    (k) => k === leaf || k.startsWith(`${leaf}_`),
+  )
+}
+
 test('every new key is a non-empty string in en.json and ru.json', () => {
   const missing: string[] = []
   for (const key of NEW_KEYS) {
@@ -145,7 +183,7 @@ test('every new key is a non-empty string in en.json and ru.json', () => {
       ['en', en],
       ['ru', ru],
     ] as const) {
-      const value = lookup(bundle, key)
+      const value = lookup(bundle, resolveKey(bundle, key))
       if (typeof value !== 'string' || value.trim() === '') missing.push(`${locale}:${key}`)
     }
   }
@@ -154,15 +192,84 @@ test('every new key is a non-empty string in en.json and ru.json', () => {
 
 test('every new string carries the same interpolation placeholders in both locales', () => {
   const mismatched = NEW_KEYS.filter(
-    (key) => placeholders(lookup(en, key)).join() !== placeholders(lookup(ru, key)).join(),
+    (key) =>
+      placeholders(lookup(en, resolveKey(en, key))).join() !==
+      placeholders(lookup(ru, resolveKey(ru, key))).join(),
   )
   expect(mismatched).toEqual([])
 })
 
 test('ru values are not copies of the en ones, and are written in Cyrillic', () => {
-  const copied = NEW_KEYS.filter((key) => lookup(en, key) === lookup(ru, key))
-  const latinOnly = NEW_KEYS.filter((key) => !/[Ѐ-ӿ]/.test(String(lookup(ru, key))))
+  const copied = NEW_KEYS.filter(
+    (key) => lookup(en, resolveKey(en, key)) === lookup(ru, resolveKey(ru, key)),
+  )
+  const latinOnly = NEW_KEYS.filter(
+    (key) => !/[Ѐ-ӿ]/.test(String(lookup(ru, resolveKey(ru, key)))),
+  )
   expect({ copied, latinOnly }).toEqual({ copied: [], latinOnly: [] })
+})
+
+// i18next v26 reads CLDR plural suffixes off a key used with `{{count}}`
+// (`_one`/`_other` for English; Russian also needs `_few`/`_many`) — it does
+// not understand the old v3-style `_plural` suffix at all, so a key written
+// that way (as `showUnchanged_plural` was) silently renders the unsuffixed
+// string for every count, which is how "Show 83 unchanged line" happened.
+const COUNT_KEYS = NEW_KEYS.filter((key) => {
+  const value = lookup(en, resolveKey(en, key))
+  return typeof value === 'string' && /\{\{\s*count\b/.test(value)
+})
+
+test('a counted key never carries the `_plural` suffix i18next v26 ignores', () => {
+  const offenders: string[] = []
+  for (const key of COUNT_KEYS) {
+    const leaf = key.split('.').at(-1) as string
+    for (const [locale, bundle] of [
+      ['en', en],
+      ['ru', ru],
+    ] as const) {
+      if (pluralSiblings(bundle, key).includes(`${leaf}_plural`)) offenders.push(`${locale}:${key}`)
+    }
+  }
+  expect(offenders).toEqual([])
+})
+
+test('a counted key carries every CLDR plural form its locale needs', () => {
+  const missing: string[] = []
+  for (const key of COUNT_KEYS) {
+    const leaf = key.split('.').at(-1) as string
+    const formOf = (name: string) => (name === leaf ? '' : name.slice(leaf.length + 1))
+    const enForms = new Set(pluralSiblings(en, key).map(formOf))
+    const ruForms = new Set(pluralSiblings(ru, key).map(formOf))
+    for (const form of ['one', 'other']) if (!enForms.has(form)) missing.push(`en:${key}_${form}`)
+    for (const form of ['one', 'few', 'many', 'other'])
+      if (!ruForms.has(form)) missing.push(`ru:${key}_${form}`)
+  }
+  // Guards against the audit silently checking nothing if every counted key
+  // were ever removed or renamed out from under COUNT_KEYS's own detection.
+  expect(COUNT_KEYS.length).toBeGreaterThan(0)
+  expect(missing).toEqual([])
+})
+
+// A real i18next instance, not just "the right keys exist" — proves the fix
+// for "Show 83 unchanged line" renders the actual singular/plural text for
+// both the exact counts the bug report named and a couple of Russian's own
+// in-between categories (`_few`/`_many`), not just `_one`/`_other`.
+test('showUnchanged renders the correct singular/plural text for 1 vs 83, in English and Russian', async () => {
+  const probe = i18next.createInstance()
+  await probe.init({
+    lng: 'en',
+    resources: { en: { translation: en }, ru: { translation: ru } },
+    interpolation: { escapeValue: false },
+  })
+  const key = 'library.suggestions.detail.showUnchanged'
+
+  expect(probe.t(key, { count: 1 })).toBe('Show 1 unchanged line')
+  expect(probe.t(key, { count: 83 })).toBe('Show 83 unchanged lines')
+
+  await probe.changeLanguage('ru')
+  expect(probe.t(key, { count: 1 })).toBe('Показать 1 неизменённую строку')
+  expect(probe.t(key, { count: 2 })).toBe('Показать 2 неизменённые строки')
+  expect(probe.t(key, { count: 5 })).toBe('Показать 5 неизменённых строк')
 })
 
 test('the old top-level prompts.title/description/bodyHint are gone — replaced by per-item keys', () => {

@@ -3,18 +3,34 @@ export interface TimezoneOption {
   label: string
 }
 
-/** `Europe/Moscow (UTC+3)` — the offset is what lets a reader place the zone
- *  without knowing the IANA name by heart, same reason the brief singles out
- *  this exact example. Computed from `now` rather than hardcoded: a zone's
- *  offset can change (DST, a government redefining it), so this always
- *  matches what the zone means today. */
-function offsetLabel(zone: string, now: Date): string {
+/** `GMT+3` → `UTC+3` (and bare `GMT` → `UTC±0`) — the offset part shared by
+ *  `offsetLabel` (the picker's own row label) and `zoneWithOffset` (a
+ *  schedule line's inline mention of the same zone), kept as one function so
+ *  the two can never drift apart on how they spell an offset. Computed from
+ *  `now` rather than hardcoded: a zone's offset can change (DST, a
+ *  government redefining it), so this always matches what the zone means
+ *  today. */
+function currentOffset(zone: string, now: Date): string {
   const part = new Intl.DateTimeFormat('en', { timeZone: zone, timeZoneName: 'shortOffset' })
     .formatToParts(now)
     .find((p) => p.type === 'timeZoneName')
-  // "GMT+3" / "GMT" (for UTC itself) — never absent for a valid IANA zone.
   const offset = part?.value.replace('GMT', 'UTC') ?? 'UTC'
-  return `${zone} (${offset === 'UTC' ? 'UTC±0' : offset})`
+  return offset === 'UTC' ? 'UTC±0' : offset
+}
+
+/** `Europe/Moscow (UTC+3)` — the offset is what lets a reader place the zone
+ *  without knowing the IANA name by heart, same reason the brief singles out
+ *  this exact example. */
+function offsetLabel(zone: string, now: Date): string {
+  return `${zone} (${currentOffset(zone, now)})`
+}
+
+/** `Europe/Moscow, UTC+3` — the same offset `offsetLabel` computes for the
+ *  picker, comma-joined instead of bracketed so it reads inline in a
+ *  sentence ("Daily at 04:00 (Europe/Moscow, UTC+3)") rather than as a
+ *  dropdown row. */
+export function zoneWithOffset(zone: string): string {
+  return `${zone}, ${currentOffset(zone, new Date())}`
 }
 
 let cached: TimezoneOption[] | null = null

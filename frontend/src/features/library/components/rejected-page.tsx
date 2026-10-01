@@ -67,8 +67,8 @@ export function RejectedPage() {
         ),
       }),
       column.accessor('title', {
-        header: () => t('library.table.description'),
-        meta: { role: 'secondary', label: t('library.table.description') },
+        header: () => t('library.suggestions.table.title'),
+        meta: { role: 'secondary', label: t('library.suggestions.table.title') },
         cell: (info) => <span className="text-sm text-muted-foreground">{info.getValue()}</span>,
       }),
       column.accessor('decidedAt', {

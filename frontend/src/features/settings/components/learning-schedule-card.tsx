@@ -21,7 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Spinner } from '@/shared/ui/spinner'
 import { Switch } from '@/shared/ui/switch'
 import { useSystemSettings, useUpdateSystemSettings } from '../hooks/use-system-settings'
-import { timezoneOptions } from '../lib/timezones'
+import { timezoneOptions, zoneWithOffset } from '../lib/timezones'
 import {
   type LearningScheduleFormValues,
   learningScheduleFormSchema,
@@ -212,7 +212,7 @@ export function LearningScheduleCard() {
                 {settings.learningSchedule.value.enabled
                   ? t('settings.learningScheduleOn', {
                       time: settings.learningSchedule.value.time,
-                      timezone: settings.learningSchedule.value.timezone,
+                      timezone: zoneWithOffset(settings.learningSchedule.value.timezone),
                     })
                   : t('settings.learningScheduleOff')}
                 <br />
