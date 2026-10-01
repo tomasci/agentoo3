@@ -56,8 +56,8 @@ export function PromptEditorPage({ name }: { name: string }) {
       </Link>
 
       <PageHeader
-        title={t('prompts.title')}
-        description={t('prompts.description')}
+        title={t(`prompts.items.${name}.title`)}
+        description={t(`prompts.items.${name}.description`)}
         actions={
           prompt && (
             <StatusBadge tone={isDefault ? 'neutral' : 'accent'}>
@@ -90,7 +90,7 @@ export function PromptEditorPage({ name }: { name: string }) {
               value={draft}
               onChange={setDraft}
             />
-            <FieldDescription>{t('prompts.bodyHint')}</FieldDescription>
+            <FieldDescription>{t(`prompts.items.${name}.bodyHint`)}</FieldDescription>
           </Field>
 
           {error && (

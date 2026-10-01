@@ -1,7 +1,15 @@
 import { createRootRoute, createRoute, createRouter, Link, redirect } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { DockerSystemPage } from '@/features/docker'
-import { AgentEditorPage, LibraryPage, PromptEditorPage, SkillEditorPage } from '@/features/library'
+import {
+  AgentEditorPage,
+  LibraryPage,
+  PromptEditorPage,
+  RejectedPage,
+  SkillEditorPage,
+  SuggestedPage,
+  SuggestionReviewPage,
+} from '@/features/library'
 import { SessionsDashboardPage } from '@/features/sessions'
 import { SettingsPage } from '@/features/settings'
 import { SshKeysPage } from '@/features/ssh-keys'
@@ -185,6 +193,34 @@ const libraryRoute = createRoute({
   component: LibraryPage,
 })
 
+// The learning feature's three extra list/detail views — real URLs, same as
+// every other page here, registered before `newAgentRoute`/`agentRoute` below
+// so a literal segment like `suggested` can never be shadowed by `$name`
+// (TanStack Router ranks a literal segment over a dynamic one regardless of
+// registration order, but putting the literal routes first keeps that
+// invariant obvious from the file alone, the same reason `new` sits before
+// `$name` for agents/skills).
+const suggestedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/suggested',
+  component: SuggestedPage,
+})
+
+const rejectedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/rejected',
+  component: RejectedPage,
+})
+
+const suggestionReviewRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/library/suggestions/$id',
+  component: function SuggestionReviewRoute() {
+    const { id } = suggestionReviewRoute.useParams()
+    return <SuggestionReviewPage id={id} />
+  },
+})
+
 const newAgentRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/library/agents/new',
@@ -299,6 +335,11 @@ export const routeTree = rootRoute.addChildren([
     ideaDetailRoute,
     projectSettingsRoute,
   ]),
+  // Literal segments before the agents/skills `$name` routes, the same
+  // reason `new` sits before `$name` right below.
+  suggestedRoute,
+  rejectedRoute,
+  suggestionReviewRoute,
   // `new` before `$name`, or "new" would be read as a name.
   newAgentRoute,
   agentRoute,

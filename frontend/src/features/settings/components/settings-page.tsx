@@ -6,6 +6,7 @@ import { themeAtom } from '@/shared/store/ui'
 import { Card, CardContent } from '@/shared/ui/card'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/shared/ui/field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/shared/ui/select'
+import { LearningScheduleCard } from './learning-schedule-card'
 import { SessionLimitCard } from './session-limit-card'
 
 const LANGUAGE_NAMES: Record<string, string> = { en: 'English', ru: 'Русский' }
@@ -98,6 +99,7 @@ export function SettingsPage() {
       </Card>
 
       <SessionLimitCard />
+      <LearningScheduleCard />
     </div>
   )
 }

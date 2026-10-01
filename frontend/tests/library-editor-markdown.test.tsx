@@ -459,7 +459,7 @@ describe('system prompt editor: body field', () => {
     expect(label?.textContent).toBe('prompts.body')
     const field = label?.closest('[data-slot="field"]')
     const hint = field?.querySelector('[data-slot="field-description"]')
-    expect(hint?.textContent).toBe('prompts.bodyHint')
+    expect(hint?.textContent).toBe('prompts.items.idea-to-prompt.bodyHint')
     // Same field as the editor, and after it in document order.
     const editor = cmEditor()
     expect(editor && field?.contains(editor)).toBe(true)

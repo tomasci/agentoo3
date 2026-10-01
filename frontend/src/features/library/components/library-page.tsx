@@ -26,6 +26,7 @@ import {
 } from '../hooks/use-library'
 import { usePrompts } from '../hooks/use-prompts'
 import { KNOWN_PROMPTS } from '../model/prompts'
+import { LibraryTabs } from './library-tabs'
 
 const agentColumn = createColumnHelper<AgentSummary>()
 const skillColumn = createColumnHelper<Skill>()
@@ -269,6 +270,7 @@ export function LibraryPage() {
 
   return (
     <div className="flex flex-col gap-8">
+      <LibraryTabs />
       <p className="text-sm text-muted-foreground">{t('library.intro')}</p>
 
       <div className="flex flex-col gap-3">
