@@ -402,7 +402,7 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
       if (!reviewResult.ok) {
         const note = `Batch of ${batch.length} session(s): review call failed: ${reviewResult.reason}`
         notes.push(note)
-        logger.info(`Learning run ${claimed.id}: ${note}`)
+        logger.warn(`Learning run ${claimed.id}: ${note}`)
         continue
       }
 
@@ -410,7 +410,7 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
       if (!parsedAnswer.success) {
         const note = `Batch of ${batch.length} session(s): review answer did not match the expected shape: ${parsedAnswer.error.message}`
         notes.push(note)
-        logger.info(`Learning run ${claimed.id}: ${note}`)
+        logger.warn(`Learning run ${claimed.id}: ${note}`)
         continue
       }
       anyBatchReviewed = true
@@ -481,7 +481,7 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
         // call itself could not be trusted.
         const note = `Batch of ${batch.length} session(s): dedupe judge call failed, so ${survivorsAfterDeterministic.length} candidate(s) were not inserted: ${judgeResult.reason}`
         notes.push(note)
-        logger.info(`Learning run ${claimed.id}: ${note}`)
+        logger.warn(`Learning run ${claimed.id}: ${note}`)
         continue
       }
 

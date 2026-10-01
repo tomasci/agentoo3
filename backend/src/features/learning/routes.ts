@@ -136,10 +136,29 @@ learningRouter.openapi(
       "For 'modify', expectedCurrentHash must match the live target's current hash — a mismatch " +
       'means the item changed since this was reviewed, and is a 409 rather than silently ' +
       "overwriting it. For 'create', it is ignored.",
-    request: { params: idParam, body: json(applySuggestionSchema, 'The hash last reviewed') },
+    request: {
+      params: idParam,
+      body: {
+        // required: true, unlike the `json()` helper above: without it,
+        // @hono/zod-openapi only validates a body whose content-type is
+        // application/json, and hands the handler `{}` for anything else —
+        // a missing body, or one sent without that header, included. With
+        // expectedCurrentHash then read as `undefined`, the 'modify' hash
+        // check below never matches a real hash, so a client that omitted
+        // the field got a 409 ("changed since you reviewed it") instead of a
+        // 400 naming the field that was actually missing. See
+        // system/routes.ts's identical body shape for the same reason.
+        content: { 'application/json': { schema: applySuggestionSchema } },
+        description: 'The hash last reviewed',
+        required: true,
+      },
+    },
     responses: {
       200: json(librarySuggestionSchema, 'Applied'),
-      400: json(errorSchema, 'The proposed body no longer validates'),
+      400: json(
+        errorSchema,
+        'The proposed body no longer validates, or the request body is missing expectedCurrentHash',
+      ),
       404: json(errorSchema, 'Unknown suggestion'),
       409: json(
         errorSchema,

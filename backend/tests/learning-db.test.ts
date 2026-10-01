@@ -153,6 +153,20 @@ dbTest('getSuggestion detail is not stale right after proposal', () => {
   expect(f.detailStale).toBe(false)
 })
 
+dbTest('apply with no request body 400s naming the missing field, not a stale-hash 409', () => {
+  const f = fact('modify')
+  expect(f.noBodyApplyStatus).toBe(400)
+  expect(f.fileUnchangedAfterNoBodyApply).toBe(true)
+  expect(f.suggestionStillPendingAfterNoBodyApply).toBe('pending')
+})
+
+dbTest('apply with a body missing expectedCurrentHash also 400s, not 409s', () => {
+  const f = fact('modify')
+  expect(f.missingFieldApplyStatus).toBe(400)
+  expect(f.fileUnchangedAfterMissingFieldApply).toBe(true)
+  expect(f.suggestionStillPendingAfterMissingFieldApply).toBe('pending')
+})
+
 dbTest('apply with a stale hash 409s and leaves the file untouched', () => {
   const f = fact('modify')
   expect(f.staleApplyStatus).toBe(409)

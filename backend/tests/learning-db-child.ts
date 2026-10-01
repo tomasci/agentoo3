@@ -70,14 +70,13 @@ const app = createApp()
 
 type Res = { status: number; body: Record<string, unknown> }
 
-async function request(method: string, path: string, body?: unknown): Promise<Res> {
-  const res = await app.request(path, {
-    method,
-    ...(body !== undefined && {
-      body: JSON.stringify(body),
-      headers: { 'content-type': 'application/json' },
-    }),
-  })
+// Shared by `request` below and, for the malformed-apply-body scenarios,
+// callers that need to send a body without the 'content-type: application/json'
+// header `request` always adds — the exact condition that used to let an
+// empty apply body skip validation entirely (see learning/routes.ts's own
+// comment on why that route's body is now `required: true`).
+async function rawRequest(method: string, path: string, init?: RequestInit): Promise<Res> {
+  const res = await app.request(path, { method, ...init })
   const text = await res.text()
   let parsed: unknown = {}
   try {
@@ -86,6 +85,16 @@ async function request(method: string, path: string, body?: unknown): Promise<Re
     parsed = { raw: text }
   }
   return { status: res.status, body: parsed as Record<string, unknown> }
+}
+
+async function request(method: string, path: string, body?: unknown): Promise<Res> {
+  return rawRequest(
+    method,
+    path,
+    body !== undefined
+      ? { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }
+      : undefined,
+  )
 }
 
 async function newProject(name: string): Promise<string> {
@@ -219,6 +228,25 @@ async function modifyScenarios() {
   const summaryList = await request('GET', '/api/library/suggestions?status=pending')
   const detail = await request('GET', `/api/library/suggestions/${suggestion.id}`)
 
+  // A missing apply body, or one that never reaches the schema at all (here:
+  // sent without 'content-type: application/json', so @hono/zod-openapi used
+  // to skip validation and hand the handler `{}`), must 400 naming the
+  // missing field — not fall through to the hash check below as
+  // `expectedCurrentHash: undefined`, which never equals a real hash and
+  // used to read as the same 409 a genuinely stale hash gets. Neither may
+  // write the file or move the suggestion off 'pending'.
+  const applyPath = `/api/library/suggestions/${suggestion.id}/apply`
+  const noBodyApply = await request('POST', applyPath)
+  const markdownAfterNoBodyApply = await readAgentMarkdown('scout')
+  const suggestionAfterNoBodyApply = await request('GET', `/api/library/suggestions/${suggestion.id}`)
+
+  const missingFieldApply = await rawRequest('POST', applyPath, { body: JSON.stringify({}) })
+  const markdownAfterMissingFieldApply = await readAgentMarkdown('scout')
+  const suggestionAfterMissingFieldApply = await request(
+    'GET',
+    `/api/library/suggestions/${suggestion.id}`,
+  )
+
   // Wrong hash: must 409 and leave the file untouched.
   const staleApply = await request('POST', `/api/library/suggestions/${suggestion.id}/apply`, {
     expectedCurrentHash: 'not-the-real-hash',
@@ -282,6 +310,12 @@ async function modifyScenarios() {
     detailTargetExists: detail.body.targetExists,
     detailStale: detail.body.stale,
     detailSourceSessions: detail.body.sourceSessions,
+    noBodyApplyStatus: noBodyApply.status,
+    fileUnchangedAfterNoBodyApply: markdownAfterNoBodyApply === originalMarkdown,
+    suggestionStillPendingAfterNoBodyApply: suggestionAfterNoBodyApply.body.status,
+    missingFieldApplyStatus: missingFieldApply.status,
+    fileUnchangedAfterMissingFieldApply: markdownAfterMissingFieldApply === originalMarkdown,
+    suggestionStillPendingAfterMissingFieldApply: suggestionAfterMissingFieldApply.body.status,
     staleApplyStatus: staleApply.status,
     fileUnchangedAfterStaleApply: markdownAfterStaleApply === originalMarkdown,
     suggestionStillPendingAfterStaleApply: suggestionAfterStaleApply.body.status,
