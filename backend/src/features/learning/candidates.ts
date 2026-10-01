@@ -52,11 +52,11 @@ export type CandidateResult =
   | { ok: true; candidate: ValidatedCandidate }
   | { ok: false; reason: string }
 
-/** Exactly suggestions.ts's own (private) renderProposedMarkdown — kept as a
- * second, small copy rather than an import: that function takes the row
- * shape stored in the database, not a freshly-validated zod body, and the
- * learning engine must never write to LIBRARY_DIR or import anything that
- * could tempt it to. */
+/** Turns an already-parsed proposal body (zod's own output, in the schema's
+ * declared key order) into markdown. The low-level half of
+ * `renderProposalMarkdown` below — kept separate because `validateCandidate`
+ * already has a parsed body in hand from its own schema check and has no
+ * reason to parse `proposed` a second time. */
 export function renderMarkdown(
   kind: 'agent' | 'skill',
   name: string,
@@ -67,6 +67,49 @@ export function renderMarkdown(
   }
   const skill = body as Omit<CreateSkillInput, 'name'>
   return skillToMarkdown(name, skill.description, skill.body)
+}
+
+/**
+ * Renders a suggestion's markdown straight from its raw `proposed` object —
+ * parsing it through the same create schema first, so the result is always
+ * in the schema's own key order, never whatever order the object's own keys
+ * happen to be in. That matters specifically for a `proposed` read back out
+ * of library_suggestions' jsonb column: Postgres's jsonb does not preserve a
+ * stored object's original key order, so rendering straight from the raw row
+ * (as every caller of this function used to do on its own, each slightly
+ * differently) produced markdown whose frontmatter key order silently
+ * disagreed with what applying the suggestion actually wrote — the bytes
+ * `applySuggestion` writes always go through this same parse (via
+ * `suggestions.ts`'s own `validateProposed`), so reparsing here, rather than
+ * trusting the object's own order, is what keeps a preview and a dedupe
+ * comparison byte-identical to the real write. The one place every caller
+ * that only has a raw `proposed` object — never an already-parsed body —
+ * goes through: suggestions.ts's detail view and engine.ts's dedupe targets.
+ *
+ * Throws rather than returning ok:false: every caller of this one is
+ * rendering a suggestion that already exists (inserted through
+ * insertSuggestion, which validated it against this exact schema), so a
+ * parse failure here means something is wrong with already-trusted data, not
+ * an ordinary "the model proposed something invalid" outcome — that case is
+ * `validateCandidate`'s own, on a raw, not-yet-accepted candidate.
+ */
+export function renderProposalMarkdown(
+  kind: 'agent' | 'skill',
+  name: string,
+  proposed: Record<string, unknown>,
+): string {
+  const schema = kind === 'agent' ? createAgentSchema : createSkillSchema
+  const parsed = schema.safeParse({ name, ...proposed })
+  if (!parsed.success) {
+    const detail = parsed.error.issues
+      .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+      .join('; ')
+    throw new Error(
+      `Cannot render ${kind} "${name}": stored proposal no longer validates: ${detail}`,
+    )
+  }
+  const { name: _name, ...body } = parsed.data
+  return renderMarkdown(kind, name, body)
 }
 
 /**

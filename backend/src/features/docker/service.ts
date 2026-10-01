@@ -1,9 +1,8 @@
 // Orchestration: everything routes.ts calls. Reads (this file's read-only
 // exports) run inline, bounded by DOCKER_READ_TIMEOUT_MS deep in cli.ts; every
 // mutation is built here but *dispatched* to the worker (queue/docker-op.worker.ts)
-// — a build or container start can run far longer than an HTTP request's own
-// timeout should tolerate, so it is enqueued and the caller polls or streams
-// the operation's own status instead of blocking on it.
+// — see the brief's "execution split" for why `compose up -d --build` cannot
+// run inside an HTTP request.
 //
 // Every read and write below resolves a `DockerScope` first (see scope.ts) —
 // the project's own repo/ checkout, or one session's independent worktree —
@@ -68,9 +67,9 @@ import { resolveDockerScope } from './scope'
  * like GET /projects/{id}/docker, which never uses this cache (its own daemon
  * reads dominate the cost of a fresh `stat` anyway).
  *
- * Repo scope only, deliberately: per-scope detection for every session's
- * worktree is out of scope for this feature — this cache, and this endpoint,
- * answer for the project's own repo/ checkout alone.
+ * Repo scope only, deliberately — per-scope detection for every session's
+ * worktree is out of scope for this feature (see the brief): this cache, and
+ * this endpoint, answer for the project's own repo/ checkout alone.
  */
 const DETECT_TTL_MS = 10_000
 const detectionCache = new Map<string, { at: number; value: Detection }>()
@@ -268,8 +267,8 @@ export async function getDockerOperation(
 }
 
 /** What a Dockerfile-mode `up` runs with, resolved before dispatch — never
- * guessed at silently: a port neither EXPOSE nor the built image declares is
- * a 400 naming the field the UI should ask for. */
+ * guessed at silently, per the brief: a port neither EXPOSE nor the built
+ * image declares is a 400 naming the field the UI should ask for. */
 async function resolveRunPort(
   scope: DockerScope,
   dockerfileAbsPath: string,
@@ -341,8 +340,8 @@ async function requestOperation(
     throw badRequest('No Dockerfile or compose file detected in this project')
   }
 
-  // A judgment call made here, not given by any spec: a project can have both
-  // a compose file and a standalone Dockerfile (compose services often build
+  // Decided here, not specified by the brief: a project can have both a
+  // compose file and a standalone Dockerfile (compose services often build
   // from one), and compose is the more complete definition of "how this
   // project runs" — so it takes precedence whenever both are present.
   const mode: 'compose' | 'dockerfile' = detection.hasCompose ? 'compose' : 'dockerfile'

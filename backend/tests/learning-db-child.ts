@@ -238,6 +238,43 @@ async function modifyScenarios() {
     expectedCurrentHash: (detail.body as { currentHash: string }).currentHash,
   })
 
+  // Item 3 in the defect log: an *applied* modify must never read as stale
+  // just because applying it is exactly what made baseMarkdown (the old
+  // content) disagree with the now-current file — that disagreement is the
+  // suggestion having done its job, not drift to warn anyone about.
+  const detailAfterApply = await request('GET', `/api/library/suggestions/${suggestion.id}`)
+
+  // A *rejected* suggestion must report stale:false too, regardless of how
+  // far its own baseMarkdown has drifted from whatever is on disk now — its
+  // own history is fixed once decided.
+  await createAgent({
+    name: 'helper',
+    role: 'subagent',
+    team: true,
+    description: 'Helper agent for the reject/stale scenario',
+    prompt: 'Helper original prompt.',
+  })
+  const rejectedSuggestion = await insertSuggestion({
+    runId: null,
+    kind: 'agent',
+    action: 'modify',
+    name: 'helper',
+    title: 'A change nobody wanted',
+    rationale: 'r',
+    sourceSessionIds: [],
+    proposed: {
+      role: 'subagent',
+      team: true,
+      description: 'Helper agent for the reject/stale scenario',
+      prompt: 'Helper rejected prompt.',
+    },
+    // Deliberately not the real on-disk content — stale:false must hold
+    // regardless, once this row is rejected.
+    baseMarkdown: 'this will never match whatever is actually on disk',
+  })
+  const rejectResponse = await request('POST', `/api/library/suggestions/${rejectedSuggestion.id}/reject`)
+  const rejectedDetail = await request('GET', `/api/library/suggestions/${rejectedSuggestion.id}`)
+
   facts.modify = {
     summaryListLength: (summaryList.body as unknown[]).length,
     summaryEntry: (summaryList.body as Record<string, unknown>[])[0],
@@ -257,6 +294,11 @@ async function modifyScenarios() {
     versionsCount: (versions.body as unknown[]).length,
     versions: versions.body,
     reapplyStatus: reapply.status,
+    detailAfterApplyStatus: detailAfterApply.body.status,
+    detailAfterApplyStale: detailAfterApply.body.stale,
+    rejectResponseStatus: rejectResponse.status,
+    rejectedDetailStatus: rejectedDetail.body.status,
+    rejectedDetailStale: rejectedDetail.body.stale,
   }
 }
 

@@ -1,7 +1,7 @@
-// Orchestration: DB metadata plus the storage module, kept to exactly one
-// ordering rule — bytes first, then the row, then the manifest. storage.ts
-// never touches Postgres and never decides a quota; this is the only place
-// that does both.
+// Orchestration: DB metadata plus the storage module, kept to exactly the
+// rule the brief for this feature states — bytes first, then the row, then
+// the manifest. storage.ts never touches Postgres and never decides a quota;
+// this is the only place that does both.
 
 import { and, desc, eq, inArray, isNotNull, isNull, sql, sum } from 'drizzle-orm'
 import { db } from '@/db/client'

@@ -103,9 +103,12 @@ export type JudgeResult =
 /**
  * Calls the judge once for the whole batch of surviving candidates. Returns
  * `duplicateOf[i]` for each candidate — the existing item's id it duplicates,
- * or null — in the same order as `candidates`. An index the judge did not
- * mention at all is treated as null (not a duplicate): the judge's job is to
- * flag matches, and silence about a candidate is not evidence either way.
+ * or null — in the same order as `candidates`. Fails closed (`ok: false`,
+ * nothing from this batch gets inserted) unless the judge gave exactly one
+ * verdict for every candidate: a candidate it never mentioned is unchecked,
+ * not "the judge looked and found nothing" — silence is not evidence either
+ * way, and treating it as "not a duplicate" is indistinguishable from never
+ * having run the judge at all for that one candidate.
  */
 export async function judgeDuplicates(
   candidates: ValidatedCandidate[],
@@ -140,13 +143,26 @@ export async function judgeDuplicates(
   // cannot identify".
   const existingIds = new Set(existing.map((e) => e.id))
   const duplicateOf: (string | null)[] = candidates.map(() => null)
+  // Which candidate indexes actually got a verdict — a duplicate or
+  // out-of-range `candidateIndex` in the judge's answer must not quietly
+  // stand in for the one it really owed a verdict to.
+  const verdictGiven = new Set<number>()
   for (const entry of parsed.data.results) {
     if (entry.candidateIndex < 0 || entry.candidateIndex >= candidates.length) continue
+    verdictGiven.add(entry.candidateIndex)
     duplicateOf[entry.candidateIndex] = resolveDuplicateOfId(
       entry.duplicateOfId,
       entry.candidateIndex,
       existingIds,
     )
+  }
+  const unjudged = candidates.map((_, i) => i).filter((i) => !verdictGiven.has(i))
+  if (unjudged.length > 0) {
+    return {
+      ok: false,
+      reason: `judge gave no verdict for candidate(s) ${unjudged.join(', ')} of ${candidates.length}`,
+      costUsd: result.costUsd,
+    }
   }
   return { ok: true, duplicateOf, costUsd: result.costUsd }
 }

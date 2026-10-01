@@ -64,7 +64,17 @@ export async function createLearningRun(args: {
   try {
     const [inserted] = await db
       .insert(learningRuns)
-      .values({ trigger: args.trigger, windowStart, windowEnd: args.windowEnd })
+      .values({
+        trigger: args.trigger,
+        windowStart,
+        windowEnd: args.windowEnd,
+        // Same statement as the row's own creation, not a follow-up UPDATE —
+        // see this column's own comment on learningRuns (db/schema.ts) for why
+        // the lack of a gap is the whole point: features/learning/stale.ts's
+        // recovery sweep needs to see this already set on the very first
+        // query that could possibly observe the row at all.
+        enqueueAttemptedAt: new Date(),
+      })
       .returning()
     if (!inserted) throw new Error('Insert returned no row')
     row = inserted
@@ -82,7 +92,6 @@ export async function createLearningRun(args: {
 
   try {
     await enqueueLearningRun({ learningRunId: row.id })
-    return { run: toLearningRunDto(row) }
   } catch (error) {
     // The row must not block every future run forever just because this one
     // instant of enqueueing failed (Redis unreachable, most likely) — mark it
@@ -100,6 +109,23 @@ export async function createLearningRun(args: {
       ),
     }
   }
+
+  // Confirms the enqueue actually succeeded — see `enqueuedAt`'s own comment
+  // on learningRuns (db/schema.ts) for why features/learning/stale.ts's sweep
+  // wants to know this, separately from merely having been attempted.
+  // Best-effort: this row is already correctly queued regardless of whether
+  // this one bookkeeping update lands, so a failure here is logged and
+  // swallowed rather than turned into a failed run over a successful enqueue
+  // — the sweep just falls back to its own grace period instead of
+  // recognising a later-lost job immediately.
+  await db
+    .update(learningRuns)
+    .set({ enqueuedAt: new Date() })
+    .where(eq(learningRuns.id, row.id))
+    .catch((error) => {
+      logger.warn(`Learning run ${row.id}: could not record enqueuedAt: ${String(error)}`)
+    })
+  return { run: toLearningRunDto(row) }
 }
 
 export interface LearningOverview {

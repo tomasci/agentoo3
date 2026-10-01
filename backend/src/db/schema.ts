@@ -780,6 +780,27 @@ export const learningRuns = pgTable(
     duplicatesSkipped: integer('duplicates_skipped').notNull().default(0),
     costUsd: doublePrecision('cost_usd').notNull().default(0),
     error: text('error'),
+    // Together, these two let features/learning/stale.ts's reconcileLostJobs
+    // tell three situations with the same surface shape ('queued', BullMQ job
+    // missing) apart, which plain `createdAt` cannot: a row whose enqueue was
+    // never even attempted (only reachable by a row inserted some other way
+    // than createLearningRun — today, only a test fixture) is lost
+    // immediately; a row whose enqueue call already confirmed success is also
+    // lost immediately the moment its job disappears (nothing to race against
+    // any more — the job existed and is now gone, full stop); only a row in
+    // between — an attempt recorded, no confirmation yet — gets a grace
+    // period, for the gap between createLearningRun's own INSERT and its
+    // enqueue call actually reaching Redis (a concurrent sweep could land in
+    // that exact gap) or, further out, a worker that crashed inside it.
+    //
+    // Set once, in the exact same INSERT that creates the row — never by
+    // anything else — so there is no gap in which a concurrent sweep could
+    // observe the row at all without this already being set.
+    enqueueAttemptedAt: timestamp('enqueue_attempted_at', { withTimezone: true }),
+    // Set by a follow-up UPDATE, only once `enqueueLearningRun` itself has
+    // returned successfully — i.e. only once BullMQ has actually confirmed
+    // the job exists. Never unset again.
+    enqueuedAt: timestamp('enqueued_at', { withTimezone: true }),
     // The learning run's own liveness signal, mirroring sessions.heartbeatAt
     // — nothing reads it yet, but the column belongs on the row that will
     // need it, not bolted on by a later migration.

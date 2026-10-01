@@ -182,6 +182,21 @@ dbTest('re-applying an already-applied suggestion 409s', () => {
   expect(fact('modify').reapplyStatus).toBe(409)
 })
 
+// Item 3 in the defect log: stale only ever means "a pending modify whose
+// target has drifted since" — never an applied or rejected one.
+dbTest('an applied suggestion never reads as stale, even though applying it is what moved the file away from baseMarkdown', () => {
+  const f = fact('modify')
+  expect(f.detailAfterApplyStatus).toBe('applied')
+  expect(f.detailAfterApplyStale).toBe(false)
+})
+
+dbTest('a rejected suggestion reads as stale:false regardless of how far its baseMarkdown has drifted from disk', () => {
+  const f = fact('modify')
+  expect(f.rejectResponseStatus).toBe(200)
+  expect(f.rejectedDetailStatus).toBe('rejected')
+  expect(f.rejectedDetailStale).toBe(false)
+})
+
 // --- 4. apply-create: new skill, version 1, 409 if the name is now taken ---
 
 dbTest('apply-create writes the new skill and records version 1', () => {

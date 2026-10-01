@@ -563,10 +563,10 @@ async function lastResultDigest(sessionId: string, rootMessageId: string): Promi
 /**
  * The turn_outcome -> (idea_run outcome, board move, lastError) mapping this
  * whole track exists to implement. `ideaStatus` is only ever set for
- * `completed`: every other outcome leaves `ideaStatus` unset, which this
- * reads as leaving the card exactly where it already sits — including
- * wherever a human may have dragged it in the meantime — rather than
- * reasserting `in_progress_dev` over that. A closed switch, not a
+ * `completed`: every other outcome "stays" exactly where the brief's own
+ * table says, which this reads as leaving the card wherever it already is —
+ * including wherever a human may have dragged it in the meantime — rather
+ * than this reasserting `in_progress_dev` over that. A closed switch, not a
  * `default`, on purpose: `turnOutcomeEnum` (db/schema.ts) is deliberately
  * exhaustive so a future outcome added there fails this file to compile
  * instead of silently landing on `needs_attention` by accident of it being

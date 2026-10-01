@@ -197,6 +197,16 @@ export function nextRunAt(schedule: LearningSchedule, now: Date): Date | null {
  * practice this only matters for a schedule time chosen to land inside some
  * zone's one-hour DST gap, which an operator picking a time like 04:00 is
  * never going to do by accident.
+ *
+ * A *repeated* (fall-back DST) local hour is the opposite failure, and this
+ * one is not left alone: cron-parser's `.prev()` searches backward day by
+ * day, and on a day whose scheduled wall-clock time occurs twice, that
+ * search lands on the *second* reading — but `nextRunAt`'s forward search
+ * (and BullMQ's own scheduler, built on the same cron-parser) always fires
+ * on the *first*. Returning the second would claim a run's window ended at
+ * an instant the schedule never actually fired at. `reanchorToForwardSearch`
+ * below corrects this by re-deriving the occurrence with a forward search
+ * instead of trusting `.prev()`'s own answer.
  */
 export function latestOccurrenceAtOrBefore(schedule: LearningSchedule, at: Date): Date | null {
   if (!schedule.enabled) return null
@@ -204,5 +214,30 @@ export function latestOccurrenceAtOrBefore(schedule: LearningSchedule, at: Date)
     currentDate: new Date(at.getTime() + 1),
     tz: schedule.timezone,
   })
-  return interval.prev().toDate()
+  return reanchorToForwardSearch(schedule, interval.prev().toDate())
+}
+
+/** 3h: comfortably longer than any real DST shift (at most a couple of
+ * hours, anywhere) so re-deriving across one never lands before the
+ * occurrence we are correcting, yet comfortably shorter than the ~23–25h
+ * between any two consecutive daily occurrences (even across a DST day) so
+ * it can never accidentally cross into the previous day's occurrence. */
+const REANCHOR_MARGIN_MS = 3 * 60 * 60 * 1000
+
+/**
+ * Re-derives `candidate` (a `.prev()` result) with a forward search anchored
+ * shortly before it, so an occurrence that `.prev()` found via the *second*
+ * reading of a repeated local hour comes back as the *first* reading
+ * instead — the one `nextRunAt` (and BullMQ) actually fire on. On an
+ * ordinary, unambiguous day this just re-finds the same instant: there is
+ * nothing else for the forward search to land on between the anchor and
+ * `candidate`.
+ */
+function reanchorToForwardSearch(schedule: LearningSchedule, candidate: Date): Date {
+  const reanchored = nextRunAt(schedule, new Date(candidate.getTime() - REANCHOR_MARGIN_MS))
+  // `schedule.enabled` is already known true here (the only caller checks it
+  // first), so `nextRunAt` cannot return null — the fallback is just a
+  // defensive floor in case some future zone's DST delta ever exceeded
+  // REANCHOR_MARGIN_MS, rather than ever returning an instant after `at`.
+  return reanchored && reanchored.getTime() <= candidate.getTime() ? reanchored : candidate
 }

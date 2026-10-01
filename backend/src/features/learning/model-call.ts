@@ -58,6 +58,23 @@ function describeNonSuccess(result: ResultMessage): string {
   return `Generation ended in ${r.subtype}: ${detail}`
 }
 
+/**
+ * A `subtype: 'success'` result the SDK still flagged `is_error: true` —
+ * seen in practice for an invalid credential, where the SDK reports
+ * `result: "Failed to authenticate. API Error: 401 Invalid bearer token"`
+ * rather than a thrown exception or a non-'success' subtype. `result` is
+ * already a human-readable sentence in this shape, so it is returned as-is
+ * rather than wrapped in this module's own commentary — both the ordinary
+ * return path and the catch block below (which used to skip this check
+ * entirely and try to JSON.parse `result` as if it were the model's answer,
+ * reporting a confusing "not valid JSON" failure instead of the real one)
+ * go through this one function, so a credential problem reads identically
+ * whichever path the SDK happens to route it through.
+ */
+function describeApiError(result: ResultMessage): string {
+  return (result as unknown as { result?: string }).result || 'no detail given'
+}
+
 export async function runOneShotQuery(args: {
   systemPrompt: string
   prompt: string
@@ -111,8 +128,7 @@ export async function runOneShotQuery(args: {
       return { ok: false, reason: describeNonSuccess(lastResult), costUsd }
     }
     if ((lastResult as unknown as { is_error?: boolean }).is_error) {
-      const text = (lastResult as unknown as { result?: string }).result || 'no detail given'
-      return { ok: false, reason: `Generation ended in an API error: ${text}`, costUsd }
+      return { ok: false, reason: describeApiError(lastResult), costUsd }
     }
 
     let parsed: unknown
@@ -143,6 +159,9 @@ export async function runOneShotQuery(args: {
       // already having delivered a perfectly good result message.
       if (lastResult.subtype !== 'success')
         return { ok: false, reason: describeNonSuccess(lastResult), costUsd }
+      if ((lastResult as unknown as { is_error?: boolean }).is_error) {
+        return { ok: false, reason: describeApiError(lastResult), costUsd }
+      }
       try {
         const parsed = JSON.parse((lastResult as unknown as { result: string }).result)
         return { ok: true, data: parsed, costUsd }

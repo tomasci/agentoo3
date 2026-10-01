@@ -190,3 +190,15 @@ dbTest('two byte-identical candidates in the same batch: the second is a duplica
   expect(f.pendingCount).toBe(1)
   expect(f.insertedTitle).toBe('Add an echo agent')
 })
+
+// --- runLearning logs a concise trail (item 9 in the defect log) -----------
+
+dbTest('a run logs claimed, window/digest/batch counts, each batch\'s outcome, and the finish', () => {
+  const f = fact('logging')
+  expect(f.status).toBe('completed')
+  expect(f.sawClaimed).toBe(true)
+  expect(f.sawWindowCounts).toBe(true)
+  expect(f.sawBatchCount).toBe(true)
+  expect(f.sawBatchOutcome).toBe(true)
+  expect(f.sawFinish).toBe(true)
+})

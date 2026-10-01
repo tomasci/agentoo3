@@ -63,6 +63,19 @@ async function reconcileHeartbeats(now: Date): Promise<number> {
 }
 
 /**
+ * How long a `queued` row whose enqueue was *attempted* but never
+ * *confirmed* (`enqueueAttemptedAt`/`enqueuedAt` — db/schema.ts's own
+ * comment on learningRuns) gets before a still-missing job counts as lost,
+ * rather than createLearningRun's own insert-then-enqueue
+ * (features/learning/runs.ts) still being in flight, or a worker that
+ * crashed partway through it. Comfortably longer than any ordinary enqueue
+ * (a single Redis round trip) ever needs, short enough that a genuine crash
+ * still clears within a couple of sweep cycles. Never consulted for a row
+ * whose enqueue already confirmed success — see the branch below.
+ */
+const QUEUED_GRACE_MS = 120_000
+
+/**
  * A `queued` learning run whose BullMQ job (`learning-<runId>` on
  * `sessionRunQueue` — see queue/index.ts's `enqueueLearningRun`) no longer
  * exists, or has already settled (`completed`/`failed`) without the run row
@@ -71,10 +84,14 @@ async function reconcileHeartbeats(now: Date): Promise<number> {
  * run can sit behind running sessions for a long time before its turn comes,
  * exactly as this feature's own README section describes.
  */
-async function reconcileLostJobs(): Promise<number> {
+async function reconcileLostJobs(now: Date): Promise<number> {
   try {
     const rows = await db
-      .select({ id: learningRuns.id })
+      .select({
+        id: learningRuns.id,
+        enqueueAttemptedAt: learningRuns.enqueueAttemptedAt,
+        enqueuedAt: learningRuns.enqueuedAt,
+      })
       .from(learningRuns)
       .where(eq(learningRuns.status, 'queued'))
 
@@ -84,7 +101,26 @@ async function reconcileLostJobs(): Promise<number> {
       try {
         const job = await sessionRunQueue.getJob(`learning-${row.id}`)
         if (!job) {
-          lost = true
+          if (row.enqueuedAt !== null) {
+            // The enqueue call itself already confirmed the job existed at
+            // some point — there is nothing left to race against, so its
+            // absence now is unambiguous: something removed it, or it ran
+            // and was never cleaned up oddly enough to still read 'queued'.
+            // Either way, lost, immediately, with no grace period to wait out.
+            lost = true
+          } else if (row.enqueueAttemptedAt === null) {
+            // No record of an enqueue attempt at all — only reachable by a
+            // row inserted some other way than createLearningRun (see that
+            // column's own comment) — means there is nothing to race against
+            // either: lost, immediately.
+            lost = true
+          } else {
+            // An attempt is recorded but not yet confirmed: this might be
+            // createLearningRun's own insert-then-enqueue gap, or a crashed
+            // worker that never got as far as confirming — give it
+            // QUEUED_GRACE_MS before deciding which.
+            lost = now.getTime() - row.enqueueAttemptedAt.getTime() > QUEUED_GRACE_MS
+          }
         } else {
           const state = await job.getState()
           lost = state === 'completed' || state === 'failed'
@@ -123,7 +159,7 @@ export async function reconcileStaleLearningRuns(now: Date = new Date()): Promis
   lostJobs: number
 }> {
   const staleHeartbeats = await reconcileHeartbeats(now)
-  const lostJobs = await reconcileLostJobs()
+  const lostJobs = await reconcileLostJobs(now)
   if (staleHeartbeats > 0 || lostJobs > 0) {
     logger.info(
       `Learning stale-run sweep: recovered ${staleHeartbeats} stale-heartbeat run(s), ${lostJobs} run(s) with a lost queue job`,

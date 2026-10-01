@@ -9,7 +9,7 @@
 // real Postgres and a real (temporary) LIBRARY_DIR.
 
 import { mkdir, readFile } from 'node:fs/promises'
-import { mock } from 'bun:test'
+import { mock, spyOn } from 'bun:test'
 // features/library/schema.ts's createAgentSchema/createSkillSchema call
 // `.openapi()` on their fields, which only exists once @hono/zod-openapi has
 // patched zod's prototype (a side effect of importing it at all) — the
@@ -110,6 +110,7 @@ const {
 const { createAgent, createSkill } = await import(`${SRC}/features/library/service.ts`)
 const { agentPath } = await import(`${SRC}/library/index.ts`)
 const { env } = await import(`${SRC}/env.ts`)
+const { logger } = await import(`${SRC}/lib/logger.ts`)
 
 const facts: Record<string, unknown> = {}
 
@@ -485,6 +486,74 @@ async function withinBatchDuplicateScenario() {
   }
 }
 
+// --- 8. runLearning logs a concise trail (item 9 in the defect log) --------
+//
+// Not exhaustive of every log line engine.ts now emits — just enough to
+// confirm the four kinds the task calls for actually appear: claimed,
+// sessions-in-window/digests/batches, a per-batch outcome, and the finish.
+
+async function loggingScenario() {
+  const project = await newProject('learning-engine-logging')
+  const windowEnd = new Date('2026-02-08T04:00:00.000Z')
+  const session = await newSession(project, 'A session worth one suggestion', new Date(windowEnd.getTime() - 60_000))
+  await addPrompt(session, 'Please remember to always check the cache first.')
+
+  const runId = await queueRun(windowEnd)
+  const proposedBody = {
+    role: 'subagent',
+    team: false,
+    description: 'Checks the cache before doing real work.',
+    prompt: 'Always check the cache first.',
+  }
+  responseQueue.push(() =>
+    successStream(
+      {
+        suggestions: [
+          {
+            kind: 'agent',
+            action: 'create',
+            name: 'cache-checker',
+            title: 'Add a cache-checking agent',
+            rationale: 'Sessions kept forgetting to check the cache.',
+            sourceSessionIds: [session],
+            proposed: proposedBody,
+          },
+        ],
+      },
+      0.02,
+    ),
+  )
+  // The dedupe judge call this one surviving candidate still goes through.
+  responseQueue.push(() =>
+    successStream({ results: [{ candidateIndex: 0, duplicateOfId: null, reason: 'new' }] }, 0.01),
+  )
+
+  const lines: string[] = []
+  const infoSpy = spyOn(logger, 'info').mockImplementation((...args: unknown[]) => {
+    lines.push(args.map(String).join(' '))
+    return logger
+  })
+  try {
+    await runLearning({ learningRunId: runId })
+  } finally {
+    infoSpy.mockRestore()
+  }
+
+  const row = await runRow(runId)
+  const has = (substr: string) => lines.some((l) => l.includes(substr))
+  facts.logging = {
+    status: row?.status,
+    sawClaimed: has(`Learning run ${runId} claimed`) && has('trigger=manual') && has('window='),
+    sawWindowCounts: has('session(s) in window') && has('digest(s)'),
+    sawBatchCount: has('batch(es) to review'),
+    sawBatchOutcome: has('batch of 1 session(s) done') && has('1 inserted'),
+    sawFinish:
+      has(`Learning run ${runId} finished: status=completed`) &&
+      has('suggestionsCreated=1') &&
+      has('costUsd='),
+  }
+}
+
 async function main() {
   await mkdir(env.LIBRARY_DIR, { recursive: true })
   await seedLibrary()
@@ -494,6 +563,7 @@ async function main() {
   await allReviewCallsFailScenario()
   await oneOfTwoBatchesFailsScenario()
   await withinBatchDuplicateScenario()
+  await loggingScenario()
   console.log(`__FACTS__${JSON.stringify(facts)}`)
 }
 

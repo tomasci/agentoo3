@@ -790,6 +790,14 @@ model-proposed one too. Applying also records a `library_item_versions` row,
 which is what lets a reviewer see exactly what changed and, if it turns out
 wrong, read back what the file said before.
 
+Two different pending suggestions for the same target (two modify
+suggestions for one agent, or two creates for the same name) can be applied
+at the same moment by two different reviewers; a per-target Postgres
+advisory lock (`db/client.ts`'s `withAdvisoryLock`, keyed on kind+name)
+serialises the claim, the write and the version insert against each other, so
+the loser's own hash check always sees the winner's write and 409s rather
+than racing it onto disk.
+
 ### A stuck run cannot block every future one
 
 At most one `learning_runs` row may be `queued` or `running` at a time
@@ -804,7 +812,12 @@ marked `failed` — the worker holding it almost certainly died mid-run, and
 nothing is re-run, the same "never retry, it already spent money" policy a
 session turn's own recovery follows. A `queued` row whose BullMQ job no
 longer exists, or already settled without the row ever having been claimed,
-is marked `failed` too; a job still legitimately waiting its turn behind
+is marked `failed` too — unless the row's own enqueue was only just
+attempted and never confirmed (`enqueueAttemptedAt`/`enqueuedAt`, see
+`db/schema.ts`'s comment on `learning_runs`), in which case it gets a short
+grace period first, so a sweep that happens to land in the gap between
+`createLearningRun`'s insert and its enqueue call cannot fail a run that was
+never actually lost. A job still legitimately waiting its turn behind
 running sessions is left alone; that is normal, not stuck.
 
 ### Everything else about how a run spends money

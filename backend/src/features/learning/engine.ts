@@ -28,7 +28,7 @@ import { HEARTBEAT_INTERVAL_MS } from '@/queue/session-run.worker'
 import { packBatches, type SessionDigest } from './batching'
 import {
   type LibrarySnapshot,
-  renderMarkdown,
+  renderProposalMarkdown,
   type ValidatedCandidate,
   validateCandidate,
 } from './candidates'
@@ -152,10 +152,14 @@ function toDedupeTarget(row: ExistingSuggestionRow): DedupeTarget {
     name: row.name,
     title: row.title,
     rationale: row.rationale,
-    proposedMarkdown: renderMarkdown(
+    // Reparsed, not read straight off the row — see renderProposalMarkdown's
+    // own comment (candidates.ts) for why a raw jsonb `proposed` cannot be
+    // trusted to still be in the order it was written in, and what that costs
+    // the deterministic dedupe layer (isDeterministicDuplicate) if it isn't.
+    proposedMarkdown: renderProposalMarkdown(
       row.kind,
       row.name,
-      row.proposed as Parameters<typeof renderMarkdown>[2],
+      row.proposed as Record<string, unknown>,
     ),
   }
 }
@@ -255,6 +259,10 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
     return
   }
 
+  logger.info(
+    `Learning run ${claimed.id} claimed (trigger=${claimed.trigger}, window=${claimed.windowStart.toISOString()}..${claimed.windowEnd.toISOString()})`,
+  )
+
   const counters: Counters = { sessionsAnalyzed: 0, suggestionsCreated: 0, duplicatesSkipped: 0 }
   const notes: string[] = []
   let costSoFar = 0
@@ -289,6 +297,14 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
     }
   }
 
+  const logFinish = (status: 'completed' | 'failed'): void => {
+    logger.info(
+      `Learning run ${claimed.id} finished: status=${status}, sessionsAnalyzed=${counters.sessionsAnalyzed}, ` +
+        `suggestionsCreated=${counters.suggestionsCreated}, duplicatesSkipped=${counters.duplicatesSkipped}, ` +
+        `costUsd=${costSoFar.toFixed(4)}`,
+    )
+  }
+
   try {
     if (!hasClaudeCredential) {
       await finishRun(
@@ -298,6 +314,7 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
         'No Claude credential. Set CLAUDE_CODE_OAUTH_TOKEN (run `claude setup-token`) or ANTHROPIC_API_KEY.',
       )
       settled = true
+      logFinish('failed')
       return
     }
 
@@ -321,9 +338,14 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
       if (text !== null) digests.push({ sessionId: session.id, text })
     }
 
+    logger.info(
+      `Learning run ${claimed.id}: ${windowSessions.length} session(s) in window, ${digests.length} digest(s)`,
+    )
+
     if (digests.length === 0) {
       await finishRun(claimed.id, 'completed', counters, null)
       settled = true
+      logFinish('completed')
       return
     }
 
@@ -349,20 +371,26 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
     const acceptedThisRun: DedupeTarget[] = pendingAndRejected.map(toDedupeTarget)
 
     const batches = packBatches(digests, env.LEARNING_BATCH_CHARS)
+    logger.info(`Learning run ${claimed.id}: ${batches.length} batch(es) to review`)
 
     for (const batch of batches) {
       if (budgetExceeded(costSoFar)) {
         const remainingSessions = batches
           .slice(batches.indexOf(batch))
           .reduce((n, b) => n + b.length, 0)
-        notes.push(
-          `Run budget ($${env.LEARNING_RUN_BUDGET_USD}) reached; ${remainingSessions} session(s) across ${batches.length - batches.indexOf(batch)} batch(es) were not sent to the model`,
-        )
+        const note = `Run budget ($${env.LEARNING_RUN_BUDGET_USD}) reached; ${remainingSessions} session(s) across ${batches.length - batches.indexOf(batch)} batch(es) were not sent to the model`
+        notes.push(note)
+        logger.info(`Learning run ${claimed.id}: ${note}`)
         break
       }
 
       const batchSessionIds = new Set(batch.map((d) => d.sessionId))
       counters.sessionsAnalyzed += batch.length
+      // This batch's own share of the two counters above, logged once the
+      // batch is fully processed — the running totals in `counters` mix in
+      // every earlier batch, which is not what "this batch's outcome" means.
+      let batchDuplicatesSkipped = 0
+      let batchSuggestionsCreated = 0
 
       const reviewResult = await runOneShotQuery({
         systemPrompt: instruction,
@@ -372,17 +400,17 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
       await chargeAndRecord(reviewResult.costUsd)
 
       if (!reviewResult.ok) {
-        notes.push(
-          `Batch of ${batch.length} session(s): review call failed: ${reviewResult.reason}`,
-        )
+        const note = `Batch of ${batch.length} session(s): review call failed: ${reviewResult.reason}`
+        notes.push(note)
+        logger.info(`Learning run ${claimed.id}: ${note}`)
         continue
       }
 
       const parsedAnswer = reviewAnswerSchema.safeParse(reviewResult.data)
       if (!parsedAnswer.success) {
-        notes.push(
-          `Batch of ${batch.length} session(s): review answer did not match the expected shape: ${parsedAnswer.error.message}`,
-        )
+        const note = `Batch of ${batch.length} session(s): review answer did not match the expected shape: ${parsedAnswer.error.message}`
+        notes.push(note)
+        logger.info(`Learning run ${claimed.id}: ${note}`)
         continue
       }
       anyBatchReviewed = true
@@ -412,6 +440,7 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
           isDeterministicDuplicate(candidate, thisBatchTargets)
         if (duplicate) {
           counters.duplicatesSkipped++
+          batchDuplicatesSkipped++
           continue
         }
         survivorsAfterDeterministic.push(candidate)
@@ -429,12 +458,17 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
         })
       }
 
-      if (survivorsAfterDeterministic.length === 0) continue
+      if (survivorsAfterDeterministic.length === 0) {
+        logger.info(
+          `Learning run ${claimed.id}: batch of ${batch.length} session(s) done — ${validated.length} candidate(s), ${batchDuplicatesSkipped} duplicate(s) skipped, 0 inserted`,
+        )
+        continue
+      }
 
       if (budgetExceeded(costSoFar)) {
-        notes.push(
-          `Batch of ${batch.length} session(s): run budget reached before the dedupe judge could run; ${survivorsAfterDeterministic.length} candidate(s) from this batch were not inserted`,
-        )
+        const note = `Batch of ${batch.length} session(s): run budget reached before the dedupe judge could run; ${survivorsAfterDeterministic.length} candidate(s) from this batch were not inserted`
+        notes.push(note)
+        logger.info(`Learning run ${claimed.id}: ${note}`)
         continue
       }
 
@@ -445,9 +479,9 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
         // Fail closed: an unverified duplicate on file is worse than a missed
         // suggestion, so nothing from this batch is inserted when the judge
         // call itself could not be trusted.
-        notes.push(
-          `Batch of ${batch.length} session(s): dedupe judge call failed, so ${survivorsAfterDeterministic.length} candidate(s) were not inserted: ${judgeResult.reason}`,
-        )
+        const note = `Batch of ${batch.length} session(s): dedupe judge call failed, so ${survivorsAfterDeterministic.length} candidate(s) were not inserted: ${judgeResult.reason}`
+        notes.push(note)
+        logger.info(`Learning run ${claimed.id}: ${note}`)
         continue
       }
 
@@ -456,6 +490,7 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
         if (!candidate) continue
         if (judgeResult.duplicateOf[i] !== null) {
           counters.duplicatesSkipped++
+          batchDuplicatesSkipped++
           continue
         }
         try {
@@ -475,6 +510,7 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
                 : null,
           })
           counters.suggestionsCreated++
+          batchSuggestionsCreated++
           acceptedThisRun.push({
             id: row.id,
             kind: candidate.kind,
@@ -495,6 +531,10 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
           )
         }
       }
+
+      logger.info(
+        `Learning run ${claimed.id}: batch of ${batch.length} session(s) done — ${validated.length} candidate(s), ${batchDuplicatesSkipped} duplicate(s) skipped, ${batchSuggestionsCreated} inserted`,
+      )
     }
 
     // A run that reaches here with batches but not one of them successfully
@@ -507,12 +547,14 @@ export async function runLearning(job: LearningRunJob): Promise<void> {
     const status = anyBatchReviewed ? 'completed' : 'failed'
     await finishRun(claimed.id, status, counters, notes.length ? notes.join(' | ') : null)
     settled = true
+    logFinish(status)
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error)
     logger.error(`Learning run ${claimed.id} failed: ${detail}`)
     try {
       await finishRun(claimed.id, 'failed', counters, detail)
       settled = true
+      logFinish('failed')
     } catch (fatal) {
       logger.error(
         `Learning run ${claimed.id} is stranded: it still reads as 'running' and could not be marked failed (${String(fatal)}). features/learning/stale.ts's own recovery will pick it up once its heartbeat goes stale.`,

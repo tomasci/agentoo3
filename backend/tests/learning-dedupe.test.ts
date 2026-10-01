@@ -163,12 +163,42 @@ test('an id the judge invents that is not in the existing list counts as null', 
   expect(result.duplicateOf).toEqual([null])
 })
 
-test('a candidate index the judge never mentions defaults to null, not a duplicate', async () => {
+// D4 in the defect log: a candidate the judge gave no verdict for is
+// unchecked, not "the judge looked and said no" — treating silence as "not a
+// duplicate" would let an unverified duplicate through, so the whole batch
+// must fail closed instead.
+test('a candidate index the judge never mentions: fails closed, nothing is treated as judged', async () => {
   turnBehaviour = () => successStream({ results: [] })
   const result = await judgeDuplicates([candidate()], [target()])
-  expect(result.ok).toBe(true)
-  if (!result.ok) return
-  expect(result.duplicateOf).toEqual([null])
+  expect(result.ok).toBe(false)
+  if (result.ok) return
+  expect(result.reason).toContain('no verdict')
+  expect(result.costUsd).toBeGreaterThan(0)
+})
+
+test('a duplicate candidateIndex in the judge answer leaves the other candidate unjudged: fails closed', async () => {
+  const two = [candidate({ name: 'scout' }), candidate({ name: 'ranger' })]
+  turnBehaviour = () =>
+    successStream({
+      results: [
+        { candidateIndex: 0, duplicateOfId: null, reason: 'first' },
+        // Same index again — candidate 1 never gets its own verdict.
+        { candidateIndex: 0, duplicateOfId: null, reason: 'again, not 1' },
+      ],
+    })
+  const result = await judgeDuplicates(two, [target()])
+  expect(result.ok).toBe(false)
+  if (result.ok) return
+  expect(result.reason).toContain('no verdict')
+})
+
+test('an out-of-range candidateIndex does not count as a verdict for any real candidate: fails closed', async () => {
+  turnBehaviour = () =>
+    successStream({ results: [{ candidateIndex: 7, duplicateOfId: null, reason: 'out of range' }] })
+  const result = await judgeDuplicates([candidate()], [target()])
+  expect(result.ok).toBe(false)
+  if (result.ok) return
+  expect(result.reason).toContain('no verdict')
 })
 
 test('judge call failure (result error) fails closed: ok is false, cost still reported', async () => {

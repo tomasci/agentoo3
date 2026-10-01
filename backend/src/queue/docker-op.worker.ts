@@ -36,11 +36,11 @@ import { type DockerOpJob, QUEUE_DOCKER_OP, redisConnection } from './index'
 /**
  * Jobs on this queue are long-running builds and container starts, not the
  * bursty, cheap work `WORKER_CONCURRENCY` is sized for (sessions). A modest,
- * fixed cap rather than a third env knob: this feature already exposes two
- * (`DOCKER_ENABLED`, `DOCKER_OP_TIMEOUT_MS`), and a third just to tune
- * concurrency is not worth it when per-project serialization is already
- * enforced by the Redis lock below regardless of how many of these run in
- * parallel across *different* projects.
+ * fixed cap rather than a third env knob — the brief is explicit that this
+ * feature adds exactly two (`DOCKER_ENABLED`, `DOCKER_OP_TIMEOUT_MS`) and
+ * nothing else — and per-project serialization is already enforced by the
+ * Redis lock below regardless of how many of these run in parallel across
+ * *different* projects.
  */
 const CONCURRENCY = 2
 
@@ -127,8 +127,8 @@ async function stepsFor(job: DockerOpJob, cli: DockerCli): Promise<Step[]> {
   if (job.kind === 'stop') return [{ label: 'docker stop', args: dockerStopArgs(name) }]
   if (job.kind === 'restart') return [{ label: 'docker restart', args: dockerRestartArgs(name) }]
   if (job.kind === 'down') {
-    // "docker stop then docker rm" — never `--rmi`/`-v`: cleanup on this path
-    // never removes the image, only the container.
+    // "docker stop then docker rm" — never `--rmi`/`-v`, per the brief:
+    // Cleanup on this path never removes the image, only the container.
     return [
       { label: 'docker stop', args: dockerStopArgs(name) },
       { label: 'docker rm', args: dockerRmArgs(name) },

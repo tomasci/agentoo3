@@ -64,7 +64,7 @@ export type OwnerSessionRow = SessionOwnerRow
  * no clock, so docker-system.test.ts can pin every rule below with plain
  * arrays and no database.
  *
- * Rules this join enforces:
+ * Rules (see the brief this feature was built from):
  *   - An unknown slug (a container labelled for some other agentoo install
  *     sharing this daemon, or a foreign `docker compose up`) is owner: null.
  *   - Repo scope (no session part) resolves to that project alone.

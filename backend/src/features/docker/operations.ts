@@ -22,8 +22,7 @@ import { logger } from '@/lib/logger'
 import type { DockerOperationDto, DockerOperationKind, DockerOperationStatus } from './schema'
 
 const OPERATION_TTL_SECONDS = 3600
-/** The oplog's own ring-buffer cap — the `N` in the `ltrim(key, -N, -1)` call
- * below that keeps only the most recent lines. */
+/** Matches the brief's `LTRIM … -2000 -1` — the oplog's own ring-buffer cap. */
 const OPLOG_MAX_LINES = 2000
 
 const lockKey = (scope: string) => `agentoo:docker:lock:${scope}`
@@ -31,8 +30,7 @@ const operationKey = (operationId: string) => `agentoo:docker:op:${operationId}`
 const oplogKey = (operationId: string) => `agentoo:docker:oplog:${operationId}`
 const projectOpsKey = (projectId: string) => `agentoo:docker:project-ops:${projectId}`
 /** Same string as `operationKey` on purpose — pub/sub channels and ordinary
- * keys live in separate Redis namespaces, so reusing the identical string for
- * both can never collide. */
+ * keys live in separate Redis namespaces, and the brief names both this way. */
 export const operationChannel = (operationId: string) => `agentoo:docker:op:${operationId}`
 
 /**
