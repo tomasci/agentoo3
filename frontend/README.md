@@ -45,7 +45,7 @@ bun run hooks       # install lefthook git hooks
 src/
   app/                 router, root layout, shell chrome (sidebar, tab bar, status bar)
   features/            one directory per feature, self-contained
-    docker/  editor/  health/  ideas/  library/  projects/
+    appearance/  docker/  editor/  health/  ideas/  library/  projects/
     sessions/  settings/  ssh-keys/  storage/  system/
   shared/
     api/               client config + generated/ (kubb output, git-ignored)
@@ -109,6 +109,19 @@ one. The rule that keeps it that way:
   drops the label's `text-destructive` at high usage, because the operator
   judged the shipped look too attention-grabbing for a strip that live-updates
   constantly.
+- `features/appearance/lib/catalog.ts` is the other exception of that kind,
+  and the only file beyond `StatusDot` allowed OKLCH literals and the `dark:`
+  variant: custom backgrounds let a reader pick a named hue (mint, brown,
+  sunset, …) the shadcn tokens have no room for, and Tailwind's own palette
+  swings too wildly in lightness/chroma between hues at any one step to stand
+  in for one consistent tint. The catalog spends the same lightness/chroma
+  budget per theme on every hue, switching `dark:` only because the operator
+  wants a visibly different, independently-tuned tint per theme rather than
+  one colour read through an opacity change — not because this app's `dark:`
+  rule has loosened. It stays inside that one file: `app/root-layout.tsx` and
+  `features/settings` only ever reach the catalog's literal class strings
+  through `features/appearance`'s own components and barrel, never by writing
+  a colour literal of their own.
 - A link that should look like a button is
   `<Link className={buttonVariants({ variant: … })}>`, not
   `<Button render={<a/>}>`: Base UI logs an error and stamps `role="button"`
@@ -218,6 +231,23 @@ of that row with no background or border of their own. The page body
 (`SidebarInset`) is the only thing that stands off that surface — its own
 `bg-background`, rounded corners, a small shadow, a gap on every side — and it
 is the only thing that scrolls.
+
+That surface can carry a reader's own chosen backdrop: a colour, a gradient or
+an icon pattern (`features/appearance`), picked on `/settings` and persisted
+per browser (`localStorage['agentoo:background']`,
+`localStorage['agentoo:background-pattern']`), the same way the theme is.
+`Shell` paints it as an `absolute inset-0 -z-10` layer behind everything else
+in the row, so it shows through the tab bar strip, the sidebar area and the
+status bar strip, including the safe-area padding around them. While one is
+active, the sidebar's own opaque surface turns transparent so the backdrop
+shows through it too, and `SidebarInset` turns to frosted glass — a
+translucent `bg-background` plus a backdrop blur — instead of its ordinary
+opaque one. Neither change happens at all when no backdrop is chosen: no
+backdrop element is rendered, the sidebar keeps its ordinary opaque surface,
+and `SidebarInset` keeps its ordinary background. The wrapper's own `relative
+isolate` (what lets that `absolute inset-0 -z-10` layer resolve against the
+shell rather than escape it) is there unconditionally, backdrop or not, but
+is inert on its own.
 
 An empty tab (the project picker) has nothing to navigate yet, so its sidebar
 is forced closed and empty and the body takes the full width. A session's own

@@ -1,4 +1,5 @@
 import { Link } from '@tanstack/react-router'
+import { useAtomValue } from 'jotai'
 import {
   BookOpen,
   Container,
@@ -15,7 +16,9 @@ import {
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useProjects } from '@/features/projects'
+import { cn } from '@/shared/lib/utils'
 import { SYSTEM_HOME, type TabKind } from '@/shared/store/tabs'
+import { backgroundAtom, backgroundPatternAtom, isBackgroundActive } from '@/shared/store/ui'
 import {
   Sidebar,
   SidebarContent,
@@ -348,6 +351,20 @@ interface ShellSidebarProps {
 export function ShellSidebar({ mode, projectId }: ShellSidebarProps) {
   const { isMobile, state } = useSidebar()
 
+  // The desktop `sidebar-inner` div (shared/ui/sidebar.tsx) is an opaque
+  // `bg-sidebar` — fine normally, since it *is* the wrapper's own surface, but
+  // it would otherwise sit as an opaque block over root-layout.tsx's chosen
+  // backdrop. `*:data-[slot=sidebar-inner]:bg-transparent` reaches through to
+  // it the same way `app/status-bar.tsx`'s `HostMetric` reaches the generated
+  // `Progress` indicator — applied conditionally, so the default look (no
+  // background chosen) stays byte-for-byte what it was. The phone `Sheet`
+  // form below never receives this `className` at all (shared/ui/sidebar.tsx
+  // only spreads it onto the desktop branch), so the drawer stays the opaque
+  // overlay it always was.
+  const background = useAtomValue(backgroundAtom)
+  const backgroundPattern = useAtomValue(backgroundPatternAtom)
+  const backdropActive = isBackgroundActive(background, backgroundPattern)
+
   // An empty tab has nothing to navigate (see the comment below), and
   // root-layout.tsx forces the provider's desktop `open` closed for it — but
   // that prop doesn't reach the phone form: below 768px the sidebar is a
@@ -363,7 +380,10 @@ export function ShellSidebar({ mode, projectId }: ShellSidebarProps) {
     <Sidebar
       variant="inset"
       collapsible="offcanvas"
-      className="absolute h-auto"
+      className={cn(
+        'absolute h-auto',
+        backdropActive && '*:data-[slot=sidebar-inner]:bg-transparent',
+      )}
       // Offcanvas moves the collapsed sidebar off-screen with a transform, not
       // `display: none` — its links would otherwise stay in the tab order and
       // reachable by a screen reader while invisible.

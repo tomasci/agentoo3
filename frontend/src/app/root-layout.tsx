@@ -2,13 +2,21 @@ import { Outlet, useLocation } from '@tanstack/react-router'
 import { useAtom, useAtomValue } from 'jotai'
 import type { CSSProperties } from 'react'
 import { useEffect } from 'react'
+import { BackgroundBackdrop } from '@/features/appearance'
+import { cn } from '@/shared/lib/utils'
 import {
   isBareShellPath,
   isFullBleedPath,
   projectIdForPath,
   shellModeForPath,
 } from '@/shared/store/tabs'
-import { sidebarOpenAtom, themeAtom } from '@/shared/store/ui'
+import {
+  backgroundAtom,
+  backgroundPatternAtom,
+  isBackgroundActive,
+  sidebarOpenAtom,
+  themeAtom,
+} from '@/shared/store/ui'
 import { SidebarInset, SidebarProvider, useSidebar } from '@/shared/ui/sidebar'
 import { ShellSidebar } from './sidebar'
 import { StatusBar } from './status-bar'
@@ -104,6 +112,14 @@ function Shell() {
   // back when the provider reports it changed.
   const [sidebarOpen, setSidebarOpen] = useAtom(sidebarOpenAtom)
 
+  // Read here, not inside `BackgroundBackdrop`/`ShellSidebar` alone: the
+  // sidebar turning transparent and the inset turning to glass both have to
+  // agree with the backdrop actually being drawn, so this is the one place
+  // that decides it for all three.
+  const background = useAtomValue(backgroundAtom)
+  const backgroundPattern = useAtomValue(backgroundPatternAtom)
+  const backdropActive = isBackgroundActive(background, backgroundPattern)
+
   return (
     <SidebarProvider
       open={mode !== 'new' && sidebarOpen}
@@ -111,14 +127,35 @@ function Shell() {
         if (mode !== 'new') setSidebarOpen(open)
       }}
       style={{ '--sidebar-width': 'calc(var(--spacing) * 72)' } as CSSProperties}
-      className="h-[var(--shell-height,100dvh)] min-h-0 flex-col overflow-hidden pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]"
+      // `relative isolate`: inert on its own (nothing here was positioned
+      // against this wrapper before), but it's what lets `BackgroundBackdrop`
+      // resolve its `absolute inset-0 -z-10` against this exact box, with its
+      // own stacking context, rather than escaping it and competing with
+      // whatever `-z-10` means outside the shell entirely.
+      className="relative isolate h-[var(--shell-height,100dvh)] min-h-0 flex-col overflow-hidden pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]"
     >
+      <BackgroundBackdrop />
       <CloseSidebarOnNavigate />
       <TabBar mode={mode} />
 
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <ShellSidebar mode={mode} projectId={projectId} />
-        <SidebarInset className="min-h-0 min-w-0 overflow-hidden">
+        <SidebarInset
+          className={cn(
+            'min-h-0 min-w-0 overflow-hidden',
+            // Frosted glass only while a backdrop is actually showing through
+            // it — `bg-background/70` stays white-ish in light and near-black
+            // in dark for free, since it's an opacity of the same semantic
+            // token the inset already uses. No fixed/sticky descendant of
+            // this element relies on the viewport as its containing block
+            // (grepped: the one `fixed` element in the app, the version-skew
+            // banner, mounts in providers.tsx, outside the shell entirely;
+            // every dialog/popover portals out of #root) — `backdrop-blur-xl`
+            // is safe to put directly on the real element rather than behind
+            // a `before:` layer.
+            backdropActive && 'bg-background/70 ring-1 ring-border/50 backdrop-blur-xl',
+          )}
+        >
           <div
             className={
               bleed
