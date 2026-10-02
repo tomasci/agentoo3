@@ -25,13 +25,17 @@ export function formatDateTime(value: string | null): string {
   return date ? DATE_TIME.format(date) : ''
 }
 
-/** `Europe/Moscow, UTC+3` — mirrors `features/settings/lib/timezones.ts`'s
+/** `Asia/Tokyo, UTC+9` — mirrors `features/settings/lib/timezones.ts`'s
  *  own `zoneWithOffset` (same computation, comma-joined rather than
  *  bracketed so it reads inline in a sentence), duplicated rather than
  *  imported for the same reason this file keeps its own `formatDateTime`
  *  instead of reaching into another feature. Computed from `now` rather than
- *  hardcoded: a zone's offset can change (DST, a government redefining it). */
+ *  hardcoded: a zone's offset can change (DST, a government redefining it).
+ *  `UTC` (the schedule's own default) is returned bare: its offset is always
+ *  +0 by definition, so "UTC, UTC+0" would just repeat the name back rather
+ *  than add anything. */
 export function formatTimezone(zone: string): string {
+  if (zone === 'UTC') return zone
   const part = new Intl.DateTimeFormat('en', { timeZone: zone, timeZoneName: 'shortOffset' })
     .formatToParts(new Date())
     .find((p) => p.type === 'timeZoneName')

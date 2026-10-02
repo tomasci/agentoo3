@@ -4,9 +4,9 @@
 // from "what does the wall clock in that zone read at this UTC instant",
 // never from the library under test.
 //
-// Requirement: a daily run, default 04:00 UTC+3 (Europe/Moscow, no DST);
-// in any other zone the run fires exactly once per local day at the
-// configured wall-clock time, across DST in both directions.
+// Requirement: a daily run, default 04:00 UTC; in any other zone the run
+// fires exactly once per local day at the configured wall-clock time, across
+// DST in both directions.
 
 import { describe, expect, test } from 'bun:test'
 import './setup-env'
@@ -64,8 +64,8 @@ const sched = (time: string, timezone: string): LearningSchedule => ({ enabled: 
 // --- the default -------------------------------------------------------------
 
 describe('default schedule', () => {
-  test('is enabled, 04:00, Europe/Moscow', () => {
-    expect(DEFAULT_LEARNING_SCHEDULE).toEqual({ enabled: true, time: '04:00', timezone: 'Europe/Moscow' })
+  test('is enabled, 04:00, UTC', () => {
+    expect(DEFAULT_LEARNING_SCHEDULE).toEqual({ enabled: true, time: '04:00', timezone: 'UTC' })
   })
 
   test('Europe/Moscow is UTC+3 on every day of 2026 (no DST) per the Intl oracle', () => {
@@ -76,19 +76,19 @@ describe('default schedule', () => {
     expect([...offsets]).toEqual([180])
   })
 
-  test('every default occurrence in 2026 is exactly 01:00:00Z, one per day, 365 in total', () => {
+  test('every default occurrence in 2026 is exactly 04:00:00Z, one per day, 365 in total', () => {
     const all = chain2026(DEFAULT_LEARNING_SCHEDULE)
     expect(all.length).toBe(365)
-    expect(all.every((d) => d.toISOString().endsWith('T01:00:00.000Z'))).toBe(true)
-    expect(all.every((d) => wall(d, 'Europe/Moscow').endsWith(' 04:00:00'))).toBe(true)
+    expect(all.every((d) => d.toISOString().endsWith('T04:00:00.000Z'))).toBe(true)
+    expect(all.every((d) => wall(d, 'UTC').endsWith(' 04:00:00'))).toBe(true)
   })
 
-  test('nextRunAt is strictly after now: at 00:59:59.999Z it is the same day, at 01:00Z the next', () => {
-    expect(nextRunAt(DEFAULT_LEARNING_SCHEDULE, new Date('2026-10-01T00:59:59.999Z'))?.toISOString()).toBe(
-      '2026-10-01T01:00:00.000Z',
+  test('nextRunAt is strictly after now: at 03:59:59.999Z it is the same day, at 04:00Z the next', () => {
+    expect(nextRunAt(DEFAULT_LEARNING_SCHEDULE, new Date('2026-10-01T03:59:59.999Z'))?.toISOString()).toBe(
+      '2026-10-01T04:00:00.000Z',
     )
-    expect(nextRunAt(DEFAULT_LEARNING_SCHEDULE, new Date('2026-10-01T01:00:00.000Z'))?.toISOString()).toBe(
-      '2026-10-02T01:00:00.000Z',
+    expect(nextRunAt(DEFAULT_LEARNING_SCHEDULE, new Date('2026-10-01T04:00:00.000Z'))?.toISOString()).toBe(
+      '2026-10-02T04:00:00.000Z',
     )
   })
 })

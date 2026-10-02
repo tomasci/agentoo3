@@ -70,18 +70,18 @@ dbTest('the child ran every scenario without throwing', () => {
 // --- 1. schedule setting ------------------------------------------------------
 
 describe('req 1: schedule setting over HTTP', () => {
-  dbTest('GET /system/settings with nothing saved: default 04:00 Europe/Moscow, source default', () => {
+  dbTest('GET /system/settings with nothing saved: default 04:00 UTC, source default', () => {
     const f = fact('settings')
     expect(f.initialStatus).toBe(200)
-    expect(f.initialValue).toEqual({ enabled: true, time: '04:00', timezone: 'Europe/Moscow' })
-    expect(f.initialDefault).toEqual({ enabled: true, time: '04:00', timezone: 'Europe/Moscow' })
+    expect(f.initialValue).toEqual({ enabled: true, time: '04:00', timezone: 'UTC' })
+    expect(f.initialDefault).toEqual({ enabled: true, time: '04:00', timezone: 'UTC' })
     expect(f.initialSource).toBe('default')
   })
 
-  dbTest('nextRunAt for the default is the next 04:00 UTC+3 per an Intl oracle (01:00Z)', () => {
+  dbTest('nextRunAt for the default is the next 04:00 UTC per an Intl oracle (04:00Z)', () => {
     const f = fact('settings')
     expect(f.initialNextRunAt).toBe(f.expectedInitialNextRunAt)
-    expect(String(f.initialNextRunAt)).toEndWith('T01:00:00.000Z')
+    expect(String(f.initialNextRunAt)).toEndWith('T04:00:00.000Z')
   })
 
   dbTest('GET /library/learning reports the same default schedule and nextRunAt', () => {
@@ -140,7 +140,7 @@ describe('req 1: schedule setting over HTTP', () => {
   dbTest('PATCH learningSchedule:null resets to the default and deletes the row', () => {
     const f = fact('settings')
     expect(f.patchNullStatus).toBe(200)
-    expect(f.patchNullValue).toEqual({ enabled: true, time: '04:00', timezone: 'Europe/Moscow' })
+    expect(f.patchNullValue).toEqual({ enabled: true, time: '04:00', timezone: 'UTC' })
     expect(f.patchNullSource).toBe('default')
     expect(f.patchNullNextRunAt).toBe(f.expectedResetNextRunAt)
     expect(f.rowAfterReset).toBeNull()
@@ -178,9 +178,9 @@ describe('req 2: window', () => {
     expect(fact('window').projectsInPrompt).toEqual(['win-a', 'win-b', 'win-c'])
   })
 
-  dbTest('a trigger with neither prevMillis nor timestamp/delay falls back to the last 04:00 UTC+3 occurrence, not now', () => {
+  dbTest('a trigger with neither prevMillis nor timestamp/delay falls back to the last 04:00 UTC occurrence, not now', () => {
     const f = fact('window')
-    expect(String(f.fallbackWindowEnd)).toEndWith('T01:00:00.000Z')
+    expect(String(f.fallbackWindowEnd)).toEndWith('T04:00:00.000Z')
     expect(f.fallbackNotAfterNow).toBe(true)
     expect(f.fallbackWithinADay).toBe(true)
   })

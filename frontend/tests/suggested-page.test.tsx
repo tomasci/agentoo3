@@ -97,7 +97,7 @@ let runNowCalls = 0
 let runNowFailure: unknown = null
 
 const OVERVIEW = () => ({
-  schedule: { value: { enabled: true, time: '04:00', timezone: 'Europe/Moscow' }, nextRunAt: null },
+  schedule: { value: { enabled: true, time: '04:00', timezone: 'UTC' }, nextRunAt: null },
   activeRun,
   lastRun,
   recentRuns: [],

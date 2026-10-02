@@ -53,11 +53,11 @@ realTest('the child ran every scenario without throwing', () => {
 
 describe('req 1: the worker keeps the BullMQ job scheduler in sync with the setting', () => {
   type S = { pattern: string; tz: string; next: number } | null
-  realTest('default: scheduler learning-daily with pattern "0 4 * * *", tz Europe/Moscow, next = nextRunAt', () => {
+  realTest('default: scheduler learning-daily with pattern "0 4 * * *", tz UTC, next = nextRunAt', () => {
     const f = fact('scheduler')
     const s1 = f.s1 as S
     expect(s1?.pattern).toBe('0 4 * * *')
-    expect(s1?.tz).toBe('Europe/Moscow')
+    expect(s1?.tz).toBe('UTC')
     expect(s1?.next).toBe(f.expectedNext1 as number)
   })
 
@@ -85,7 +85,7 @@ describe('req 1: the worker keeps the BullMQ job scheduler in sync with the sett
   })
 
   realTest('reset to null brings back the default scheduler', () => {
-    expect(fact('scheduler').s4).toEqual({ pattern: '0 4 * * *', tz: 'Europe/Moscow' })
+    expect(fact('scheduler').s4).toEqual({ pattern: '0 4 * * *', tz: 'UTC' })
   })
 })
 
