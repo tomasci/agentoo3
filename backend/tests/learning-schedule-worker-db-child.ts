@@ -100,7 +100,7 @@ const realSchedule = (await import(`${SRC}/features/learning/schedule.ts`)) as R
 let scheduleAnswer: { enabled: boolean; time: string; timezone: string } = {
   enabled: true,
   time: '04:00',
-  timezone: 'Europe/Moscow',
+  timezone: 'UTC',
 }
 mock.module(`${SRC}/features/learning/schedule.ts`, () => ({
   ...realSchedule,
@@ -206,7 +206,7 @@ function fakeQueue(calls: Call[]) {
 }
 
 async function reconcileScenarios() {
-  scheduleAnswer = { enabled: true, time: '04:00', timezone: 'Europe/Moscow' }
+  scheduleAnswer = { enabled: true, time: '04:00', timezone: 'UTC' }
 
   // First reconcile always applies.
   {

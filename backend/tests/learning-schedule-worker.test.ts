@@ -111,7 +111,7 @@ test('a conflict (a run already active) is logged and skipped, not thrown', () =
 test('the first reconcile always applies, even though it matches the built-in default', () => {
   const f = fact('reconcileFirstAlwaysApplies')
   expect(f.calls).toEqual(['upsert'])
-  expect(f.applied).toEqual({ enabled: true, pattern: '0 4 * * *', timezone: 'Europe/Moscow' })
+  expect(f.applied).toEqual({ enabled: true, pattern: '0 4 * * *', timezone: 'UTC' })
 })
 
 test('a second reconcile with an unchanged schedule does not re-upsert', () => {

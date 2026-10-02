@@ -300,7 +300,7 @@ async function settingsScenario() {
     initialSource: initial.body?.learningSchedule?.source,
     initialDefault: initial.body?.learningSchedule?.defaultValue,
     initialNextRunAt: initial.body?.learningSchedule?.nextRunAt,
-    expectedInitialNextRunAt: oracleNext('04:00', 'Europe/Moscow', now),
+    expectedInitialNextRunAt: oracleNext('04:00', 'UTC', now),
     overview0Schedule: overview0.body?.schedule,
     invalid,
     rowAfterInvalid: rowAfterInvalid ?? null,
@@ -320,7 +320,7 @@ async function settingsScenario() {
     patchNullValue: patchNull.body?.learningSchedule?.value,
     patchNullSource: patchNull.body?.learningSchedule?.source,
     patchNullNextRunAt: patchNull.body?.learningSchedule?.nextRunAt,
-    expectedResetNextRunAt: oracleNext('04:00', 'Europe/Moscow', nowReset),
+    expectedResetNextRunAt: oracleNext('04:00', 'UTC', nowReset),
     rowAfterReset: rowAfterReset ?? null,
     overviewResetSchedule: overviewReset.body?.schedule,
   }
@@ -434,7 +434,7 @@ async function windowScenario() {
   await settleActive()
 
   // No prevMillis and no timestamp/delay: falls back to the schedule's own
-  // latest occurrence (default 04:00 Moscow = 01:00Z), never "now".
+  // latest occurrence (default 04:00 UTC = 04:00Z), never "now".
   const nowMs = Date.now()
   await handleLearningScheduleTrigger({})
   const [fallback] = await db

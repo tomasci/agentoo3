@@ -44,11 +44,11 @@ test('cronPatternFor: minute and hour fields only, day/month/weekday wild', () =
 
 // --- the default ---------------------------------------------------------
 
-test('the default schedule is enabled, 04:00 Europe/Moscow', () => {
+test('the default schedule is enabled, 04:00 UTC', () => {
   expect(DEFAULT_LEARNING_SCHEDULE).toEqual({
     enabled: true,
     time: '04:00',
-    timezone: 'Europe/Moscow',
+    timezone: 'UTC',
   })
 })
 
@@ -63,7 +63,9 @@ test('nextRunAt and latestOccurrenceAtOrBefore are both null when disabled', () 
 // --- Europe/Moscow: fixed UTC+3, no DST ever -------------------------------
 //
 // Local 04:00 Europe/Moscow is always UTC 01:00 — no date in this zone can
-// change that, which is exactly what makes it the documented default.
+// change that, which is exactly what makes it a convenient fixed-offset
+// fixture for exercising the non-DST path below (the default itself is now
+// plain UTC — see DEFAULT_LEARNING_SCHEDULE).
 
 test('nextRunAt in a fixed-offset zone: strictly after now, same day', () => {
   const schedule = moscow('04:00')

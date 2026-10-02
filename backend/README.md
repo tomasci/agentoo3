@@ -689,12 +689,12 @@ this design avoids.
 
 ### The schedule: once a day, worker-applied
 
-The default is 04:00 Europe/Moscow — a fixed UTC+3 with no DST transition
-ever to land that run on the wrong side of (see `DEFAULT_LEARNING_SCHEDULE`'s
-own comment in `features/learning/schedule.ts` for why Moscow specifically,
-among the three UTC+3 candidates the reference point named). An admin can
-change the time, the IANA zone, or disable it entirely from the Library UI;
-that write only ever touches `system_settings` in Postgres. The worker is the
+The default is 04:00 UTC — neutral rather than any one operator's real-world
+zone, with no DST transition of its own to land that run on the wrong side of
+(see `DEFAULT_LEARNING_SCHEDULE`'s own comment in
+`features/learning/schedule.ts` for why). An admin can change the time, the
+IANA zone, or disable it entirely from the Library UI; that write only ever
+touches `system_settings` in Postgres. The worker is the
 only thing that ever touches Redis for it: `queue/learning-schedule.worker.ts`
 runs a reconcile loop (tick at boot, then every ~30s) that reads the saved
 schedule and, only when it actually changed since the last successful apply,

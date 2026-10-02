@@ -149,10 +149,10 @@ export function watchLearningSchedule(queue: SchedulerQueue): () => void {
 
 /**
  * The scheduled occurrence this trigger fired for, so a run's `windowEnd`
- * reflects the tick that was actually due — e.g. exactly 04:00:00 UTC+3 —
- * rather than whenever the worker happened to get around to processing the
- * job (which can be much later: this job rides no special priority, and a
- * busy worker may not reach it for a while).
+ * reflects the tick that was actually due — e.g. exactly 04:00:00 in the
+ * schedule's configured zone — rather than whenever the worker happened to
+ * get around to processing the job (which can be much later: this job rides
+ * no special priority, and a busy worker may not reach it for a while).
  *
  * `job.opts.prevMillis` is the primary source: BullMQ's own JobScheduler
  * stamps every job it produces with `prevMillis` set to that job's own

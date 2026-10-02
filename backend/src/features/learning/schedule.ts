@@ -47,25 +47,24 @@ export const learningScheduleSchema = z
     timezone: z
       .string()
       .refine(isKnownTimeZone, 'Unknown IANA time zone')
-      .openapi({ description: 'IANA zone name', example: 'Europe/Moscow' }),
+      .openapi({ description: 'IANA zone name', example: 'UTC' }),
   })
   .openapi('LearningSchedule')
 export type LearningSchedule = z.infer<typeof learningScheduleSchema>
 
 /**
- * Europe/Moscow, not a bare "+03:00" offset. The reference point given for
- * this default was "Moscow/Israel/Ukraine, effectively UTC+3" — three real
- * places, each with its own DST rule at other times of year — and the one
- * among them that is a fixed UTC+3 year-round, with no DST transition ever to
- * land a 04:00 run on the wrong side of, is Moscow: Russia abolished daylight
- * saving in 2014. Naming it as a zone rather than a raw offset also keeps a
- * future change of mind about which of the three to follow a one-word config
- * change rather than a code change.
+ * UTC, not some real-world operator's zone: with no installation-specific
+ * region to anchor a default on, picking any inhabited zone would bias
+ * towards whichever part of the world happened to be used as the reference
+ * point, and read as a claim about who this box is run by or for. UTC makes
+ * no such claim, has no DST transition of its own to land a 04:00 run on the
+ * wrong side of, and is the same 04:00 for every installation until an
+ * operator changes it to their own zone from the Settings page.
  */
 export const DEFAULT_LEARNING_SCHEDULE: LearningSchedule = {
   enabled: true,
   time: '04:00',
-  timezone: 'Europe/Moscow',
+  timezone: 'UTC',
 }
 
 /**
