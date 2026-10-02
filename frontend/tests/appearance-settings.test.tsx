@@ -109,6 +109,14 @@ async function mount(path = '/settings') {
       nextRunAt: null,
     },
   })
+  // The status bar's version button and the "what's new" screen
+  // (app/root-layout.tsx's Shell) query this on every mount — seeded for the
+  // same reason as every other query here, not because this file has
+  // anything of its own to say about that screen.
+  client.setQueryData(
+    [{ url: '/api/whats-new' }],
+    { installedVersion: null, installedAt: null, pending: false },
+  )
 
   store = createStore()
   root = createRoot(container)

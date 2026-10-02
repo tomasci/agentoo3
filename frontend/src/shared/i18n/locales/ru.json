@@ -1433,5 +1433,21 @@
     "source": "Исходный Markdown",
     "showSource": "Редактировать исходный Markdown",
     "showFormatted": "Вернуться к оформленному виду"
+  },
+  "whatsNew": {
+    "installedTitle": "Обновление {{version}} установлено",
+    "installedSubtitle": "Вот что нового",
+    "manualTitle": "Что нового",
+    "manualSubtitle": "У вас версия {{version}}",
+    "close": "Понятно",
+    "closeX": "Закрыть",
+    "statusBarLabel": "Что нового",
+    "changelogLabel": "Список изменений",
+    "dismissFailed": "Не удалось сохранить, что вы закрыли это окно — оно может появиться снова в следующий раз",
+    "kind": {
+      "new": "Новое",
+      "improved": "Улучшено",
+      "fixed": "Исправлено"
+    }
   }
 }
