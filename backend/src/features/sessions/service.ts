@@ -6,6 +6,7 @@ import { env } from '@/env'
 import { deleteSessionFiles } from '@/features/attachments/storage'
 import { listScopeContainers } from '@/features/docker/containers'
 import { removeEditor } from '@/features/editor/container'
+import { materializeEnvFiles } from '@/features/env-files/materialize'
 import { keyPathFor } from '@/features/ssh-keys/service'
 import { badRequest, conflict, notFound } from '@/lib/errors'
 import { publishControl, publishSessionEvent } from '@/lib/events'
@@ -538,6 +539,14 @@ export async function createSession(
           logger.debug(`No upstream for ${name}: ${tracked.stderr}`)
         }
       }
+
+      // .env files are git-ignored by convention, so a brand-new worktree
+      // otherwise starts with none at all — this is what a project's stored
+      // env files (features/env-files) exist to fix. Best-effort by its own
+      // design (see that function's own comment): never allowed to fail
+      // session creation, so its result is not even checked here.
+      await materializeEnvFiles(project.slug, path)
+
       await db
         .update(sessions)
         .set({

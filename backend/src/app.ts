@@ -6,6 +6,7 @@ import { attachmentsRouter } from '@/features/attachments/routes'
 import { dockerRouter } from '@/features/docker/routes'
 import { editorProxyRouter } from '@/features/editor/proxy'
 import { editorRouter } from '@/features/editor/routes'
+import { envFilesRouter } from '@/features/env-files/routes'
 import { healthRouter } from '@/features/health/routes'
 import { ideasRouter } from '@/features/ideas/routes'
 import { learningRouter } from '@/features/learning/routes'
@@ -48,6 +49,7 @@ export function createApp() {
 
   app.route('/api', healthRouter)
   app.route('/api', projectsRouter)
+  app.route('/api', envFilesRouter)
   app.route('/api', libraryRouter)
   app.route('/api', learningRouter)
   app.route('/api', sshKeysRouter)
