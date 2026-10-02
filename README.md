@@ -107,6 +107,8 @@ itself on its next run.
 ```
 bootstrap.sh            curl-able entry point: installs git, clones, runs install.sh
 install.sh              orchestrator — parses flags, runs the steps in order
+CHANGELOG.md            changelog shown in the app's What's new screen, newest release first (English)
+CHANGELOG.ru.md         the same, in Russian
 scripts/
   lib/common.sh         logging, dry-run, sudo, apt, env-file, service helpers
   lib/config.sh         every version, package list and path (all overridable)
@@ -170,6 +172,12 @@ it stops. `turn-reconcile.worker.ts` notices the interruption on the worker's
 next start and recovers it, but the turn itself is cut short rather than
 finishing; there is no drain-first option today. Something to know before
 re-running the installer against a box mid-session, not a reason to avoid it.
+
+Right after migrations, this step also records the install for the frontend's
+"What's new" screen (`bun run mark-install`, `GET`/`POST /api/whats-new`) —
+system-wide, not per-browser, so every operator sees the changelog once and it
+stays closed once anyone dismisses it. A failure here only logs a warning; it
+never fails the install.
 
 Agents and skills are markdown in `LIBRARY_DIR`, marked `role: orchestrator` or
 `role: subagent` so you can see which drive a session and which are only reached

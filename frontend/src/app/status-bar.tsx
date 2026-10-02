@@ -2,10 +2,12 @@ import { useAtomValue } from 'jotai'
 import { useTranslation } from 'react-i18next'
 import { useHealth } from '@/features/health'
 import { formatBytes, useSystem } from '@/features/system'
+import { useOpenWhatsNew } from '@/features/whats-new'
 import { StatusDot, type Tone } from '@/shared/components'
+import { env } from '@/shared/config/env'
 import { cn } from '@/shared/lib/utils'
 import { reconnectingStreamsAtom } from '@/shared/store/connection'
-import { buttonVariants } from '@/shared/ui/button'
+import { Button, buttonVariants } from '@/shared/ui/button'
 import {
   Popover,
   PopoverContent,
@@ -26,6 +28,10 @@ const DOT_TONE: Record<'checking' | 'ok' | 'warn', Tone> = {
   ok: 'success',
   warn: 'warning',
 }
+
+// Points the version button's aria-describedby at the sr-only span below it
+// — see the button's own comment for why a description, not the name.
+const WHATS_NEW_DESCRIPTION_ID = 'status-bar-whats-new-description'
 
 type MetricKey = 'cpu' | 'mem' | 'disk'
 
@@ -110,6 +116,7 @@ export function StatusBar() {
   const { t, i18n } = useTranslation()
   const { data: health, isPending, isError } = useHealth()
   const { data: system } = useSystem()
+  const openWhatsNew = useOpenWhatsNew()
   // Every live session's own stream (use-session-stream.ts) reports here when
   // it drops — folded into the same line as the health check itself, so an
   // operator sees "Reconnecting…" whichever of the two actually failed,
@@ -290,8 +297,46 @@ export function StatusBar() {
         </>
       )}
 
+      {/* Reopens the "what's new" screen (features/whats-new) in manual mode
+          — the one way to see it again once the operator has closed it for
+          this install. Falls back to env.appVersion rather than going blank
+          while health is still pending, same as the screen itself does.
+          No aria-label: the button's own visible text (`v1.2.150`) already is
+          its name, and WCAG 2.5.3 wants an accessible name that actually
+          contains whatever text is on screen, not a different phrase
+          replacing it. Base UI's Tooltip is visual only — it renders no
+          `role="tooltip"` and wires up no description of its own, so without
+          help here a screen reader announces only "v1.2.150" and nothing
+          about what the button does. `aria-describedby` points at the
+          sr-only span below instead, which carries "What's new" as the
+          button's accessible description while leaving its accessible name
+          exactly the visible text. */}
       <span className={cn('shrink-0', !system && 'ml-auto')}>
-        {health?.version ? `v${health.version}` : ''}
+        <Tooltip>
+          {/* `data-slot="button"` restated: TooltipTrigger stamps its own
+              `data-slot="tooltip-trigger"` over whatever it clones its
+              `render` element into, the same fix tab-bar.tsx and
+              composer.tsx use for their own Tooltip-wrapped buttons. */}
+          <TooltipTrigger
+            data-slot="button"
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="h-auto px-1.5 py-1 font-normal"
+                onClick={openWhatsNew}
+                aria-describedby={WHATS_NEW_DESCRIPTION_ID}
+              >
+                {`v${health?.version ?? env.appVersion}`}
+              </Button>
+            }
+          />
+          <TooltipContent>{t('whatsNew.statusBarLabel')}</TooltipContent>
+        </Tooltip>
+        <span id={WHATS_NEW_DESCRIPTION_ID} className="sr-only">
+          {t('whatsNew.statusBarLabel')}
+        </span>
       </span>
     </footer>
   )

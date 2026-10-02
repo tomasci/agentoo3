@@ -51,6 +51,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   log_info "[dry-run] would ensure the service account '$APP_USER' exists"
   log_info "[dry-run] would reassign $REPO_ROOT and the data directories to $APP_USER"
   log_info "[dry-run] would run 'bun install' and migrations in $BACKEND_DIR"
+  log_info "[dry-run] would record this install for the What's new screen"
   log_info "[dry-run] would create $PROJECTS_DIR, $SOURCES_DIR and $LIBRARY_DIR"
   log_info "[dry-run] would create $SSH_KEYS_DIR (0700) and adopt any keys from ~/.ssh/$APP_NAME"
   log_info "[dry-run] would create $ATTACHMENTS_DIR (0700) for session-scoped file attachments"
@@ -300,6 +301,20 @@ log_info "Applying database migrations"
 run_as_app bash -c "cd '$BACKEND_DIR' && DATABASE_URL='$db_url' bun run db:migrate" \
   || die "Migrations failed. Check: journalctl -u ${APP_NAME}-api -n 50"
 log_ok "Migrations applied"
+
+# Records "an install/update just ran" for the frontend's "What's new" screen
+# (backend/src/mark-install.ts, backend/src/features/whats-new/). Run the same
+# way migrations just were — as the app user, with only DATABASE_URL set — and
+# deliberately never fatal: this is a cosmetic feature, and an operator must
+# never lose a real install over it failing. mark-install.ts itself reports
+# the version it recorded, so a failure here still names what, if anything,
+# the API will report once it is back up.
+if run_as_app bash -c "cd '$BACKEND_DIR' && DATABASE_URL='$db_url' bun run mark-install"; then
+  installed_version="$(jq -r '.version' "$BACKEND_DIR/package.json" 2>/dev/null || echo '?')"
+  log_ok "Recorded install $installed_version for the What's new screen"
+else
+  log_warn "Could not record this install for the What's new screen (not fatal)."
+fi
 
 # --- services -----------------------------------------------------------------
 if ! has_systemd; then

@@ -1,5 +1,11 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath, URL } from 'node:url'
 import { plugin } from 'bun'
 import { GlobalRegistrator } from '@happy-dom/global-registrator'
+import {
+  mergeChangelogMarkdown,
+  parseChangelogMarkdown,
+} from '../src/features/whats-new/model/changelog-markdown'
 
 // React's `act` only exists in its development build, and only runs when the
 // environment declares itself a test one. Set before anything imports React —
@@ -40,3 +46,27 @@ plugin({
   },
 })
 
+// __CHANGELOG__ is normally substituted by vite.config.ts's `define` at
+// config-load time (see that file, and features/whats-new/model/changelog.ts) —
+// `bun test` never runs vite at all, so this preload parses the same two
+// repo-root files with the same parser and sets the same global, before any
+// test file can import model/changelog.ts. Component tests render the real
+// changelog this way, the same way they see the real `en`/`ru` i18n bundles.
+const changelogEnPath = fileURLToPath(new URL('../../CHANGELOG.md', import.meta.url))
+const changelogRuPath = fileURLToPath(new URL('../../CHANGELOG.ru.md', import.meta.url))
+const changelogEn = parseChangelogMarkdown(
+  readFileSync(changelogEnPath, 'utf8'),
+  'en',
+  'CHANGELOG.md',
+)
+const changelogRu = parseChangelogMarkdown(
+  readFileSync(changelogRuPath, 'utf8'),
+  'ru',
+  'CHANGELOG.ru.md',
+)
+;(globalThis as { __CHANGELOG__?: unknown }).__CHANGELOG__ = mergeChangelogMarkdown(
+  changelogEn,
+  changelogRu,
+  'CHANGELOG.md',
+  'CHANGELOG.ru.md',
+)
