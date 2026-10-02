@@ -211,3 +211,28 @@ test('the next run is shown with the shared date formatter and "your local time"
   // Never the raw, unlabelled `Date#toLocaleString()` output this replaced.
   expect(text(card())).not.toContain(new Date(nextRunAt).toLocaleString())
 })
+
+// UTC is the schedule's own default (DEFAULT_SCHEDULE above) — the Select
+// pins it first and labels it bare "UTC" rather than "UTC (UTC+0)" (see
+// src/features/settings/lib/timezones.ts's own comment on why that
+// parenthetical would just repeat the zone's name back at the reader), and
+// the schedule line below reads "Daily at 04:00 (UTC)." for the same reason.
+test('UTC is offered in the timezone Select, labelled bare, and the schedule line reads cleanly', async () => {
+  override = { enabled: true, time: '04:00', timezone: 'UTC' }
+  await mount()
+  expect(text(card())).toContain('Daily at 04:00 (UTC).')
+  expect(text(card())).not.toContain('UTC+0')
+
+  const trigger = card().querySelector('#settings-learning-timezone') as HTMLElement
+  // Base UI renders the trigger's chevron as part of the same text node set
+  // in jsdom, so this checks containment rather than exact equality.
+  expect(text(trigger)).toContain('UTC')
+  expect(text(trigger)).not.toContain('(UTC+0)')
+
+  await click(trigger)
+  const options = [...document.body.querySelectorAll('[role="option"]')]
+  const utc = options.find((el) => text(el) === 'UTC')
+  if (!utc) throw new Error('no "UTC" option in the timezone Select')
+  // Not a second, "UTC (UTC+0)"-style row alongside the bare one.
+  expect(options.some((el) => text(el).startsWith('UTC ('))).toBe(false)
+})
