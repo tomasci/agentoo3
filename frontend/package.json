@@ -2,7 +2,7 @@
   "name": "agentoo-frontend",
   "private": true,
   "type": "module",
-  "version": "1.2.155",
+  "version": "1.2.156",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
