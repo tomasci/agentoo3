@@ -71,7 +71,12 @@ envFilesRouter.openapi(
       200: json(envFileSchema, 'Saved'),
       400: json(errorSchema, 'Invalid path or content'),
       404: json(errorSchema, 'Not found'),
-      409: json(errorSchema, 'This project already has the maximum number of stored env files'),
+      409: json(
+        errorSchema,
+        'Conflict: either the project already has the maximum number of stored env files, or ' +
+          'this path collides with an existing entry of the other kind (a file where a folder ' +
+          'is needed, or vice versa)',
+      ),
     },
   }),
   async (c) => {

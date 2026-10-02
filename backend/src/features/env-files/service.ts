@@ -117,6 +117,17 @@ async function fileExists(path: string): Promise<boolean> {
   }
 }
 
+/** `lstat`-based directory check, the mirror of `fileExists` above — used by
+ * `putEnvFile`'s own collision check, never to decide whether to *follow*
+ * anything. */
+async function directoryExists(path: string): Promise<boolean> {
+  try {
+    return (await lstat(path)).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 /**
  * Every stored env file's store-relative path, by project slug directly —
  * what materialize.ts calls during session creation. That caller already has
@@ -187,6 +198,54 @@ async function writeFileAtomic(target: string, content: string): Promise<void> {
   }
 }
 
+// --- per-project serialization -------------------------------------------
+
+/**
+ * One chained promise per project slug — what every mutating operation
+ * (`putEnvFile`, `deleteEnvFile`) below runs inside, so two calls for the
+ * same project never interleave their own read-then-write.
+ *
+ * Without this, `putEnvFile`'s cap check races its own write: two concurrent
+ * PUTs of two *different*, both-new paths can each see the store below
+ * ENV_FILE_MAX_FILES_PER_PROJECT before either has written anything, and both
+ * proceed — the project ends up over the cap (see this feature's own
+ * concurrency test for a deterministic repro). A `Map<string, Promise>` chain
+ * is enough — nothing fancier is needed — because `putEnvFile` and
+ * `deleteEnvFile` only ever run in the API process: the worker's own queue
+ * code (`src/worker.ts`) calls `materializeEnvFiles`, which only *reads* this
+ * store, never either of these two.
+ */
+const projectLocks = new Map<string, Promise<void>>()
+
+/**
+ * Run `fn` only after every previously queued `fn` for this `slug` has
+ * finished, success or failure — a rejection must release the lock for the
+ * next caller, not hold it forever.
+ */
+async function withProjectLock<T>(slug: string, fn: () => Promise<T>): Promise<T> {
+  const previous = projectLocks.get(slug) ?? Promise.resolve()
+  let release!: () => void
+  // What the *next* caller for this slug waits on — a plain signal, not `fn`'s
+  // own result, so this call's success or failure never has to be observed by
+  // anyone but its own caller.
+  const next = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  projectLocks.set(slug, next)
+
+  await previous
+  try {
+    return await fn()
+  } finally {
+    release()
+    // Drop the entry once nothing is queued behind this call — otherwise a
+    // project touched once would hold a resolved promise in this map for the
+    // life of the process. Only safe to delete if we are still the most
+    // recent link: a caller that queued up after us has already replaced it.
+    if (projectLocks.get(slug) === next) projectLocks.delete(slug)
+  }
+}
+
 /**
  * Create or overwrite one env file. Creating parent directories is how the
  * UI "creates structure": saving `server/.env` for the first time creates
@@ -203,30 +262,56 @@ export async function putEnvFile(projectId: string, input: PutEnvFileInput): Pro
   const check = checkEnvFilePath(input.path)
   if (!check.ok) throw badRequest(check.reason)
 
-  const root = projectEnvDir(project.slug)
-  const target = storePath(project.slug, input.path)
+  // The cap check and the write below must happen in the same critical
+  // section as any file/directory collision check: all three read disk state
+  // and then act on it, and none of that read-then-act is safe to run twice
+  // at once for the same project.
+  return withProjectLock(project.slug, async () => {
+    const root = projectEnvDir(project.slug)
+    const target = storePath(project.slug, input.path)
 
-  const isNew = !(await fileExists(target))
-  if (isNew) {
-    const count = (await walk(root, '')).length
-    if (count >= ENV_FILE_MAX_FILES_PER_PROJECT) {
-      throw conflict(
-        `This project already has ${ENV_FILE_MAX_FILES_PER_PROJECT} env files, the maximum`,
-      )
+    // A store-path collision with what is already on disk — distinct from
+    // the cap below, and caught here rather than left to `ensureStoreDir`'s
+    // `mkdir` (ENOTDIR, saving "db.env/.env" once "db.env" is a file) or
+    // `writeFileAtomic`'s `rename` (EISDIR/ENOTEMPTY, saving "x.env" once
+    // "x.env/.env" made "x.env" a directory) — either of which would
+    // otherwise surface as an unhandled 500 instead of a clear 409.
+    const segments = input.path.split('/')
+    let ancestor = root
+    for (let i = 0; i < segments.length - 1; i++) {
+      ancestor = join(ancestor, segments[i] as string)
+      if (await fileExists(ancestor)) {
+        throw conflict(
+          `"${segments.slice(0, i + 1).join('/')}" is already a file, so it cannot also be a folder`,
+        )
+      }
     }
-  }
+    if (await directoryExists(target)) {
+      throw conflict(`"${input.path}" is already a folder`)
+    }
 
-  await ensureStoreDir(root, dirname(target))
-  await writeFileAtomic(target, input.content)
+    const isNew = !(await fileExists(target))
+    if (isNew) {
+      const count = (await walk(root, '')).length
+      if (count >= ENV_FILE_MAX_FILES_PER_PROJECT) {
+        throw conflict(
+          `This project already has ${ENV_FILE_MAX_FILES_PER_PROJECT} env files, the maximum`,
+        )
+      }
+    }
 
-  const st = await fsStat(target)
-  logger.info(`Env file "${input.path}" saved for project ${project.slug}`)
-  return {
-    path: input.path,
-    content: input.content,
-    size: st.size,
-    updatedAt: st.mtime.toISOString(),
-  }
+    await ensureStoreDir(root, dirname(target))
+    await writeFileAtomic(target, input.content)
+
+    const st = await fsStat(target)
+    logger.info(`Env file "${input.path}" saved for project ${project.slug}`)
+    return {
+      path: input.path,
+      content: input.content,
+      size: st.size,
+      updatedAt: st.mtime.toISOString(),
+    }
+  })
 }
 
 /** Idempotent in neither direction: deleting a file that is not there is a
@@ -239,24 +324,28 @@ export async function deleteEnvFile(projectId: string, relPath: string): Promise
   const check = checkEnvFilePath(relPath)
   if (!check.ok) throw badRequest(check.reason)
 
-  const root = projectEnvDir(project.slug)
-  const target = storePath(project.slug, relPath)
+  // Same lock putEnvFile takes: a delete shrinking the store below the cap
+  // and a put's own count check must not interleave either.
+  await withProjectLock(project.slug, async () => {
+    const root = projectEnvDir(project.slug)
+    const target = storePath(project.slug, relPath)
 
-  if (!(await fileExists(target))) throw notFound('Env file')
-  await rm(target, { force: true })
+    if (!(await fileExists(target))) throw notFound('Env file')
+    await rm(target, { force: true })
 
-  // Prune now-empty parent directories, innermost first, so a deleted
-  // `server/.env` also removes the now-empty `env/server/` — but never the
-  // store root itself, even once the last file in the project is gone;
-  // putEnvFile's own ensureStoreDir expects the root to already exist (or be
-  // freely re-creatable), not to have been swept away by the delete path.
-  let dir = dirname(target)
-  while (dir !== root && dir.startsWith(root + sep)) {
-    const entries = await readdir(dir).catch(() => undefined)
-    if (!entries || entries.length > 0) break
-    await rmdir(dir).catch(() => {})
-    dir = dirname(dir)
-  }
+    // Prune now-empty parent directories, innermost first, so a deleted
+    // `server/.env` also removes the now-empty `env/server/` — but never the
+    // store root itself, even once the last file in the project is gone;
+    // putEnvFile's own ensureStoreDir expects the root to already exist (or be
+    // freely re-creatable), not to have been swept away by the delete path.
+    let dir = dirname(target)
+    while (dir !== root && dir.startsWith(root + sep)) {
+      const entries = await readdir(dir).catch(() => undefined)
+      if (!entries || entries.length > 0) break
+      await rmdir(dir).catch(() => {})
+      dir = dirname(dir)
+    }
 
-  logger.info(`Env file "${relPath}" deleted for project ${project.slug}`)
+    logger.info(`Env file "${relPath}" deleted for project ${project.slug}`)
+  })
 }
