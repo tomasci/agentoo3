@@ -21,6 +21,7 @@ import {
   useUpdateAgent,
 } from '../hooks/use-library'
 import { AVAILABLE_TOOLS, EFFORTS } from '../model/tools'
+import { ItemVersionHistory } from './item-version-history'
 
 interface Draft {
   name: string
@@ -392,6 +393,9 @@ export function AgentEditorPage({ name }: { name?: string }) {
           remove.mutate({ path: { name } }, { onSuccess: () => void navigate({ to: '/library' }) })
         }
       />
+
+      {/* Edit mode only: a new agent has no versions yet. */}
+      {!isNew && name && <ItemVersionHistory kind="agent" name={name} />}
     </div>
   )
 }

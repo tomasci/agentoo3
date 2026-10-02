@@ -40,7 +40,13 @@ import { sessionUploadsDir } from '@/lib/paths'
 // reading `undefined` instead, which `endTurn` below already treats the
 // same as the queue rejecting the call.
 import * as queueIndex from './index'
-import { enqueueSessionRun, QUEUE_SESSION_RUN, redisConnection, type SessionRunJob } from './index'
+import {
+  enqueueSessionRun,
+  type LearningRunJob,
+  QUEUE_SESSION_RUN,
+  redisConnection,
+  type SessionRunJob,
+} from './index'
 import { startUnderSessionConcurrency } from './session-concurrency'
 
 /**
@@ -1486,6 +1492,45 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
   }
 }
 
+/**
+ * Dispatches one job off `sessionRunQueue` by its BullMQ job *name* — `'turn'`
+ * (a session turn, enqueueSessionRun) runs exactly as before,
+ * `'learning'` (a learning run, enqueueLearningRun in queue/index.ts) runs
+ * the learning job's own analysis (features/learning/engine.ts's
+ * `runLearning`).
+ *
+ * This single dispatch point, inside the one BullMQ `Worker` this queue has,
+ * is what puts a learning run under the identical global concurrency cap a
+ * session turn runs under (session-concurrency.ts's `startUnderSessionConcurrency`,
+ * wired below exactly as it already was) — a learning run waits in the same
+ * queue, behind the same running sessions, rather than any separate queue or
+ * worker ever executing the analysis. See queue/index.ts's own comment on
+ * `sessionRunQueue` for why the two job shapes share this one queue instead
+ * of `LearningRunJob` getting a queue of its own.
+ *
+ * Exported for tests/learning-worker-dispatch.test.ts; startSessionRunWorker
+ * below is the only real caller.
+ */
+export function dispatchSessionRunJob(job: {
+  name: string
+  data: SessionRunJob | LearningRunJob
+}): Promise<void> {
+  if (job.name === 'learning') {
+    // Imported lazily, inline, rather than at the top of this file: a static
+    // top-level import of features/learning/engine.ts would drag that whole
+    // module's own import graph (the library readers, the SDK call helper,
+    // the dedupe judge) into every test that imports this file for `runTurn`
+    // alone — the identical module-boundary reasoning
+    // features/ideas/run-close.ts's own header documents for why it is kept
+    // thin. A dynamic import costs nothing here: this only runs once per
+    // dispatched job, never in a hot loop.
+    return import('@/features/learning/engine').then(({ runLearning }) =>
+      runLearning(job.data as LearningRunJob),
+    )
+  }
+  return runTurn(job.data as SessionRunJob)
+}
+
 export function startSessionRunWorker() {
   // env.WORKER_CONCURRENCY here is only ever the construction-time value —
   // startUnderSessionConcurrency below replaces it before BullMQ ever fetches
@@ -1505,13 +1550,19 @@ export function startSessionRunWorker() {
   // saved cap; see startUnderSessionConcurrency's own comment for the
   // measured frequency. Calling `worker.run()` only ourselves, after that
   // first tick's apply actually lands, is what closes the gap.
-  const worker = new Worker<SessionRunJob>(QUEUE_SESSION_RUN, (job) => runTurn(job.data), {
-    connection: redisConnection(),
-    concurrency: env.WORKER_CONCURRENCY,
-    autorun: false,
-  })
+  const worker = new Worker<SessionRunJob | LearningRunJob>(
+    QUEUE_SESSION_RUN,
+    (job) => dispatchSessionRunJob(job),
+    {
+      connection: redisConnection(),
+      concurrency: env.WORKER_CONCURRENCY,
+      autorun: false,
+    },
+  )
   worker.on('failed', (job, error) => {
-    logger.error(`Session turn ${job?.data.sessionId} failed: ${error.message}`)
+    logger.error(
+      `Session-run job ${job?.name} (${JSON.stringify(job?.data)}) failed: ${error.message}`,
+    )
   })
   // Reached through the namespace import above, not a destructured
   // `sessionRunQueue` from '@/queue' — see this file's own comment on

@@ -201,6 +201,60 @@ const schema = z.object({
     .default('')
     .refine((v) => v === '' || isAbsolute(v), 'EDITOR_SETTINGS_FILE must be an absolute path')
     .transform((v) => (v === '' ? undefined : v)),
+
+  // Session learning (backend/README.md's "Session learning" section): a
+  // daily background review of every session in a rolling 24h window,
+  // proposing library changes as suggestions a human still has to approve.
+  // Nothing about this knob set controls *whether* a run happens or *when* —
+  // that is features/learning/schedule.ts's own admin-configurable setting —
+  // only how one run's model calls are bounded, mirroring IDEA_PROMPT_* above
+  // for the identical reason: a tool-less, structured-output SDK call with its
+  // own budget and timeout, nothing like a session turn.
+  //
+  // Unset by default: a one-shot call with no `model` option takes the SDK's
+  // own default, same as every agent in the library that omits its own
+  // `model:` frontmatter.
+  LEARNING_MODEL: z.string().optional(),
+  // Passed to the SDK's own maxTurns for both the per-batch review call and
+  // the dedupe judge call. `tools: []` on both means there is no tool-use
+  // fan-out that could loop turn after turn — see IDEA_PROMPT_MAX_TURNS's own
+  // comment for why this still needs to be more than 1: room for the model to
+  // retry a structured-output attempt the CLI itself rejected, or continue a
+  // longer answer. A review call's input (the whole library plus a batch of
+  // session digests) runs larger than an idea's canvas, so this is a little
+  // more generous than that knob's 6.
+  LEARNING_MAX_TURNS: z.coerce.number().int().positive().default(10),
+  // Per-call ceiling (SDK's own maxBudgetUsd), for one review call OR one
+  // judge call — not the whole run, which LEARNING_RUN_BUDGET_USD bounds
+  // separately below. Exists to bound the ordinary case, not to be brushed
+  // against.
+  LEARNING_CALL_BUDGET_USD: z.coerce.number().positive().default(2),
+  // The only timeout the SDK offers is an AbortController — see
+  // features/ideas/prompt-service.ts's identical reasoning for
+  // IDEA_PROMPT_TIMEOUT_MS. Longer than that knob's 120s: a review call reads
+  // the whole library plus a batch of session digests, which is a larger
+  // prompt than one idea's canvas.
+  LEARNING_CALL_TIMEOUT_MS: z.coerce.number().int().positive().default(300_000),
+  // A run-level ceiling, summed across every call it makes (review calls plus
+  // judge calls) — distinct from the per-call knob above, which bounds one
+  // call in isolation but says nothing about how many calls a run with many
+  // batches ends up making. Once a run's summed cost reaches this, it stops
+  // *starting new calls* — whatever it already produced stays, the run still
+  // completes rather than failing outright, and the cutoff is recorded in its
+  // `error` as an advisory note. A run this box is not expecting to run daily
+  // against a large fleet of sessions is exactly the shape a ceiling like this
+  // protects: without it, a backlog of unreviewed sessions turns one run's
+  // bill into the sum of every batch, uncapped.
+  LEARNING_RUN_BUDGET_USD: z.coerce.number().positive().default(10),
+  // The char budget features/learning/batching.ts packs session digests
+  // against, greedily, before each batch becomes one review call. Sized well
+  // under typical context limits so a batch (library contents + pending/
+  // rejected suggestions + digests) still leaves headroom for the model's own
+  // reasoning and answer; a single oversized session digest still gets its own
+  // batch regardless; see digest.ts's own per-item/per-session truncation
+  // caps for where an oversized digest's size is actually bounded in the first
+  // place.
+  LEARNING_BATCH_CHARS: z.coerce.number().int().positive().default(60_000),
 })
 
 const parsed = schema.safeParse(process.env)

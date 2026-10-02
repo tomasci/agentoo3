@@ -1,9 +1,12 @@
 // The global Library page's third section, "System prompts", through the real
 // route tree and shell at `/library`: its heading sits after Agents and
-// Skills with no "New" button, its one row (`idea-to-prompt`) links to the
-// editor under /library, its Source cell reflects the GET's `source` (and
-// falls back to "—" when that GET fails), and its actions menu offers Edit
-// only.
+// Skills with no "New" button, one row per `KNOWN_PROMPTS` entry
+// (`idea-to-prompt`, `session-learning`) links to the editor under /library,
+// its Source cell reflects the GET's `source` (and falls back to "—" when
+// that GET fails), and its actions menu offers Edit only. The fake GET below
+// answers every name with the same fixture — fine here, since only
+// `idea-to-prompt`'s own row (always first, `KNOWN_PROMPTS`' own order) is
+// what these tests read from.
 //
 // Mounted the way tests/usage-route-verify.test.tsx mounts the shell (memory
 // history, seeded query cache), with the prompt clients replaced through
@@ -99,6 +102,8 @@ async function mount(path: string) {
   )
   client.setQueryData([{ url: '/api/library/agents' }], [])
   client.setQueryData([{ url: '/api/library/skills' }], [])
+  client.setQueryData([{ url: '/api/library/suggestions' }, { status: 'pending' }], [])
+  client.setQueryData([{ url: '/api/library/suggestions' }, { status: 'rejected' }], [])
   root = createRoot(container)
   await act(async () => {
     root?.render(
@@ -164,17 +169,21 @@ test('the System prompts section comes after Agents and Skills and has no New bu
   expect(problems).toEqual([])
 })
 
-test('its single row links the title to /library/prompts/idea-to-prompt and has a description', async () => {
+test('one row per known prompt, the first linking the title to /library/prompts/idea-to-prompt', async () => {
   await mount('/library')
   const rows = promptRows()
-  expect(rows).toHaveLength(1)
+  expect(rows).toHaveLength(2)
   const link = rows[0]?.querySelector('a') as HTMLAnchorElement | null
   expect(link?.textContent?.trim()).toBe('Idea → prompt instruction')
   expect(link?.getAttribute('href')).toBe('/library/prompts/idea-to-prompt')
   expect(rows[0]?.textContent).toContain(
     "Turns an idea's canvas into a single development prompt for an orchestrator session.",
   )
-  expect(getCalls).toEqual([NAME])
+  // The second known prompt, added for session learning — same table, its own row.
+  const link2 = rows[1]?.querySelector('a') as HTMLAnchorElement | null
+  expect(link2?.getAttribute('href')).toBe('/library/prompts/session-learning')
+  expect(link2?.textContent?.trim()).toBe('Session learning instruction')
+  expect(getCalls).toEqual([NAME, 'session-learning'])
 })
 
 test('Source reads "Built-in default" when the GET says source: default', async () => {
@@ -192,7 +201,7 @@ test('Source reads "Custom" when the GET says source: file', async () => {
 test('Source reads "—" when the GET fails, and the rest of the row still renders', async () => {
   getAnswer = 'fail'
   await mount('/library')
-  expect(getCalls).toEqual([NAME])
+  expect(getCalls).toEqual([NAME, 'session-learning'])
   expect(sourceCellText()).toBe('—')
   expect(promptRows()[0]?.querySelector('a')?.getAttribute('href')).toBe(
     '/library/prompts/idea-to-prompt',

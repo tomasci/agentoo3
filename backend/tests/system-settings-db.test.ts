@@ -208,9 +208,9 @@ for (const value of [1, 3, 64]) {
       >('valid')[String(value)]
     const expected = { maxConcurrentSessions: { value, source: 'override', defaultValue: 2 } }
     expect(f?.patch.status).toBe(200)
-    expect(f?.patch.body).toEqual(expected)
+    expect(f?.patch.body).toMatchObject(expected)
     expect(f?.get.status).toBe(200)
-    expect(f?.get.body).toEqual(expected)
+    expect(f?.get.body).toMatchObject(expected)
     expect(f?.stored).toEqual({ value })
     expect(f?.jsonbType).toBe('number')
     expect(f?.effective).toBe(value)
@@ -220,7 +220,7 @@ for (const value of [1, 3, 64]) {
 dbTest('PATCH null resets to the default and deletes the row', () => {
   const f = fact<{ patch: Res; stored: unknown; get: Res }>('reset')
   expect(f.patch.status).toBe(200)
-  expect(f.patch.body).toEqual({
+  expect(f.patch.body).toMatchObject({
     maxConcurrentSessions: { value: 2, source: 'default', defaultValue: 2 },
   })
   expect(f.stored).toBeNull()
@@ -230,14 +230,14 @@ dbTest('PATCH null resets to the default and deletes the row', () => {
 dbTest('PATCH null with nothing saved is still a 200 default', () => {
   const f = fact<{ patch: Res }>('resetWhenUnset')
   expect(f.patch.status).toBe(200)
-  expect(f.patch.body).toEqual({
+  expect(f.patch.body).toMatchObject({
     maxConcurrentSessions: { value: 2, source: 'default', defaultValue: 2 },
   })
 })
 
 dbTest('saving a value equal to the default still reports an override', () => {
   const f = fact<{ patch: Res }>('equalToDefault')
-  expect(f.patch.body).toEqual({
+  expect(f.patch.body).toMatchObject({
     maxConcurrentSessions: { value: 2, source: 'override', defaultValue: 2 },
   })
 })
@@ -265,7 +265,7 @@ dbTest('with no row and WORKER_CONCURRENCY unset, GET reports the built-in defau
   const f = fact<{ envWorkerConcurrency: number; get: Res; effective: number }>('envDefault')
   expect(f.envWorkerConcurrency).toBe(2)
   expect(f.get.status).toBe(200)
-  expect(f.get.body).toEqual({
+  expect(f.get.body).toMatchObject({
     maxConcurrentSessions: { value: 2, source: 'default', defaultValue: 2 },
   })
   expect(f.effective).toBe(2)
@@ -274,7 +274,7 @@ dbTest('with no row and WORKER_CONCURRENCY unset, GET reports the built-in defau
 dbTest('with WORKER_CONCURRENCY=5, the default follows env', () => {
   const f = envFact<{ envWorkerConcurrency: number; get: Res; effective: number }>('envDefault')
   expect(f.envWorkerConcurrency).toBe(5)
-  expect(f.get.body).toEqual({
+  expect(f.get.body).toMatchObject({
     maxConcurrentSessions: { value: 5, source: 'default', defaultValue: 5 },
   })
   expect(f.effective).toBe(5)
@@ -282,7 +282,7 @@ dbTest('with WORKER_CONCURRENCY=5, the default follows env', () => {
 
 dbTest('with WORKER_CONCURRENCY=5, a reset lands on 5, not on 2', () => {
   const f = envFact<{ patch: Res }>('envDefaultReset')
-  expect(f.patch.body).toEqual({
+  expect(f.patch.body).toMatchObject({
     maxConcurrentSessions: { value: 5, source: 'default', defaultValue: 5 },
   })
 })
@@ -328,7 +328,7 @@ for (const name of malformedNames) {
         >
       >('malformed')[name]
     expect(f?.get.status).toBe(200)
-    expect(f?.get.body).toEqual({
+    expect(f?.get.body).toMatchObject({
       maxConcurrentSessions: { value: 2, source: 'default', defaultValue: 2 },
     })
     expect(f?.effective).toBe(2)
@@ -340,7 +340,7 @@ for (const name of malformedNames) {
 dbTest('a malformed row is replaced by a valid save and removed by a reset', () => {
   const f = fact<{ save: Res; reset: Res; storedAfterReset: unknown }>('overMalformed')
   expect(f.save.status).toBe(200)
-  expect(f.save.body).toEqual({
+  expect(f.save.body).toMatchObject({
     maxConcurrentSessions: { value: 4, source: 'override', defaultValue: 2 },
   })
   expect(f.reset.status).toBe(200)

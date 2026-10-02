@@ -10,6 +10,7 @@ import { Card, CardContent } from '@/shared/ui/card'
 import { Field, FieldDescription, FieldLabel } from '@/shared/ui/field'
 import { Input } from '@/shared/ui/input'
 import { useCreateSkill, useDeleteSkill, useSkill, useUpdateSkill } from '../hooks/use-library'
+import { ItemVersionHistory } from './item-version-history'
 
 export function SkillEditorPage({ name }: { name?: string }) {
   const { t } = useTranslation()
@@ -152,6 +153,9 @@ export function SkillEditorPage({ name }: { name?: string }) {
           remove.mutate({ path: { name } }, { onSuccess: () => void navigate({ to: '/library' }) })
         }
       />
+
+      {/* Edit mode only: a new skill has no versions yet. */}
+      {!isNew && name && <ItemVersionHistory kind="skill" name={name} />}
     </div>
   )
 }

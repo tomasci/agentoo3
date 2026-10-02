@@ -50,6 +50,8 @@ mock.module(`${B}/queue/index.ts`, () => ({
   enqueueIdeaHandoffSweep: async () => ({}),
   ensureIdeaHandoffSweepSchedule: async () => {},
   enqueueDockerOp: async () => ({}),
+  QUEUE_LEARNING_SCHEDULE: 'learning-schedule',
+  enqueueLearningRun: async () => ({}),
 }))
 
 // An in-memory stand-in for the Redis-backed operation record and lock.

@@ -8,6 +8,7 @@
 // in its own import graph. A bare 'zod' import here left `.openapi()` missing
 // at the moment this file's own top-level schemas ran, in exactly that path.
 import { z } from '@hono/zod-openapi'
+import { learningScheduleSchema } from '@/features/learning/schedule'
 
 /**
  * Which text a prompt response actually carries: the operator's own saved
@@ -526,6 +527,23 @@ export const systemSettingsSchema = z
             'override, and what `value` reverts to on reset.',
         }),
     }),
+    // When the learning job (backend/README.md) next runs on its own
+    // schedule — see features/learning/schedule.ts for the cron-shaped value
+    // this wraps and queue/learning-schedule.worker.ts, the worker that
+    // actually reads it off Redis.
+    learningSchedule: z.object({
+      value: learningScheduleSchema,
+      source: systemSettingsSourceSchema,
+      defaultValue: learningScheduleSchema,
+      nextRunAt: z
+        .string()
+        .nullable()
+        .openapi({
+          description:
+            'ISO timestamp of the next scheduled run, computed from `value` against the ' +
+            'current time — null exactly when `value.enabled` is false.',
+        }),
+    }),
   })
   .openapi('SystemSettings')
 export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>
@@ -538,6 +556,9 @@ export type SystemSettingsDto = z.infer<typeof systemSettingsSchema>
 // which an OpenAPIHono object schema strips before this refine ever runs —
 // into a 400 instead of a silent no-op PATCH.
 export const updateSystemSettingsSchema = z
-  .object({ maxConcurrentSessions: maxConcurrentSessionsSchema.nullable().optional() })
+  .object({
+    maxConcurrentSessions: maxConcurrentSessionsSchema.nullable().optional(),
+    learningSchedule: learningScheduleSchema.nullable().optional(),
+  })
   .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to update' })
 export type UpdateSystemSettingsInput = z.infer<typeof updateSystemSettingsSchema>

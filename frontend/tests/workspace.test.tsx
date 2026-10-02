@@ -89,6 +89,21 @@ async function mount(path: string, projects = PROJECTS) {
     [{ url: '/api/system/settings' }],
     { maxConcurrentSessions: { value: 2, source: 'default', defaultValue: 2 } },
   )
+  // The Suggested/Rejected tab counts (features/library/components/
+  // library-tabs.tsx) and the System prompts table's new row — seeded for
+  // the same reason as every other query here, not because this file has
+  // anything of its own to say about the learning feature.
+  client.setQueryData([{ url: '/api/library/suggestions' }, { status: 'pending' }], [])
+  client.setQueryData([{ url: '/api/library/suggestions' }, { status: 'rejected' }], [])
+  client.setQueryData(
+    [{ url: '/api/system/prompts/:name', params: { name: 'session-learning' } }],
+    {
+      name: 'session-learning',
+      body: 'Built-in default instruction.',
+      path: '/opt/agentoo/library/prompts/session-learning.md',
+      source: 'default',
+    },
+  )
 
   const root = createRoot(container)
   roots.push(root)

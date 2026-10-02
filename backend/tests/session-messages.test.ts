@@ -204,6 +204,7 @@ mock.module(`${B}/queue/index.ts`, () => ({
   enqueueSessionRun: async () => ({}),
   enqueueAttachmentsGc: async () => ({}),
   ensureAttachmentsGcSchedule: async () => {},
+  enqueueLearningRun: async () => ({}),
 }))
 
 const { listMessagePage } = await import(`${B}/features/sessions/service.ts`)

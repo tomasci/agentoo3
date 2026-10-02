@@ -176,6 +176,8 @@ mock.module(`${B}/queue/index.ts`, () => ({
     enqueued.push(job)
     return {}
   },
+  QUEUE_LEARNING_SCHEDULE: 'learning-schedule',
+  enqueueLearningRun: async () => ({}),
 }))
 
 const operationRecords = new Map<string, Record<string, unknown>>()

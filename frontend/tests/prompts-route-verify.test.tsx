@@ -112,6 +112,8 @@ async function mount(path: string) {
   )
   client.setQueryData([{ url: '/api/library/agents' }], [])
   client.setQueryData([{ url: '/api/library/skills' }], [])
+  client.setQueryData([{ url: '/api/library/suggestions' }, { status: 'pending' }], [])
+  client.setQueryData([{ url: '/api/library/suggestions' }, { status: 'rejected' }], [])
   root = createRoot(container)
   await act(async () => {
     root?.render(

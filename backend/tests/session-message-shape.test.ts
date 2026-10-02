@@ -143,6 +143,7 @@ mock.module(`${B}/queue/index.ts`, () => ({
   enqueueSessionRun: async () => ({}),
   enqueueAttachmentsGc: async () => ({}),
   ensureAttachmentsGcSchedule: async () => {},
+  enqueueLearningRun: async () => ({}),
 }))
 
 // Captured rather than sent anywhere real — this file is about the shape of

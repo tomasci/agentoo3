@@ -440,6 +440,112 @@
       "agentConfirm": "\"{{name}}\" will be deleted, and unlinked from {{count}} project(s) using it. This cannot be undone.",
       "skillTitle": "Delete skill?",
       "skillConfirm": "\"{{name}}\" and its {{files}} bundled file(s) will be deleted, and unlinked from {{count}} project(s) using it. This cannot be undone."
+    },
+    "tabs": {
+      "library": "Library",
+      "suggested": "Suggested",
+      "rejected": "Rejected",
+      "nav": "Library views"
+    },
+    "learning": {
+      "heading": "Session learning",
+      "runNow": "Run learning now",
+      "runFailed": "Could not start a run",
+      "runQueued": "Waiting in the session queue.",
+      "runRunning": "Reviewing sessions from {{start}} to {{end}}.",
+      "lastRun": "Last run",
+      "noRuns": "No run has finished yet.",
+      "lastRunWhen": "When",
+      "lastRunSessions": "Sessions analyzed",
+      "lastRunCreated": "Suggestions created",
+      "lastRunDuplicates": "Duplicates skipped",
+      "lastRunCost": "Cost",
+      "lastRunError": "Error",
+      "lastRunNote": "Note",
+      "scheduleOn": "Daily at {{time}} ({{timezone}}).",
+      "scheduleOff": "Scheduled runs are off.",
+      "scheduleNextRun": "Next run: {{when}} (your local time).",
+      "scheduleLink": "Change in Settings",
+      "loadFailed": "Could not load the learning status"
+    },
+    "suggestions": {
+      "modifyHeading": "Changes to existing agents & skills",
+      "createHeading": "New agents & skills",
+      "noModify": "No suggested changes right now.",
+      "noCreate": "No suggested additions right now.",
+      "loadFailed": "Could not load suggestions",
+      "review": "Review",
+      "reject": "Reject",
+      "rejected": "Rejected",
+      "rejectTitle": "Reject this suggestion?",
+      "rejectConfirm": "The learning job will not propose \"{{title}}\" again unless you delete it from Rejected.",
+      "rejectFailed": "Could not reject",
+      "stale": "Changed since suggested",
+      "targetMissing": "Target missing",
+      "targetTaken": "Name already exists",
+      "createdAt": "Suggested {{date}}",
+      "sourceSessions": "From:",
+      "kind": {
+        "agent": "Agent",
+        "skill": "Skill"
+      },
+      "kindLower": {
+        "agent": "agent",
+        "skill": "skill"
+      },
+      "action": {
+        "create": "New",
+        "modify": "Modify"
+      },
+      "rejectedHeading": "Rejected suggestions",
+      "rejectedIntro": "Kept here so the learning job won't propose the same idea again. Delete one to let it resurface.",
+      "noRejected": "No rejected suggestions.",
+      "deletePermanently": "Delete permanently",
+      "deleteTitle": "Delete this suggestion permanently?",
+      "deleteConfirm": "\"{{title}}\" will be forgotten. The learning job may propose the same idea again in a future run.",
+      "deleteFailed": "Could not delete",
+      "table": {
+        "kind": "Kind",
+        "action": "Action",
+        "title": "Title",
+        "rejectedAt": "Rejected"
+      },
+      "detail": {
+        "loadFailed": "Could not load this suggestion",
+        "apply": "Apply",
+        "applied": "Applied",
+        "applyTitleModify": "Apply this change?",
+        "applyConfirmModify": "This creates a new version of \"{{name}}\".",
+        "applyTitleCreate": "Add this to the library?",
+        "applyConfirmCreate": "This adds the new {{kind}} \"{{name}}\" to the library.",
+        "applyFailed": "Could not apply",
+        "staleBody": "This item changed after the suggestion was made. The diff below is against the current version — applying replaces it.",
+        "diffCaptionApplied": "Comparing the version this replaced to what was applied — not the item's current content.",
+        "diffCaptionRejected": "Comparing the version this was based on to what it proposed.",
+        "targetMissingBody": "This suggestion modifies an item that no longer exists, so it cannot be applied.",
+        "targetTakenBody": "A library item named \"{{name}}\" already exists, so this {{kind}} can't be created until the existing one is renamed or removed.",
+        "preview": "Preview",
+        "rawMarkdown": "Raw markdown",
+        "showUnchanged_one": "Show {{count}} unchanged line",
+        "showUnchanged_other": "Show {{count}} unchanged lines",
+        "status": {
+          "pending": "Pending",
+          "applied": "Applied",
+          "rejected": "Rejected"
+        },
+        "appliedVersion": "Applied as version {{version}}",
+        "viewInLibrary": "View in library"
+      }
+    },
+    "history": {
+      "heading": "History",
+      "empty": "No earlier versions yet.",
+      "snapshot": "Snapshot",
+      "appliedSuggestion": "Applied suggestion",
+      "view": "View",
+      "viewSuggestion": "View suggestion",
+      "versionLabel": "Version {{version}}",
+      "loadFailed": "Could not load version history"
     }
   },
   "shell": {
@@ -488,8 +594,23 @@
     "loadFailed": "Could not load the current setting",
     "errors": {
       "maxConcurrentSessionsInvalid": "Enter a whole number of 1 or more",
-      "maxConcurrentSessionsTooHigh": "Limit is too high"
-    }
+      "maxConcurrentSessionsTooHigh": "Limit is too high",
+      "learningTimeInvalid": "Enter a time as HH:MM",
+      "learningTimezoneInvalid": "Choose a timezone"
+    },
+    "learningHeading": "Session learning",
+    "learningLead": "When the background job reviews recent sessions and drafts suggestions for the library.",
+    "learningEnabled": "Run automatically",
+    "learningEnabledHint": "\"Run learning now\" on the Suggested tab works regardless of this setting.",
+    "learningTime": "Time of day",
+    "learningTimeHint": "24-hour clock, in the timezone below.",
+    "learningTimezone": "Timezone",
+    "learningScheduleOn": "Daily at {{time}} ({{timezone}}).",
+    "learningScheduleOff": "Scheduled runs are off.",
+    "learningNextRun": "Next run: {{when}} (your local time).",
+    "learningNextRunNone": "Not scheduled.",
+    "learningUsingDefault": "Using the default schedule.",
+    "learningOverridden": "Overriding the default schedule."
   },
   "storage": {
     "heading": "Storage",
@@ -963,10 +1084,7 @@
     }
   },
   "prompts": {
-    "title": "Idea → prompt instruction",
-    "description": "The system instruction that turns an idea's canvas into a single development prompt for an orchestrator session. Tune it here instead of over SSH.",
     "body": "Instruction",
-    "bodyHint": "The whole system prompt for the one-shot call that turns a canvas into a session prompt. Blank is rejected — an empty instruction means the model runs with no guidance at all.",
     "sourceFile": "Custom — your saved instruction",
     "sourceDefault": "Built-in default",
     "defaultNotice": "No custom instruction is saved yet. This is the built-in default the app runs on until you save one of your own.",
@@ -979,7 +1097,13 @@
     "items": {
       "idea-to-prompt": {
         "title": "Idea → prompt instruction",
-        "description": "Turns an idea's canvas into a single development prompt for an orchestrator session."
+        "description": "Turns an idea's canvas into a single development prompt for an orchestrator session.",
+        "bodyHint": "The whole system prompt for the one-shot call that turns a canvas into a session prompt. Blank is rejected — an empty instruction means the model runs with no guidance at all."
+      },
+      "session-learning": {
+        "title": "Session learning instruction",
+        "description": "Turns recent sessions and the current library into draft suggestions — new agents/skills or changes to existing ones.",
+        "bodyHint": "The whole system prompt for the learning job's review call. Blank is rejected — an empty instruction means the model runs with no guidance at all."
       }
     }
   },

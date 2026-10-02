@@ -745,6 +745,181 @@ export const systemSettings = pgTable('system_settings', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+// --- learning: runs, suggestions, versions ---------------------------------
+//
+// A background job reviews every session in a rolling 24h window
+// and proposes library changes. Nothing here ever writes agents/skills
+// directly — see library_suggestions below — this is purely "what the job
+// found" plus the human decision over it.
+
+export const learningRunTriggerEnum = pgEnum('learning_run_trigger', ['scheduled', 'manual'])
+
+export const learningRunStatusEnum = pgEnum('learning_run_status', [
+  'queued',
+  'running',
+  'completed',
+  'failed',
+])
+
+// One row per learning job run, across every project (the job is global, not
+// per-project — see backend/README.md's feature description). `windowStart`/
+// `windowEnd` are the 24h of session activity this run actually reviewed,
+// recorded on the row rather than derived from createdAt so a late-firing
+// scheduled run (worker was down, a prior run overran) still reports the
+// window it reviewed, not the window it merely started in.
+export const learningRuns = pgTable(
+  'learning_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    trigger: learningRunTriggerEnum('trigger').notNull(),
+    status: learningRunStatusEnum('status').notNull().default('queued'),
+    windowStart: timestamp('window_start', { withTimezone: true }).notNull(),
+    windowEnd: timestamp('window_end', { withTimezone: true }).notNull(),
+    sessionsAnalyzed: integer('sessions_analyzed').notNull().default(0),
+    suggestionsCreated: integer('suggestions_created').notNull().default(0),
+    duplicatesSkipped: integer('duplicates_skipped').notNull().default(0),
+    costUsd: doublePrecision('cost_usd').notNull().default(0),
+    error: text('error'),
+    // Together, these two let features/learning/stale.ts's reconcileLostJobs
+    // tell three situations with the same surface shape ('queued', BullMQ job
+    // missing) apart, which plain `createdAt` cannot: a row whose enqueue was
+    // never even attempted (only reachable by a row inserted some other way
+    // than createLearningRun — today, only a test fixture) is lost
+    // immediately; a row whose enqueue call already confirmed success is also
+    // lost immediately the moment its job disappears (nothing to race against
+    // any more — the job existed and is now gone, full stop); only a row in
+    // between — an attempt recorded, no confirmation yet — gets a grace
+    // period, for the gap between createLearningRun's own INSERT and its
+    // enqueue call actually reaching Redis (a concurrent sweep could land in
+    // that exact gap) or, further out, a worker that crashed inside it.
+    //
+    // Set once, in the exact same INSERT that creates the row — never by
+    // anything else — so there is no gap in which a concurrent sweep could
+    // observe the row at all without this already being set.
+    enqueueAttemptedAt: timestamp('enqueue_attempted_at', { withTimezone: true }),
+    // Set by a follow-up UPDATE, only once `enqueueLearningRun` itself has
+    // returned successfully — i.e. only once BullMQ has actually confirmed
+    // the job exists. Never unset again.
+    enqueuedAt: timestamp('enqueued_at', { withTimezone: true }),
+    // The learning run's own liveness signal, mirroring sessions.heartbeatAt
+    // — nothing reads it yet, but the column belongs on the row that will
+    // need it, not bolted on by a later migration.
+    heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    // At most one run may be queued or running at a time, enforced by
+    // Postgres rather than a check-then-insert race (the identical reasoning
+    // idea_runs_open_key and session_files_session_checksum_key already give
+    // above). The indexed expression is a constant, not a column: every row
+    // that matches the WHERE collides on the same key regardless of its own
+    // id, trigger or window, which is what makes this a *table-wide* "at most
+    // one active row" rule rather than one scoped per some column's value. A
+    // partial unique index on `status` alone would not do this — two rows,
+    // one 'queued' and one 'running', have different values of `status` and
+    // would not collide with each other at all.
+    uniqueIndex('learning_runs_single_active_key')
+      .on(sql`(true)`)
+      .where(sql`${t.status} in ('queued', 'running')`),
+    index('learning_runs_status_idx').on(t.status),
+  ],
+)
+
+export const librarySuggestionActionEnum = pgEnum('library_suggestion_action', ['create', 'modify'])
+
+export const librarySuggestionStatusEnum = pgEnum('library_suggestion_status', [
+  'pending',
+  'applied',
+  'rejected',
+])
+
+// One row per proposed library change. Nothing here ever touches a library
+// file by itself — applying one runs through the same createAgent/
+// updateAgent/createSkill/updateSkill path a human editing the Library UI
+// would (features/learning/suggestions.ts), so every invariant that already
+// holds for a hand-edited item still holds for a model-proposed one.
+export const librarySuggestions = pgTable(
+  'library_suggestions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // ON DELETE SET NULL, not CASCADE: a suggestion outlives the run that
+    // proposed it — a human may review and act on it long after the run
+    // itself has aged out of whatever retention policy learning_runs ends up
+    // with.
+    runId: uuid('run_id').references(() => learningRuns.id, { onDelete: 'set null' }),
+    kind: libraryKindEnum('kind').notNull(),
+    action: librarySuggestionActionEnum('action').notNull(),
+    // The target's name for 'modify', the name to create for 'create' —
+    // either way, the filename/directory this suggestion is about.
+    name: text('name').notNull(),
+    title: text('title').notNull(),
+    // Why: what pattern, in which sessions, this is meant to address — shown
+    // to the reviewer, never parsed.
+    rationale: text('rationale').notNull(),
+    // Plain ids, no FK: a session can be deleted (and routinely is, per
+    // backend/README.md's retention story) without invalidating a suggestion
+    // that cites it — the suggestion should outlive the sessions it was
+    // drawn from. getSuggestion/listSuggestions resolve whichever of these
+    // still exist in one batched query rather than failing on the rest.
+    sourceSessionIds: jsonb('source_session_ids').$type<string[]>().notNull().default([]),
+    // The structured proposed definition: an agent body or a skill body,
+    // exactly createAgentSchema/createSkillSchema minus `name` (the column
+    // above already carries that). Re-validated against those schemas at
+    // apply time, below, since this came from a model, not a form.
+    proposed: jsonb('proposed').$type<Record<string, unknown>>().notNull(),
+    // For 'modify': the target's full markdown at proposal time, snapshotted
+    // so the reviewer's diff — and the `stale` check in listSuggestions — has
+    // something fixed to compare the live file against. Null for 'create',
+    // which has no "before".
+    baseMarkdown: text('base_markdown'),
+    status: librarySuggestionStatusEnum('status').notNull().default('pending'),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    // Which library_item_versions row this suggestion produced, once applied.
+    appliedVersion: integer('applied_version'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('library_suggestions_status_idx').on(t.status)],
+)
+
+export const libraryVersionSourceEnum = pgEnum('library_version_source', ['snapshot', 'suggestion'])
+
+// The edit history of a library item, keyed by (kind, name) rather than by
+// suggestion: a 'snapshot' row can exist with no suggestion behind it at all
+// (a manual edit made outside this flow, captured the next time a suggestion
+// for that same item is applied — see recordVersion in
+// features/learning/versions.ts for the rule that produces these).
+export const libraryItemVersions = pgTable(
+  'library_item_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    kind: libraryKindEnum('kind').notNull(),
+    name: text('name').notNull(),
+    // 1-based, per (kind, name) — not a global sequence.
+    version: integer('version').notNull(),
+    // The full file content: an agent's .md, or a skill's SKILL.md. Always
+    // read back from disk after a write rather than re-rendered, so history
+    // matches the file byte-for-byte (see recordVersion).
+    markdown: text('markdown').notNull(),
+    source: libraryVersionSourceEnum('source').notNull(),
+    // Null for a 'snapshot' row, which was captured as a side effect rather
+    // than produced by any one suggestion; ON DELETE SET NULL for the same
+    // reason library_suggestions.runId is — the version history outlives the
+    // suggestion that produced it.
+    suggestionId: uuid('suggestion_id').references(() => librarySuggestions.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('library_item_versions_key').on(t.kind, t.name, t.version),
+    index('library_item_versions_name_idx').on(t.kind, t.name),
+  ],
+)
+
 // --- relations ----------------------------------------------------------------
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
@@ -823,4 +998,20 @@ export const ideaRunsRelations = relations(ideaRuns, ({ one }) => ({
 
 export const ideaFilesRelations = relations(ideaFiles, ({ one }) => ({
   idea: one(ideas, { fields: [ideaFiles.ideaId], references: [ideas.id] }),
+}))
+
+export const learningRunsRelations = relations(learningRuns, ({ many }) => ({
+  suggestions: many(librarySuggestions),
+}))
+
+export const librarySuggestionsRelations = relations(librarySuggestions, ({ one, many }) => ({
+  run: one(learningRuns, { fields: [librarySuggestions.runId], references: [learningRuns.id] }),
+  versions: many(libraryItemVersions),
+}))
+
+export const libraryItemVersionsRelations = relations(libraryItemVersions, ({ one }) => ({
+  suggestion: one(librarySuggestions, {
+    fields: [libraryItemVersions.suggestionId],
+    references: [librarySuggestions.id],
+  }),
 }))

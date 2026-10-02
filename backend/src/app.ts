@@ -8,6 +8,7 @@ import { editorProxyRouter } from '@/features/editor/proxy'
 import { editorRouter } from '@/features/editor/routes'
 import { healthRouter } from '@/features/health/routes'
 import { ideasRouter } from '@/features/ideas/routes'
+import { learningRouter } from '@/features/learning/routes'
 import { libraryRouter } from '@/features/library/routes'
 import { projectsRouter } from '@/features/projects/routes'
 import { sessionsRouter } from '@/features/sessions/routes'
@@ -48,6 +49,7 @@ export function createApp() {
   app.route('/api', healthRouter)
   app.route('/api', projectsRouter)
   app.route('/api', libraryRouter)
+  app.route('/api', learningRouter)
   app.route('/api', sshKeysRouter)
   app.route('/api', sourcesRouter)
   app.route('/api', sessionsRouter)

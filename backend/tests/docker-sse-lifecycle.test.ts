@@ -53,6 +53,8 @@ mock.module(`${B}/queue/index.ts`, () => ({
   enqueueIdeaHandoffSweep: async () => ({}),
   ensureIdeaHandoffSweepSchedule: async () => {},
   enqueueDockerOp: async () => ({}),
+  QUEUE_LEARNING_SCHEDULE: 'learning-schedule',
+  enqueueLearningRun: async () => ({}),
 }))
 
 const {
