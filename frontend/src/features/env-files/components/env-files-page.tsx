@@ -32,7 +32,13 @@ function EnvFilesSkeleton() {
  */
 export function EnvFilesPage({ projectId }: { projectId: string }) {
   const { t } = useTranslation()
-  const { data, isPending, isError, error } = useListEnvFiles(projectId)
+  // `isSuccess` (not just `data`) is what the add form uses to tell a
+  // list that really is empty from one that hasn't answered yet, or
+  // failed to — `files` below is `[]` in all three cases, and the add
+  // form's duplicate guard only sees `files`, so without this it can't
+  // tell a false negative from a real one. See add-env-file-form.tsx's
+  // `filesLoaded` prop doc.
+  const { data, isPending, isError, error, isSuccess: filesLoaded } = useListEnvFiles(projectId)
   const files = data?.files ?? []
   const groups = groupEnvFilesByFolder(files)
 
@@ -67,7 +73,12 @@ export function EnvFilesPage({ projectId }: { projectId: string }) {
         actions={<HowItWorksDrawer />}
       />
 
-      <AddEnvFileForm projectId={projectId} files={files} onAdded={setFocusPath} />
+      <AddEnvFileForm
+        projectId={projectId}
+        files={files}
+        filesLoaded={filesLoaded}
+        onAdded={setFocusPath}
+      />
 
       {isPending && <EnvFilesSkeleton />}
 

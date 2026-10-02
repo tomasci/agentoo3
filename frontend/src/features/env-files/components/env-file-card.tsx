@@ -90,7 +90,7 @@ export function EnvFileCard({ projectId, file, cardRef }: EnvFileCardProps) {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
               e.preventDefault()
               save()
             }

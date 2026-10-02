@@ -16,6 +16,14 @@ const SUGGESTIONS = ['.env', 'server/.env']
 interface AddEnvFileFormProps {
   projectId: string
   files: EnvFile[]
+  /** The list query's own `isSuccess` — `false` while it's still loading or
+   * after it failed, in which case `files` above is `[]` whether or not the
+   * store actually has anything in it. The duplicate guard below only ever
+   * sees `files`, so on an unloaded list it can't tell a real empty store
+   * from "unknown", and PUT is an upsert: a false negative there would
+   * silently overwrite whatever is already saved. Disabling the form (and the
+   * submit below) until this is `true` is what keeps that from happening. */
+  filesLoaded: boolean
   /** Fires with the path just created, or the existing one a duplicate
    * resolved to — the page uses this to scroll/focus that file's card. */
   onAdded: (path: string) => void
@@ -27,13 +35,18 @@ interface AddEnvFileFormProps {
  * file and its parent folders exist, and show up in the list, before a
  * single byte is typed into it.
  */
-export function AddEnvFileForm({ projectId, files, onAdded }: AddEnvFileFormProps) {
+export function AddEnvFileForm({ projectId, files, filesLoaded, onAdded }: AddEnvFileFormProps) {
   const { t } = useTranslation()
   const put = usePutEnvFile(projectId)
   const [path, setPath] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   const submit = (candidate: string) => {
+    // Belt-and-suspenders alongside the disabled Input/Button below: a click
+    // already in flight when the list finishes loading (or failing) must not
+    // slip through on a button that was enabled a tick ago.
+    if (!filesLoaded) return
+
     const trimmed = candidate.trim()
     if (!trimmed) return
 
@@ -85,18 +98,23 @@ export function AddEnvFileForm({ projectId, files, onAdded }: AddEnvFileFormProp
                 }}
                 autoComplete="off"
                 spellCheck={false}
+                disabled={!filesLoaded}
                 {...field}
               />
             )}
           </FormField>
         </div>
-        <Button type="button" onClick={() => submit(path)} disabled={put.isPending || !path.trim()}>
+        <Button
+          type="button"
+          onClick={() => submit(path)}
+          disabled={put.isPending || !path.trim() || !filesLoaded}
+        >
           {put.isPending && <Spinner data-icon="inline-start" />}
           {t('envFiles.add.submit')}
         </Button>
       </div>
 
-      {files.length === 0 && (
+      {filesLoaded && files.length === 0 && (
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <span>{t('envFiles.add.suggestionsLabel')}</span>
           {SUGGESTIONS.map((suggestion) => (
