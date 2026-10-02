@@ -23,6 +23,7 @@ import {
   IdeaDetailRoute,
   NewTabRoute,
   ProjectDockerRoute,
+  ProjectEnvRoute,
   ProjectIdeasRoute,
   ProjectLibraryRoute,
   ProjectSessionsRoute,
@@ -167,6 +168,19 @@ const projectDockerRoute = createRoute({
   getParentRoute: () => projectRoute,
   path: '/docker',
   component: ProjectDockerRoute,
+})
+
+// The project's stored env files — copied into every *new* session worktree
+// at the same relative paths (backend/src/features/env-files), which is what
+// lets that worktree's own Docker Compose (projectDockerRoute above) find a
+// `.env` it would otherwise start without, since `.env` files are
+// git-ignored by convention. A child of the project layout like every other
+// project route, not of `projectDockerRoute`: it manages the store, not one
+// scope's live containers.
+const projectEnvRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/env',
+  component: ProjectEnvRoute,
 })
 
 // The Idea Manager's board: six fixed columns, one project's worth of ideas.
@@ -330,6 +344,7 @@ export const routeTree = rootRoute.addChildren([
     sessionDockerRoute,
     sessionEditorRoute,
     projectDockerRoute,
+    projectEnvRoute,
     projectLibraryRoute,
     projectIdeasRoute,
     ideaDetailRoute,
