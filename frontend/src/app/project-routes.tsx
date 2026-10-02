@@ -1,6 +1,7 @@
 import { useParams } from '@tanstack/react-router'
 import { DockerPage } from '@/features/docker'
 import { EditorLauncher } from '@/features/editor'
+import { EnvFilesPage } from '@/features/env-files'
 import { IdeaBoardPage, IdeaDetailPage } from '@/features/ideas'
 import { ProjectLibraryPage } from '@/features/library'
 import { ProjectOverview, ProjectPicker, useProjects } from '@/features/projects'
@@ -37,6 +38,11 @@ export function ProjectLibraryRoute() {
 export function ProjectDockerRoute() {
   const { projectId } = useParams({ from: '/projects/$projectId' })
   return <DockerPage projectId={projectId} />
+}
+
+export function ProjectEnvRoute() {
+  const { projectId } = useParams({ from: '/projects/$projectId' })
+  return <EnvFilesPage projectId={projectId} />
 }
 
 export function ProjectIdeasRoute() {

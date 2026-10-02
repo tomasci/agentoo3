@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 import {
   BookOpen,
   Container,
+  FileKey,
   Gauge,
   HardDrive,
   KeyRound,
@@ -242,6 +243,23 @@ function ProjectNav({ projectId }: { projectId: string }) {
               >
                 <Container />
                 <span>{t('nav.docker')}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            {/* Right after Docker: the files this page manages exist to make
+                that dashboard's `docker compose` actually find its `.env`
+                files — `env-files/index.ts`'s `EnvFilesPage`. */}
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                render={
+                  <Link
+                    to="/projects/$projectId/env"
+                    params={{ projectId }}
+                    activeProps={{ 'aria-current': 'page', 'data-active': '' }}
+                  />
+                }
+              >
+                <FileKey />
+                <span>{t('nav.env')}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
             {/* Non-exact: the detail route (`/ideas/$ideaId`) is a child page of

@@ -33,6 +33,24 @@ export function projectPlugin(slug: string): string {
   return join(projectRoot(slug), 'plugin')
 }
 
+/**
+ * Per-project store of env files, copied into every *new* session worktree at
+ * the same relative paths (`env/.env` -> `.env`, `env/server/.env` ->
+ * `server/.env`, ...) — see features/env-files. `.env` files are git-ignored
+ * by convention, so a brand new worktree otherwise starts with none at all,
+ * which is what breaks `docker compose`'s `env_file: ./server/.env` the first
+ * time a session tries to bring a stack up.
+ *
+ * Outside repo/ and worktrees/, same reasoning as projectPlugin above: this is
+ * our own scaffolding, not part of any checkout, so it must never collide with
+ * a path a git operation on the repo itself might touch. There is no database
+ * row backing any of this — the directory tree on disk is the one source of
+ * truth; see features/env-files/service.ts's own header for why.
+ */
+export function projectEnvDir(slug: string): string {
+  return join(projectRoot(slug), 'env')
+}
+
 // --- editor runtime (per-session code-server) ------------------------------
 //
 // Lives under PROJECTS_DIR, not ATTACHMENTS_DIR or a /tmp path: slugs can

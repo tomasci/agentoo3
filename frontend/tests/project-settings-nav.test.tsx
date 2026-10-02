@@ -240,13 +240,14 @@ test('/projects/<id>/settings renders the old Overview page: details, SSH key, r
 
 // ── rule 3 ──────────────────────────────────────────────────────────────────
 
-test('project nav: Sessions, Docker, Ideas, Library in the content; Settings alone in the footer', async () => {
+test('project nav: Sessions, Docker, Env, Ideas, Library in the content; Settings alone in the footer', async () => {
   await mount('/projects/p1/sessions')
   const content = sidebar()?.querySelector('[data-slot="sidebar-content"]')
   const footer = sidebar()?.querySelector('[data-slot="sidebar-footer"]')
   expect(linksIn(content)).toEqual([
     { href: '/projects/p1/sessions', label: 'Sessions' },
     { href: '/projects/p1/docker', label: 'Docker' },
+    { href: '/projects/p1/env', label: 'Env files' },
     { href: '/projects/p1/ideas', label: 'Ideas' },
     { href: '/projects/p1/library', label: 'Agents & skills' },
   ])

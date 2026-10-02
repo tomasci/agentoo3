@@ -14,7 +14,8 @@
     "save": "Save",
     "edit": "Edit",
     "noOptions": "No options available",
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "close": "Close"
   },
   "health": {
     "checking": "Checking backend…",
@@ -149,7 +150,8 @@
     "system": "System",
     "configuration": "Configuration",
     "ideas": "Ideas",
-    "projectSettings": "Settings"
+    "projectSettings": "Settings",
+    "env": "Env files"
   },
   "sshKeys": {
     "heading": "Your keys",
@@ -1031,6 +1033,72 @@
       "stopSucceeded": "Stopped {{name}}",
       "stopFailed": "Could not stop {{name}}",
       "stopConflict": "Another Docker operation is already in progress for this container's project. Try again shortly."
+    }
+  },
+  "envFiles": {
+    "heading": "Env files",
+    "lead": "Files saved here are copied into every new session's worktree at the same path, so Docker and the apps find them. Existing sessions are not changed.",
+    "loadFailed": "Could not load env files",
+    "groups": {
+      "root": "/ (project root)"
+    },
+    "add": {
+      "label": "Path",
+      "submit": "Add",
+      "suggestionsLabel": "Quick add:",
+      "failed": "Could not add the file"
+    },
+    "empty": {
+      "title": "No env files stored yet",
+      "description": "Add a path above \u2014 e.g. \".env\" or \"server/.env\" \u2014 to start the project's store."
+    },
+    "card": {
+      "meta": "{{size}} \u00b7 updated {{updatedAt}}",
+      "contentLabel": "Contents of {{path}}",
+      "unsaved": "Unsaved changes",
+      "saved": "Saved {{path}}",
+      "saveFailed": "Could not save the file",
+      "deleted": "Deleted {{path}}",
+      "deleteFailed": "Could not delete the file",
+      "deleteConfirmTitle": "Delete this env file?",
+      "deleteConfirmBody": "Removes \"{{path}}\" from the store. A worktree that already has its own copy keeps it; future sessions will no longer receive this file."
+    },
+    "validation": {
+      "empty": "Path is required",
+      "tooLong": "Path is longer than 255 characters",
+      "leadingSlash": "Path may not start with \"/\"",
+      "trailingSlash": "Path may not end with \"/\"",
+      "backslash": "Path may not contain \"\\\"",
+      "controlChars": "Path may not contain a control character",
+      "emptySegment": "Path may not contain an empty segment (e.g. \"a//b\")",
+      "dotSegment": "Path may not contain a \".\" or \"..\" segment",
+      "gitSegment": "Path may not contain a \".git\" segment",
+      "nodeModulesSegment": "Path may not contain a \"node_modules\" segment",
+      "invalidChars": "Path segments may only contain letters, digits, \"_\", \"-\" and \".\"",
+      "badBasename": "Filename must be \".env\", \".env.<suffix>\" or \"<name>.env\" (e.g. \".env.local\", \"db.env\")"
+    },
+    "howItWorks": {
+      "trigger": "How it works",
+      "title": "How env files work",
+      "intro": "A copy of each file below is placed into every new session's git worktree, at the same path, the moment that session is created.",
+      "layouts": {
+        "title": "Typical layouts",
+        "rootOnly": "A project that just needs one file at its root: add \".env\".",
+        "serverWebapp": "A project split into a server and a webapp, each with its own file: add both \"server/.env\" and \"webapp/.env\".",
+        "compose": "A Docker Compose file that reads one through env_file: add exactly the path it names, e.g. \"server/.env\" for:"
+      },
+      "rules": {
+        "title": "Rules",
+        "onCreateOnly": "Copied only when a session is created \u2014 never synced into one already running.",
+        "branchWins": "Never overwrites a file the session's branch already tracks at that path \u2014 the branch always wins.",
+        "keptOutOfGit": "Kept out of git automatically, so an agent can never commit a copy by accident.",
+        "allowedNames": "Allowed names: \".env\", \".env.<suffix>\" (e.g. \".env.local\"), or \"<name>.env\" (e.g. \"db.env\")."
+      },
+      "storage": {
+        "title": "Where they live",
+        "location": "Stored under the project's own folder, next to \u2014 but never inside \u2014 its repo/ checkout, and readable only by the agentoo service account.",
+        "untouched": "Saving or deleting a file here never changes an existing session or the project's own checkout; it only changes what the next new session receives."
+      }
     }
   },
   "editor": {

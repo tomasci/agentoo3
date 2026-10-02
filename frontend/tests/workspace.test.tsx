@@ -289,6 +289,7 @@ test('picking a project fills in that same tab, and turns on project navigation'
   expect(navLinks()).toEqual([
     '/projects/p1/sessions',
     '/projects/p1/docker',
+    '/projects/p1/env',
     '/projects/p1/ideas',
     '/projects/p1/library',
     '/projects/p1/settings',
