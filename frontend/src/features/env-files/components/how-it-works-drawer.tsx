@@ -55,10 +55,12 @@ export function HowItWorksDrawer() {
       <DrawerContent className="sm:[--drawer-content-width:28rem]">
         <DrawerHeader>
           <DrawerTitle>{t('envFiles.howItWorks.title')}</DrawerTitle>
-          <DrawerDescription>{t('envFiles.howItWorks.intro')}</DrawerDescription>
+          <DrawerDescription className="text-pretty">
+            {t('envFiles.howItWorks.intro')}
+          </DrawerDescription>
         </DrawerHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pt-4 pb-4">
           <Section title={t('envFiles.howItWorks.layouts.title')}>
             <p>{t('envFiles.howItWorks.layouts.rootOnly')}</p>
             <p>{t('envFiles.howItWorks.layouts.serverWebapp')}</p>
