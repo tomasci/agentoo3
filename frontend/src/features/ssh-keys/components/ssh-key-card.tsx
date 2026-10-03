@@ -34,7 +34,13 @@ export function SshKeyCard({ sshKey }: { sshKey: SshKey }) {
         })
 
   return (
-    <Item variant="outline" render={<article />}>
+    // In a grid row, the card stretches to match a taller sibling (e.g. one
+    // showing a test-result Alert). `Item` is a multi-line flex container,
+    // and with spare cross-axis space its default `align-content: normal`
+    // (stretch) splits that extra height across the header and body lines
+    // instead of leaving it below them, pushing the header down and adding
+    // a gap before the public key. `content-start` packs the lines to the top.
+    <Item variant="outline" render={<article />} className="content-start">
       <ItemHeader>
         <ItemContent>
           <ItemTitle>{sshKey.name}</ItemTitle>
