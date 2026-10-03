@@ -303,7 +303,7 @@ function ProjectNav({ projectId, glass }: { projectId: string; glass: boolean })
           column, so this footer sits below whatever content there is rather
           than trailing directly after it. */}
       <SidebarFooter>
-        <SidebarMenu>
+        <SidebarMenu className={cn(glass && cn('rounded-xl p-1', GLASS_CLASS_NAME))}>
           <SidebarMenuItem>
             <SidebarMenuButton
               render={
@@ -362,11 +362,12 @@ export function ShellSidebar({ mode, projectId }: ShellSidebarProps) {
   // overlay it always was.
   const backdropActive = useBackdropActive()
 
-  // `SystemNav`/`ProjectNav`'s own nav list goes glassy on the same condition
-  // plus one more: the phone `Sheet` below is an opaque overlay drawer with no
-  // backdrop behind it at all (see the comment above), so glass there would
-  // just be a translucent panel over a plain colour — `!isMobile` keeps that
-  // nav list opaque in the drawer regardless of `backdropActive`.
+  // `SystemNav`/`ProjectNav`'s own nav list and `ProjectNav`'s footer menu go
+  // glassy on the same condition plus one more: the phone `Sheet` below is an
+  // opaque overlay drawer with no backdrop behind it at all (see the comment
+  // above), so glass there would just be a translucent panel over a plain
+  // colour — `!isMobile` keeps those menus opaque in the drawer regardless of
+  // `backdropActive`.
   const glassNav = backdropActive && !isMobile
 
   // An empty tab has nothing to navigate (see the comment below), and

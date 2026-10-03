@@ -1,6 +1,6 @@
 // The shared glass recipe (`GLASS_CLASS_NAME`, features/appearance) on the
-// three shell surfaces that carry it while a backdrop is active, and on
-// nothing else:
+// shell surfaces that carry it while a backdrop is active, and on nothing
+// else:
 //
 //   - the page body, `main[data-slot=sidebar-inset]`;
 //   - the desktop tab pill: one element wrapping the tab <ul> and the [+]
@@ -8,13 +8,15 @@
 //     with the header kept at `h-12`;
 //   - the desktop sidebar's main nav `SidebarMenu`, for both the system tab
 //     (`SystemNav`) and a project tab (`ProjectNav`), with the glass plus
-//     `rounded-xl p-1`.
+//     `rounded-xl p-1`;
+//   - on a project tab only, the desktop sidebar's footer `SidebarMenu` (the
+//     "Project settings" link, `ProjectNav`'s footer), with the same glass
+//     plus `rounded-xl p-1`. The system tab's `SystemNav` has no footer.
 //
-// The brand header, ProjectNav's footer menu and the sidebar container never
-// carry glass. Neither does the nav menu in the phone drawer. With nothing
-// chosen, none of these surfaces carries any glass class or the
-// `rounded-xl`/`p-1` this change adds, and the tabs, the [+] and the nav links
-// still work.
+// The brand header and the sidebar container never carry glass. Neither do
+// the nav menu and the footer menu in the phone drawer. With nothing chosen,
+// none of these surfaces carries any glass class or the `rounded-xl`/`p-1`
+// this change adds, and the tabs, the [+] and the nav links still work.
 //
 // "Carries glass" is detected by any of `bg-background/70`,
 // `backdrop-blur-xl` or `ring-border/50`. None of them is used anywhere else
@@ -161,8 +163,9 @@ const inset = () => container.querySelector('main[data-slot="sidebar-inset"]')
 const sidebars = () => [...document.querySelectorAll('[data-slot="sidebar"]')]
 const mainNavMenu = (sidebar: Element | undefined = sidebars()[0]) =>
   sidebar?.querySelector('[data-slot="sidebar-content"] [data-slot="sidebar-menu"]') ?? null
-const footerMenu = () =>
-  sidebars()[0]?.querySelector('[data-slot="sidebar-footer"] [data-slot="sidebar-menu"]') ?? null
+/** ProjectNav's footer menu ("Project settings"); null on the system tab. */
+const footerMenu = (sidebar: Element | undefined = sidebars()[0]) =>
+  sidebar?.querySelector('[data-slot="sidebar-footer"] [data-slot="sidebar-menu"]') ?? null
 const brandHeader = () => sidebars()[0]?.querySelector('[data-slot="sidebar-header"]') ?? null
 
 /** Names every element in the document that carries any glass marker, so a
@@ -172,6 +175,7 @@ function glassySurfaces(): string[] {
     [inset(), 'inset'],
     [tabPill(), 'tab-pill'],
     [mainNavMenu(), 'nav-menu'],
+    [footerMenu(), 'footer-menu'],
   ])
   return [...document.querySelectorAll('[class]')]
     .filter((el) => has(el, GLASS_MARKERS).length > 0)
@@ -192,24 +196,43 @@ function surfaces() {
     pillShape: has(tabPill(), PILL),
     navRecipe: has(mainNavMenu(), RECIPE),
     navShape: has(mainNavMenu(), PILL),
+    hasFooter: footerMenu() !== null,
+    footerRecipe: has(footerMenu(), RECIPE),
+    footerShape: has(footerMenu(), PILL),
   }
 }
 
-const ON = {
-  glassy: ['inset', 'nav-menu', 'tab-pill'],
-  insetRecipe: [...RECIPE],
-  pillRecipe: [...RECIPE],
-  pillShape: [...PILL],
-  navRecipe: [...RECIPE],
-  navShape: [...PILL],
+/** The system tab has no footer menu at all; a project tab has one. */
+type Tab = 'system' | 'project'
+
+function on(tab: Tab) {
+  const footer = tab === 'project'
+  return {
+    glassy: footer
+      ? ['footer-menu', 'inset', 'nav-menu', 'tab-pill']
+      : ['inset', 'nav-menu', 'tab-pill'],
+    insetRecipe: [...RECIPE],
+    pillRecipe: [...RECIPE],
+    pillShape: [...PILL],
+    navRecipe: [...RECIPE],
+    navShape: [...PILL],
+    hasFooter: footer,
+    footerRecipe: footer ? [...RECIPE] : [],
+    footerShape: footer ? [...PILL] : [],
+  }
 }
-const OFF = {
-  glassy: [],
-  insetRecipe: [],
-  pillRecipe: [],
-  pillShape: [],
-  navRecipe: [],
-  navShape: [],
+function off(tab: Tab) {
+  return {
+    glassy: [],
+    insetRecipe: [],
+    pillRecipe: [],
+    pillShape: [],
+    navRecipe: [],
+    navShape: [],
+    hasFooter: tab === 'project',
+    footerRecipe: [],
+    footerShape: [],
+  }
 }
 
 beforeEach(() => {
@@ -272,20 +295,24 @@ describe('with nothing chosen no surface carries glass or the pill shape', () =>
   test('system tab: nothing stored', async () => {
     await mount('/library')
     expect(mainNavMenu() !== null).toBe(true)
-    expect(surfaces()).toEqual(OFF)
+    expect(surfaces()).toEqual(off('system'))
   })
 
   test('project tab: nothing stored', async () => {
     await mount('/projects/p1/sessions')
     expect(mainNavMenu() !== null).toBe(true)
-    expect(surfaces()).toEqual(OFF)
+    expect(surfaces()).toEqual(off('project'))
+    // The footer menu is the "Project settings" one, and it is plain.
+    const footer = footerMenu()
+    expect(!!footer?.querySelector('a[href="/projects/p1/settings"]')).toBe(true)
+    expect(has(footer, [...GLASS_MARKERS, ...PILL])).toEqual([])
   })
 
   test('garbage in storage counts as nothing chosen', async () => {
     localStorage.setItem(BG_KEY, '{not json')
     localStorage.setItem(PATTERN_KEY, '"stripes"')
     await mount('/library')
-    expect(surfaces()).toEqual(OFF)
+    expect(surfaces()).toEqual(off('system'))
   })
 })
 
@@ -346,17 +373,17 @@ describe('with nothing chosen the tabs, the [+] and the nav links still work', (
 
 // --- on ----------------------------------------------------------------------------------
 
-describe('while a backdrop is active exactly the three surfaces carry the glass', () => {
+describe('while a backdrop is active exactly the glass surfaces carry the glass', () => {
   test('system tab, a colour', async () => {
     localStorage.setItem(BG_KEY, '"blue"')
     await mount('/library')
-    expect(surfaces()).toEqual(ON)
+    expect(surfaces()).toEqual(on('system'))
   })
 
   test('system tab, a pattern alone', async () => {
     localStorage.setItem(PATTERN_KEY, '"code"')
     await mount('/library')
-    expect(surfaces()).toEqual(ON)
+    expect(surfaces()).toEqual(on('system'))
   })
 
   test('project tab, a gradient and a pattern', async () => {
@@ -365,10 +392,12 @@ describe('while a backdrop is active exactly the three surfaces carry the glass'
     await mount('/projects/p1/sessions')
     // It is ProjectNav's menu being checked: it links into the project.
     expect(!!mainNavMenu()?.querySelector('a[href="/projects/p1/sessions"]')).toBe(true)
-    expect(surfaces()).toEqual(ON)
+    // And the footer menu is ProjectNav's "Project settings" one.
+    expect(!!footerMenu()?.querySelector('a[href="/projects/p1/settings"]')).toBe(true)
+    expect(surfaces()).toEqual(on('project'))
   })
 
-  test('the brand header, the footer menu and the sidebar container carry none of it', async () => {
+  test('the brand header and the sidebar container carry none of it; the footer menu carries all of it', async () => {
     localStorage.setItem(BG_KEY, '"green"')
     await mount('/projects/p1/sessions')
     const brand = brandHeader()
@@ -380,37 +409,71 @@ describe('while a backdrop is active exactly the three surfaces carry the glass'
       ...has(el, GLASS_MARKERS),
       // and nothing inside them either
       ...[...(el?.querySelectorAll('[class]') ?? [])].flatMap((d) =>
-        // The container/inner hold the nav menu, which is allowed glass.
-        d === mainNavMenu() ? [] : has(d, GLASS_MARKERS),
+        // The container/inner hold the nav and footer menus, which are allowed glass.
+        d === mainNavMenu() || d === footer ? [] : has(d, GLASS_MARKERS),
       ),
     ]
     expect({
       brand: touched(brand),
-      footer: touched(footer),
+      // The footer menu itself carries the full recipe and the pill shape...
+      footerRecipe: has(footer, RECIPE),
+      footerShape: has(footer, PILL),
+      // ...but nothing inside it is glassy on its own.
+      insideFooter: [...(footer?.querySelectorAll('[class]') ?? [])].flatMap((d) =>
+        has(d, GLASS_MARKERS),
+      ),
       container: has(sidebarContainer, GLASS_MARKERS),
       inner: has(sidebarInner, GLASS_MARKERS),
-    }).toEqual({ brand: [], footer: [], container: [], inner: [] })
+    }).toEqual({
+      brand: [],
+      footerRecipe: [...RECIPE],
+      footerShape: [...PILL],
+      insideFooter: [],
+      container: [],
+      inner: [],
+    })
   })
 
   test('switching the backdrop on and off live adds and removes all three', async () => {
     await mount('/library')
-    expect(surfaces()).toEqual(OFF)
+    expect(surfaces()).toEqual(off('system'))
     await act(async () => {
       store.set(backgroundAtom, 'mint')
     })
     await settle()
-    expect(surfaces()).toEqual(ON)
+    expect(surfaces()).toEqual(on('system'))
     await act(async () => {
       store.set(backgroundAtom, 'none')
       store.set(backgroundPatternAtom, 'geometric')
     })
     await settle()
-    expect(surfaces()).toEqual(ON)
+    expect(surfaces()).toEqual(on('system'))
     await act(async () => {
       store.set(backgroundPatternAtom, 'none')
     })
     await settle()
-    expect(surfaces()).toEqual(OFF)
+    expect(surfaces()).toEqual(off('system'))
+  })
+
+  test('project tab: switching the backdrop on and off live adds and removes the footer menu glass too', async () => {
+    await mount('/projects/p1/sessions')
+    expect(surfaces()).toEqual(off('project'))
+    await act(async () => {
+      store.set(backgroundAtom, 'mint')
+    })
+    await settle()
+    expect(surfaces()).toEqual(on('project'))
+    await act(async () => {
+      store.set(backgroundAtom, 'none')
+      store.set(backgroundPatternAtom, 'geometric')
+    })
+    await settle()
+    expect(surfaces()).toEqual(on('project'))
+    await act(async () => {
+      store.set(backgroundPatternAtom, 'none')
+    })
+    await settle()
+    expect(surfaces()).toEqual(off('project'))
   })
 })
 
@@ -421,7 +484,8 @@ describe('in the phone drawer the nav menu stays opaque', () => {
     ['system tab', '/library', '/ssh-keys'],
     ['project tab', '/projects/p1/sessions', '/projects/p1/library'],
   ] as const) {
-    test(`${what}: backdrop active, drawer open, no glass on its nav menu`, async () => {
+    const footerToo = what === 'project tab' ? ' or its footer menu' : ''
+    test(`${what}: backdrop active, drawer open, no glass on its nav menu${footerToo}`, async () => {
       setViewport(375, 800)
       localStorage.setItem(BG_KEY, '"purple"')
       localStorage.setItem(PATTERN_KEY, '"weather"')
@@ -433,6 +497,14 @@ describe('in the phone drawer the nav menu stays opaque', () => {
       // The right menu, and it is populated.
       expect(!!menu?.querySelector(`a[href="${href}"]`)).toBe(true)
       expect(has(menu, [...GLASS_MARKERS, ...PILL])).toEqual([])
+      const footer = footerMenu(drawer)
+      if (what === 'project tab') {
+        // The drawer's "Project settings" footer menu is there and plain.
+        expect(!!footer?.querySelector('a[href="/projects/p1/settings"]')).toBe(true)
+        expect(has(footer, [...GLASS_MARKERS, ...PILL])).toEqual([])
+      } else {
+        expect(footer).toBeNull()
+      }
       // Nothing else in the drawer went glassy either.
       const glassyInDrawer = [...(drawer?.querySelectorAll('[class]') ?? [])].filter(
         (el) => has(el, GLASS_MARKERS).length > 0,

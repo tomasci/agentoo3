@@ -303,8 +303,9 @@ isolate` (what lets that `absolute inset-0 -z-10` layer resolve against the
 shell rather than escape it) is there unconditionally, backdrop or not, but
 is inert on its own. The same condition also puts a small glass pill — one
 shared `GLASS_CLASS_NAME` recipe, read everywhere through
-`features/appearance`'s own `useBackdropActive()` — around the tab row and
-around each sidebar nav list, never the whole tab bar or the whole sidebar.
+`features/appearance`'s own `useBackdropActive()` — around the tab row,
+around each sidebar nav list, and around the project sidebar's footer menu,
+never the whole tab bar or the whole sidebar.
 
 An empty tab (the project picker) has nothing to navigate yet, so its sidebar
 is forced closed and empty and the body takes the full width. A session's own
