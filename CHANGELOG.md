@@ -2,6 +2,11 @@
 
 The What's new screen inside agentoo shows this same list after each update — reopen it any time via the version number in the status bar. Newest release first. Also available in [Russian](CHANGELOG.ru.md).
 
+## 1.3.166 — 2026-10-03
+
+### Fixed
+- Long links and other unbroken text in a session's history now wrap on a phone instead of letting the history scroll sideways.
+
 ## 1.3.165 — 2026-10-03
 
 ### New
