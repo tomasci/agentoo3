@@ -2,6 +2,16 @@
 
 The What's new screen inside agentoo shows this same list after each update — reopen it any time via the version number in the status bar. Newest release first. Also available in [Russian](CHANGELOG.ru.md).
 
+## 1.3.165 — 2026-10-03
+
+### New
+- Pick an accent colour in Settings — main buttons, links, switches and checkboxes take it on, separate from the background colour, so the two can match or contrast.
+- Status colours, like a failed session's red, keep their own meaning whatever accent colour you choose.
+
+### Improved
+- With a background colour or gradient on, hovers, selected items and open menus now carry a tint of that colour instead of plain grey.
+- The project sidebar's bottom menu (Project settings) now sits on frosted glass too, like the menus above it.
+
 ## 1.3.161 — 2026-10-03
 
 ### Improved

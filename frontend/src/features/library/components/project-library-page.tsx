@@ -100,7 +100,7 @@ export function ProjectLibraryPage({ projectId }: { projectId: string }) {
                   <Field
                     key={agent.name}
                     orientation="horizontal"
-                    className="rounded-md border px-3 py-2 hover:bg-muted/50"
+                    className="rounded-md border px-3 py-2 hover:bg-accent/50"
                   >
                     <Checkbox
                       id={`assign-agent-${agent.name}`}
@@ -132,7 +132,7 @@ export function ProjectLibraryPage({ projectId }: { projectId: string }) {
                   <Field
                     key={skill.name}
                     orientation="horizontal"
-                    className="rounded-md border px-3 py-2 hover:bg-muted/50"
+                    className="rounded-md border px-3 py-2 hover:bg-accent/50"
                   >
                     <Checkbox
                       id={`assign-skill-${skill.name}`}

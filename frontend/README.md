@@ -69,7 +69,9 @@ folder that grew a subfolder. `ui/` is shadcn's own output — one file per
 component (`src/shared/ui/button.tsx`, imported as `@/shared/ui/button`), no
 barrel, regenerated with `npx shadcn@latest add` and never hand-edited (see
 "Styling" below). `components/` is everything hand-written on top of it —
-`StatusDot`/`Tone`, `StatusBadge`, `Loading`, `ConfirmDialog`, `ActionsMenu`,
+`StatusDot`/`Tone` (its root span also carries `data-fixed-tone`, so the
+reader's chosen accent colour never touches its success/warning/danger dots —
+see "Styling" below), `StatusBadge`, `Loading`, `ConfirmDialog`, `ActionsMenu`,
 `DataTable`, `Code`, `CopyButton`, `Markdown`, `DefinitionList`, `PageHeader`,
 a `toast` re-export — with the one barrel a feature actually imports through
 (`@/shared/components`). Dependency direction is one-way: features →
@@ -175,7 +177,25 @@ one. The rule that keeps it that way:
   rule has loosened. It stays inside that one file: `app/root-layout.tsx` and
   `features/settings` only ever reach the catalog's literal class strings
   through `features/appearance`'s own components and barrel, never by writing
-  a colour literal of their own.
+  a colour literal of their own. The same file also carries `HIGHLIGHT_TINT_CLASS_NAME`/
+  `HIGHLIGHT_TINT_ALIAS_CLASS_NAME`, which re-point `--accent`, `--muted`,
+  `--secondary` and `--sidebar-accent` — four tokens `globals.css` already
+  ships equal to each other — as classes on `document.body` rather than
+  adding any new CSS property, inline `style`, or `globals.css` edit, and
+  `ACCENT_COLOR_CLASS_NAME`, which re-points `--primary` the same way for the
+  reader's independently-chosen accent colour; see the "Layout" section below
+  for what both buy. `--primary` also backs a handful of *closed* meaning
+  scales that must never follow that accent — `StatusDot`'s tones and
+  `SuggestionDiff`'s add/remove lines (`features/library/components/
+  suggestion-diff.tsx`) — so each of those carries a `data-fixed-tone`
+  attribute on its own root element; `ACCENT_COLOR_FIXED_TONE_CLASS_NAME`
+  scopes `--primary` back to `var(--foreground)` for exactly `[data-fixed-tone]`
+  and `Progress`'s own `[data-slot=progress-indicator]`, close enough to the
+  unmodified token (see the catalog's own header comment for the exact
+  numbers) to be indistinguishable, and only in effect while an accent is
+  actually chosen. Any future subtree whose colour is itself the information,
+  not decoration, carries the same attribute rather than being special-cased
+  by name.
 - A link that should look like a button is
   `<Link className={buttonVariants({ variant: … })}>`, not
   `<Button render={<a/>}>`: Base UI logs an error and stamps `role="button"`
@@ -303,8 +323,30 @@ isolate` (what lets that `absolute inset-0 -z-10` layer resolve against the
 shell rather than escape it) is there unconditionally, backdrop or not, but
 is inert on its own. The same condition also puts a small glass pill — one
 shared `GLASS_CLASS_NAME` recipe, read everywhere through
-`features/appearance`'s own `useBackdropActive()` — around the tab row and
-around each sidebar nav list, never the whole tab bar or the whole sidebar.
+`features/appearance`'s own `useBackdropActive()` — around the tab row,
+around each sidebar nav list, and around the project sidebar's footer menu,
+never the whole tab bar or the whole sidebar. A chosen colour or gradient
+(not a pattern on its own — `backgroundAtom` has to be something other than
+`'none'`) carries one step further: `useHighlightTint()`, mounted next to
+`useBackdropActive()` in `Shell`, tints every hover, selected and open
+highlight in the app — tabs, sidebar nav, dropdown menu items, table rows,
+ghost/outline buttons — to that same hue, so the chrome a reader just
+recoloured doesn't go back to plain grey the moment they interact with it.
+
+A reader can separately choose an **accent colour** — the same 18 options as
+the background, but its own choice and its own key
+(`localStorage['agentoo:accent-color']`): matching the background is up to
+the reader, the two atoms never read off each other. `useAccentColor()`,
+mounted in `RootLayout` itself rather than `Shell` — reader-wide like the
+theme, not scoped to the workspace shell, since the bare-shell editor
+launcher's own buttons are calls to attention too — re-points `--primary` to
+the chosen hue, which is what every primary `Button`, `text-primary` link and
+checked `Checkbox`/`Switch` already reads. It deliberately leaves untouched:
+status dots, progress meters and diff lines (each a closed meaning scale,
+marked `data-fixed-tone` or caught by `Progress`'s own slot — see "Styling"
+above) and every focus ring (`--ring` is never re-pointed), so those look
+exactly the same regardless of what a reader picks. `'none'`, the default,
+changes nothing at all.
 
 An empty tab (the project picker) has nothing to navigate yet, so its sidebar
 is forced closed and empty and the body takes the full width. A session's own

@@ -30,6 +30,11 @@ export function StatusDot({ tone, pulse = false }: StatusDotProps) {
   return (
     <span
       aria-hidden="true"
+      // A closed meaning scale (success/warning/danger/accent are fixed
+      // colours, not decoration) — must stay exactly these colours
+      // regardless of any accent the reader has chosen; see
+      // features/appearance/lib/catalog.ts's `ACCENT_COLOR_FIXED_TONE_CLASS_NAME`.
+      data-fixed-tone=""
       className={cn(
         'inline-block size-2 shrink-0 rounded-full',
         TONE[tone],

@@ -1,6 +1,6 @@
 import { useAtom } from 'jotai'
 import { useTranslation } from 'react-i18next'
-import { BackgroundFields } from '@/features/appearance'
+import { AccentColorField, BackgroundFields } from '@/features/appearance'
 import { PageHeader } from '@/shared/components'
 import { SUPPORTED_LANGUAGES } from '@/shared/i18n'
 import { themeAtom } from '@/shared/store/ui'
@@ -22,11 +22,12 @@ interface Option {
  * changing the language of the whole app, which is why this page lives in the
  * system tab rather than in a corner of every sidebar.
  *
- * Language, theme and the chosen background/pattern stay in the browser: they
- * describe how one reader wants to see this installation, not how it is
- * configured, so there is nothing here worth a round trip to the server. The
- * session limit below them is the opposite — it configures the installation
- * itself, for every reader and every tab, so it lives on the server and
+ * Language, theme and the chosen background/pattern/accent colour stay in
+ * the browser: they describe how one reader wants to see this installation,
+ * not how it is configured, so there is nothing here worth a round trip to
+ * the server. The session limit below them is the opposite — it configures
+ * the installation itself, for every reader and every tab, so it lives on
+ * the server and
  * `SessionLimitCard` owns its own query/loading/error states for it. That
  * card is deliberately not awaited here: this page must still render the
  * language/theme controls even if the settings API is unreachable or slow,
@@ -98,6 +99,7 @@ export function SettingsPage() {
             </Field>
 
             <BackgroundFields />
+            <AccentColorField />
           </FieldGroup>
         </CardContent>
       </Card>

@@ -1,6 +1,8 @@
 // The custom-background preference at the storage boundary
 // (src/shared/store/ui.ts): `backgroundAtom` and `backgroundPatternAtom`, the
-// id lists they validate against, and `isBackgroundActive`.
+// id lists they validate against, and `isBackgroundActive` — plus
+// `accentColorAtom` (its own key, `agentoo:accent-color`, over the same 18
+// background ids), at the bottom of this file.
 //
 // The contract under test is the spec's, not the implementation's: both atoms
 // default to 'none', a valid id written persists as its JSON string, and *any*
@@ -24,6 +26,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { createStore } from 'jotai'
 import {
+  accentColorAtom,
   BACKGROUND_COLOR_IDS,
   BACKGROUND_GRADIENT_IDS,
   BACKGROUND_PATTERN_IDS,
@@ -34,6 +37,7 @@ import {
 
 const BG_KEY = 'agentoo:background'
 const PATTERN_KEY = 'agentoo:background-pattern'
+const ACCENT_KEY = 'agentoo:accent-color'
 
 // Spelled out from the spec rather than imported, so a renamed, dropped or
 // reordered id in ui.ts fails here instead of agreeing with itself.
@@ -79,6 +83,7 @@ async function freshModule() {
   return {
     backgroundAtom: mod.backgroundAtom as typeof backgroundAtom,
     backgroundPatternAtom: mod.backgroundPatternAtom as typeof backgroundPatternAtom,
+    accentColorAtom: mod.accentColorAtom as typeof accentColorAtom,
   }
 }
 
@@ -319,6 +324,124 @@ describe('cross-tab: a storage event from another window', () => {
     otherWindowWrites('agentoo:theme', '"light"')
     expect(store.get(backgroundAtom)).toBe('mint')
     expect(store.get(backgroundPatternAtom)).toBe('nature')
+    for (const u of unsubs) u()
+  })
+})
+
+// --- accentColorAtom ----------------------------------------------------------------
+//
+// Same ids as the background ('none' + 12 colours + 5 gradients), same
+// validation, its own key — and neither atom ever reads or writes the other's.
+
+describe('accentColorAtom', () => {
+  const ACCENT_IDS = ['none', ...BACKGROUNDS] as const
+
+  test('with nothing stored it reads none, from this module and a fresh evaluation', async () => {
+    expect(createStore().get(accentColorAtom)).toBe('none')
+    const mod = await freshModule()
+    expect(createStore().get(mod.accentColorAtom)).toBe('none')
+  })
+
+  test('writing each of the 18 ids persists its JSON string under agentoo:accent-color', () => {
+    expect(ACCENT_IDS).toHaveLength(18)
+    const store = createStore()
+    const wrong: string[] = []
+    for (const id of ACCENT_IDS) {
+      store.set(accentColorAtom, id)
+      if (store.get(accentColorAtom) !== id) wrong.push(`atom:${id}`)
+      if (localStorage.getItem(ACCENT_KEY) !== JSON.stringify(id)) wrong.push(`storage:${id}`)
+    }
+    expect(wrong).toEqual([])
+  })
+
+  test('getOnInit: each of the 18 ids round-trips through a fresh module evaluation', async () => {
+    const wrong: string[] = []
+    for (const id of ACCENT_IDS) {
+      localStorage.setItem(ACCENT_KEY, JSON.stringify(id))
+      const mod = await freshModule()
+      const got = createStore().get(mod.accentColorAtom)
+      if (got !== id) wrong.push(`${id} -> ${got}`)
+    }
+    expect(wrong).toEqual([])
+  })
+
+  const BAD: ReadonlyArray<readonly [string, string]> = [
+    ...GARBAGE,
+    ['a pattern id', '"code"'],
+    ['another pattern id', '"geometric"'],
+  ]
+
+  for (const [what, raw] of BAD) {
+    test(`getOnInit: ${what} (${JSON.stringify(raw)}) reads none and does not throw`, async () => {
+      localStorage.setItem(ACCENT_KEY, raw)
+      const mod = await freshModule()
+      expect(createStore().get(mod.accentColorAtom)).toBe('none')
+    })
+
+    test(`onMount: ${what} (${JSON.stringify(raw)}) reads none and does not throw`, () => {
+      localStorage.setItem(ACCENT_KEY, raw)
+      const store = createStore()
+      const unsub = store.sub(accentColorAtom, () => {})
+      expect(store.get(accentColorAtom)).toBe('none')
+      unsub()
+    })
+
+    test(`cross-tab: ${what} (${JSON.stringify(raw)}) replaces a valid accent with none`, () => {
+      const store = createStore()
+      const unsub = store.sub(accentColorAtom, () => {})
+      store.set(accentColorAtom, 'purple')
+      otherWindowWrites(ACCENT_KEY, raw)
+      expect(store.get(accentColorAtom)).toBe('none')
+      unsub()
+    })
+  }
+
+  test('cross-tab: a valid accent from another window is adopted', () => {
+    const store = createStore()
+    const unsub = store.sub(accentColorAtom, () => {})
+    otherWindowWrites(ACCENT_KEY, '"ocean"')
+    expect(store.get(accentColorAtom)).toBe('ocean')
+    unsub()
+  })
+
+  test('writing the accent never touches agentoo:background, and vice versa', () => {
+    const store = createStore()
+    store.set(accentColorAtom, 'blue')
+    expect(localStorage.getItem(BG_KEY)).toBeNull()
+    expect(localStorage.getItem(PATTERN_KEY)).toBeNull()
+    expect(store.get(backgroundAtom)).toBe('none')
+
+    store.set(backgroundAtom, 'red')
+    expect(localStorage.getItem(ACCENT_KEY)).toBe('"blue"')
+    expect(store.get(accentColorAtom)).toBe('blue')
+
+    store.set(accentColorAtom, 'none')
+    expect(localStorage.getItem(BG_KEY)).toBe('"red"')
+    expect(store.get(backgroundAtom)).toBe('red')
+  })
+
+  test('a stored background is not read as the accent, and a stored accent is not read as the background', async () => {
+    localStorage.setItem(BG_KEY, '"teal"')
+    let mod = await freshModule()
+    expect(createStore().get(mod.accentColorAtom)).toBe('none')
+
+    localStorage.clear()
+    localStorage.setItem(ACCENT_KEY, '"teal"')
+    mod = await freshModule()
+    expect(createStore().get(mod.backgroundAtom)).toBe('none')
+    expect(createStore().get(mod.accentColorAtom)).toBe('teal')
+  })
+
+  test('a cross-tab background change leaves the accent alone, and vice versa', () => {
+    const store = createStore()
+    const unsubs = [store.sub(accentColorAtom, () => {}), store.sub(backgroundAtom, () => {})]
+    store.set(accentColorAtom, 'pink')
+    store.set(backgroundAtom, 'mint')
+    otherWindowWrites(BG_KEY, '"forest"')
+    expect(store.get(accentColorAtom)).toBe('pink')
+    otherWindowWrites(ACCENT_KEY, '"brown"')
+    expect(store.get(backgroundAtom)).toBe('forest')
+    expect(store.get(accentColorAtom)).toBe('brown')
     for (const u of unsubs) u()
   })
 })

@@ -119,3 +119,39 @@ test('the picker component references the group headings and hints', async () =>
   ]
   expect(keys.filter((key) => !source.includes(`'${key}'`))).toEqual([])
 })
+
+// --- the accent-colour picker --------------------------------------------------------
+// Its 18 option labels are the background's own `labelKey`s (checked above);
+// only the legend and hint are new.
+
+const ACCENT_KEYS = ['settings.accentColor', 'settings.accentColorHint']
+
+test('the accent legend and hint are non-empty in both locales, translated, in Cyrillic', () => {
+  const missing: string[] = []
+  for (const key of ACCENT_KEYS) {
+    for (const [locale, bundle] of LOCALES) {
+      const value = lookup(bundle, key)
+      if (typeof value !== 'string' || value.trim() === '') missing.push(`${locale}:${key}`)
+    }
+  }
+  const copied = ACCENT_KEYS.filter((key) => lookup(en, key) === lookup(ru, key))
+  const latinOnly = ACCENT_KEYS.filter((key) => !/[Ѐ-ӿ]/.test(String(lookup(ru, key))))
+  expect({ missing, copied, latinOnly }).toEqual({ missing: [], copied: [], latinOnly: [] })
+})
+
+test('the accent legend is not the background legend, in either locale', () => {
+  for (const [locale, bundle] of LOCALES) {
+    expect({ locale, same: lookup(bundle, 'settings.accentColor') === lookup(bundle, 'settings.background') }).toEqual({
+      locale,
+      same: false,
+    })
+  }
+})
+
+test('the accent picker component references its legend and hint keys, and the background labels', async () => {
+  const source = await Bun.file(
+    new URL('../src/features/appearance/components/accent-color-field.tsx', import.meta.url),
+  ).text()
+  expect(ACCENT_KEYS.filter((key) => !source.includes(`'${key}'`))).toEqual([])
+  expect(source).toContain('BACKGROUND_OPTIONS')
+})

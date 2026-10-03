@@ -86,7 +86,14 @@ export function SuggestionDiff({ before, after }: { before: string; after: strin
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set())
 
   return (
-    <div className="overflow-hidden rounded-lg border font-mono text-sm">
+    <div
+      // A closed meaning scale (add/remove tints are fixed colours, not
+      // decoration) — must stay exactly these colours regardless of any
+      // accent the reader has chosen; see features/appearance/lib/catalog.ts's
+      // `ACCENT_COLOR_FIXED_TONE_CLASS_NAME`.
+      data-fixed-tone=""
+      className="overflow-hidden rounded-lg border font-mono text-sm"
+    >
       {groups.map((group, groupIndex) => {
         const groupKey = group.lines[0]?.key ?? groupIndex
 

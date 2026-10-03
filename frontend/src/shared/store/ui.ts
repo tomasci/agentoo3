@@ -143,6 +143,20 @@ export const backgroundPatternAtom = atomWithStorage<BackgroundPatternValue>(
   { getOnInit: true },
 )
 
+// The reader's chosen accent colour — the same 18 ids as the background,
+// since both pick from one catalog (features/appearance's lib/catalog.ts),
+// but its own type alias and its own key: unlike the background, this colours
+// buttons/links/checked controls, and the user is expected to pick it
+// independently of the background (matching it is their choice, not a rule
+// this app enforces), so the two atoms never read off one another.
+export type AccentColorId = BackgroundId
+export const accentColorAtom = atomWithStorage<AccentColorId>(
+  'agentoo:accent-color',
+  'none',
+  validatedStorage(isBackgroundId, 'none'),
+  { getOnInit: true },
+)
+
 /** Whether either persisted choice above is anything but the default — the
  * one fact root-layout.tsx and sidebar.tsx both need to decide whether the
  * sidebar should give up its own opaque surface and the page body should turn
