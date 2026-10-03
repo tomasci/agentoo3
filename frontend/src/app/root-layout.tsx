@@ -2,7 +2,7 @@ import { Outlet, useLocation } from '@tanstack/react-router'
 import { useAtom, useAtomValue } from 'jotai'
 import type { CSSProperties } from 'react'
 import { useEffect } from 'react'
-import { BackgroundBackdrop } from '@/features/appearance'
+import { BackgroundBackdrop, GLASS_CLASS_NAME, useBackdropActive } from '@/features/appearance'
 import { cn } from '@/shared/lib/utils'
 import {
   isBareShellPath,
@@ -10,13 +10,7 @@ import {
   projectIdForPath,
   shellModeForPath,
 } from '@/shared/store/tabs'
-import {
-  backgroundAtom,
-  backgroundPatternAtom,
-  isBackgroundActive,
-  sidebarOpenAtom,
-  themeAtom,
-} from '@/shared/store/ui'
+import { sidebarOpenAtom, themeAtom } from '@/shared/store/ui'
 import { SidebarInset, SidebarProvider, useSidebar } from '@/shared/ui/sidebar'
 import { ShellSidebar } from './sidebar'
 import { StatusBar } from './status-bar'
@@ -112,13 +106,7 @@ function Shell() {
   // back when the provider reports it changed.
   const [sidebarOpen, setSidebarOpen] = useAtom(sidebarOpenAtom)
 
-  // Read here, not inside `BackgroundBackdrop`/`ShellSidebar` alone: the
-  // sidebar turning transparent and the inset turning to glass both have to
-  // agree with the backdrop actually being drawn, so this is the one place
-  // that decides it for all three.
-  const background = useAtomValue(backgroundAtom)
-  const backgroundPattern = useAtomValue(backgroundPatternAtom)
-  const backdropActive = isBackgroundActive(background, backgroundPattern)
+  const backdropActive = useBackdropActive()
 
   return (
     <SidebarProvider
@@ -144,16 +132,14 @@ function Shell() {
           className={cn(
             'min-h-0 min-w-0 overflow-hidden',
             // Frosted glass only while a backdrop is actually showing through
-            // it — `bg-background/70` stays white-ish in light and near-black
-            // in dark for free, since it's an opacity of the same semantic
-            // token the inset already uses. No fixed/sticky descendant of
-            // this element relies on the viewport as its containing block
-            // (grepped: the one `fixed` element in the app, the version-skew
-            // banner, mounts in providers.tsx, outside the shell entirely;
-            // every dialog/popover portals out of #root) — `backdrop-blur-xl`
-            // is safe to put directly on the real element rather than behind
-            // a `before:` layer.
-            backdropActive && 'bg-background/70 ring-1 ring-border/50 backdrop-blur-xl',
+            // it. No fixed/sticky descendant of this element relies on the
+            // viewport as its containing block (grepped: the one `fixed`
+            // element in the app, the version-skew banner, mounts in
+            // providers.tsx, outside the shell entirely; every dialog/popover
+            // portals out of #root) — `backdrop-blur-xl` (part of
+            // `GLASS_CLASS_NAME`) is safe to put directly on the real element
+            // rather than behind a `before:` layer.
+            backdropActive && GLASS_CLASS_NAME,
           )}
         >
           <div
