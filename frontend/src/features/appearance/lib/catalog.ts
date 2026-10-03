@@ -220,3 +220,13 @@ export const PATTERN_PREVIEW_SLOTS: ReadonlyArray<PatternSlot> = [
   { x: 44, y: 26, size: 14, rotate: 12 },
   { x: 32, y: 48, size: 16, rotate: -8 },
 ]
+
+/**
+ * The one frosted-glass recipe every backdrop-active surface uses — the page
+ * body (`SidebarInset`, root-layout.tsx), the tab pill and the sidebar's own
+ * nav lists (tab-bar.tsx, sidebar.tsx) — so the three can't quietly drift
+ * into three different "glassy" looks. `bg-background/70` reads white-ish in
+ * light and near-black in dark for free, since it's an opacity of the same
+ * semantic token each surface already uses when no backdrop is active.
+ */
+export const GLASS_CLASS_NAME = 'bg-background/70 ring-1 ring-border/50 backdrop-blur-xl'

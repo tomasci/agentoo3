@@ -1,3 +1,5 @@
 export { BackgroundBackdrop } from './components/background-backdrop'
 export { BackgroundFields } from './components/background-fields'
 export { BackgroundPattern } from './components/background-pattern'
+export { useBackdropActive } from './hooks/use-backdrop-active'
+export { GLASS_CLASS_NAME } from './lib/catalog'

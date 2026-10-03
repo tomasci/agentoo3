@@ -1,5 +1,4 @@
 import { Link } from '@tanstack/react-router'
-import { useAtomValue } from 'jotai'
 import {
   BookOpen,
   Container,
@@ -15,10 +14,10 @@ import {
 } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { GLASS_CLASS_NAME, useBackdropActive } from '@/features/appearance'
 import { useProjects } from '@/features/projects'
 import { cn } from '@/shared/lib/utils'
 import { SYSTEM_HOME, type TabKind } from '@/shared/store/tabs'
-import { backgroundAtom, backgroundPatternAtom, isBackgroundActive } from '@/shared/store/ui'
 import {
   Sidebar,
   SidebarContent,
@@ -70,7 +69,7 @@ function SidebarBrand({ eyebrow, heading, tagline, render }: SidebarBrandProps) 
  * in its own tab, and mixing the two is what made the old single-window shell
  * ambiguous about what "here" meant.
  */
-function SystemNav() {
+function SystemNav({ glass }: { glass: boolean }) {
   const { t } = useTranslation()
 
   return (
@@ -90,7 +89,7 @@ function SystemNav() {
       />
       <SidebarContent>
         <SidebarGroup>
-          <SidebarMenu className="gap-1">
+          <SidebarMenu className={cn('gap-1', glass && cn('rounded-xl p-1', GLASS_CLASS_NAME))}>
             <SidebarMenuItem>
               <SidebarMenuButton
                 render={
@@ -198,7 +197,7 @@ function SystemNav() {
  * row full of similar names is easy to misread — the sidebar is where you
  * confirm which checkout you are about to run an agent against.
  */
-function ProjectNav({ projectId }: { projectId: string }) {
+function ProjectNav({ projectId, glass }: { projectId: string; glass: boolean }) {
   const { t } = useTranslation()
   const { data: projects } = useProjects()
   const project = projects?.find((candidate) => candidate.id === projectId)
@@ -216,7 +215,7 @@ function ProjectNav({ projectId }: { projectId: string }) {
       />
       <SidebarContent>
         <SidebarGroup>
-          <SidebarMenu className="gap-1">
+          <SidebarMenu className={cn('gap-1', glass && cn('rounded-xl p-1', GLASS_CLASS_NAME))}>
             {/* Not exact: the session detail route (`/sessions/$sessionId`) is a
                 child page of the same section, and should keep this item
                 current rather than going dark once a session is opened. */}
@@ -361,9 +360,14 @@ export function ShellSidebar({ mode, projectId }: ShellSidebarProps) {
   // form below never receives this `className` at all (shared/ui/sidebar.tsx
   // only spreads it onto the desktop branch), so the drawer stays the opaque
   // overlay it always was.
-  const background = useAtomValue(backgroundAtom)
-  const backgroundPattern = useAtomValue(backgroundPatternAtom)
-  const backdropActive = isBackgroundActive(background, backgroundPattern)
+  const backdropActive = useBackdropActive()
+
+  // `SystemNav`/`ProjectNav`'s own nav list goes glassy on the same condition
+  // plus one more: the phone `Sheet` below is an opaque overlay drawer with no
+  // backdrop behind it at all (see the comment above), so glass there would
+  // just be a translucent panel over a plain colour — `!isMobile` keeps that
+  // nav list opaque in the drawer regardless of `backdropActive`.
+  const glassNav = backdropActive && !isMobile
 
   // An empty tab has nothing to navigate (see the comment below), and
   // root-layout.tsx forces the provider's desktop `open` closed for it — but
@@ -389,8 +393,8 @@ export function ShellSidebar({ mode, projectId }: ShellSidebarProps) {
       // reachable by a screen reader while invisible.
       inert={!isMobile && state === 'collapsed'}
     >
-      {mode === 'project' && projectId && <ProjectNav projectId={projectId} />}
-      {mode === 'system' && <SystemNav />}
+      {mode === 'project' && projectId && <ProjectNav projectId={projectId} glass={glassNav} />}
+      {mode === 'system' && <SystemNav glass={glassNav} />}
       {/* 'new': an empty tab has nothing to navigate yet — the sidebar renders
           with nothing in it rather than a column of dead links (see
           root-layout.tsx, which also forces the provider closed in this mode). */}
