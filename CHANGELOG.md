@@ -2,6 +2,16 @@
 
 The What's new screen inside agentoo shows this same list after each update — reopen it any time via the version number in the status bar. Newest release first. Also available in [Russian](CHANGELOG.ru.md).
 
+## 1.3.161 — 2026-10-03
+
+### Improved
+- With a custom shell background on, the tabs and sidebar menus now sit on their own small frosted-glass panels.
+
+## 1.3.160 — 2026-10-03
+
+### Fixed
+- SSH key cards no longer push their contents down when a card next to them is taller.
+
 ## 1.3.159 — 2026-10-02
 
 ### New
