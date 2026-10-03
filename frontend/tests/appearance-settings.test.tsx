@@ -1,11 +1,14 @@
 // The background/pattern picker on /settings (features/appearance's
-// `BackgroundFields`, mounted by features/settings' `SettingsPage`), driven
+// `BackgroundFields`, mounted by features/settings' `SettingsPage`) and the
+// accent-colour picker after it (`AccentColorField`), driven
 // through the real router and shell so "the shell reflects it" is observed,
 // not assumed — same reasoning as tests/settings-page.test.tsx's header.
 //
 // Contract:
-// - two native radio groups, `settings-background` (none + 12 colours + 5
-//   gradients, in that order) and `settings-pattern` (none + 6 patterns);
+// - three native radio groups, `settings-background` (none + 12 colours + 5
+//   gradients, in that order), `settings-pattern` (none + 6 patterns) and
+//   `settings-accent-color` (the background's 18 options, same order and
+//   labels, bound to its own `accentColorAtom`);
 // - each radio's accessible name is its label's translated text (checked in
 //   English and, after switching language, in Russian);
 // - exactly one radio per group is checked and it is the atom's value —
@@ -34,14 +37,15 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
 import { routeTree } from '../src/app/router'
-import { BACKGROUND_CLASS_NAME } from '../src/features/appearance/lib/catalog'
+import { ACCENT_COLOR_CLASS_NAME, BACKGROUND_CLASS_NAME } from '../src/features/appearance/lib/catalog'
 import { client as apiClient } from '../src/shared/api/generated/.kubb/client'
 import en from '../src/shared/i18n/locales/en.json'
 import ru from '../src/shared/i18n/locales/ru.json'
-import { backgroundAtom, backgroundPatternAtom } from '../src/shared/store/ui'
+import { accentColorAtom, backgroundAtom, backgroundPatternAtom } from '../src/shared/store/ui'
 
 const BG_KEY = 'agentoo:background'
 const PATTERN_KEY = 'agentoo:background-pattern'
+const ACCENT_KEY = 'agentoo:accent-color'
 
 const COLORS = [
   'red', 'orange', 'yellow', 'green', 'mint', 'teal',
@@ -148,6 +152,7 @@ const radios = (name: string) =>
   [...container.querySelectorAll<HTMLInputElement>(`input[type="radio"][name="${name}"]`)]
 const bgRadios = () => radios('settings-background')
 const patternRadios = () => radios('settings-pattern')
+const accentRadios = () => radios('settings-accent-color')
 const checkedValues = (name: string) => radios(name).filter((r) => r.checked).map((r) => r.value)
 const radio = (name: string, value: string) => radios(name).find((r) => r.value === value)
 /** The accessible name a native radio gets from the <label> wrapping it. */
@@ -196,6 +201,7 @@ function patternWiring() {
 
 beforeEach(async () => {
   document.body.replaceChildren()
+  document.body.className = ''
   localStorage.clear()
   document.documentElement.className = ''
   apiClient.setConfig({ transport: offlineTransport })
@@ -219,15 +225,22 @@ afterEach(async () => {
 afterAll(() => {
   apiClient.setConfig({ transport: originalTransport })
   localStorage.clear()
+  document.body.className = ''
   document.documentElement.className = ''
 })
 
 // --- structure ----------------------------------------------------------------------
 
-test('two radio groups, in the spec order: 18 backgrounds and 7 patterns', async () => {
+test('three radio groups, in the spec order: 18 backgrounds, 7 patterns, 18 accent colours', async () => {
   await mount()
   expect(bgRadios().map((r) => r.value)).toEqual(BACKGROUND_VALUES)
   expect(patternRadios().map((r) => r.value)).toEqual(PATTERN_VALUES)
+  expect(accentRadios().map((r) => r.value)).toEqual(BACKGROUND_VALUES)
+  // No other radio group on the page.
+  const names = new Set(
+    [...container.querySelectorAll<HTMLInputElement>('input[type="radio"]')].map((r) => r.name),
+  )
+  expect([...names].sort()).toEqual(['settings-accent-color', 'settings-background', 'settings-pattern'])
 })
 
 test('every option is named by its own label, in English', async () => {
@@ -433,4 +446,108 @@ test('ids stay unique after switching the shell pattern back and forth', async (
   expect(new Set(ids).size).toBe(ids.length)
   expect(ids).toHaveLength(1 + PATTERNS.length)
   expect(fills.filter((f) => !f.ok)).toEqual([])
+})
+
+// --- accent colour ------------------------------------------------------------------------
+
+const accentOn = (id: keyof typeof ACCENT_COLOR_CLASS_NAME) =>
+  ACCENT_COLOR_CLASS_NAME[id].split(/\s+/).every((t) => document.body.classList.contains(t))
+const anyAccentOnBody = () =>
+  Object.values(ACCENT_COLOR_CLASS_NAME)
+    .flatMap((c) => c.split(/\s+/))
+    .some((t) => document.body.classList.contains(t))
+
+test('the accent group comes after the background/pattern groups, under its own translated legend', async () => {
+  await mount()
+  const groupOf = (r: HTMLInputElement) => r.closest('fieldset')?.querySelector('legend')?.textContent?.trim()
+  expect([...new Set(accentRadios().map(groupOf))]).toEqual([en.settings.accentColor])
+  const accentSet = accentRadios()[0]?.closest('fieldset')
+  const patternSet = patternRadios()[0]?.closest('fieldset')
+  expect(accentSet && patternSet && accentSet !== patternSet).toBe(true)
+  // DOCUMENT_POSITION_FOLLOWING: the accent fieldset follows the pattern one.
+  expect((patternSet?.compareDocumentPosition(accentSet as Node) ?? 0) & 4).toBe(4)
+  expect(accentSet?.textContent).toContain(en.settings.accentColorHint)
+})
+
+test('accent options carry the same labels as the background options, in English and in Russian', async () => {
+  await mount()
+  expect(accentRadios().map(nameOf)).toEqual(BACKGROUND_VALUES.map((id) => backgroundLabel(en, id)))
+  expect(accentRadios().map(nameOf)).toEqual(bgRadios().map(nameOf))
+  await act(async () => {
+    await testI18n.changeLanguage('ru')
+  })
+  await settle()
+  expect(accentRadios().map(nameOf)).toEqual(BACKGROUND_VALUES.map((id) => backgroundLabel(ru, id)))
+  const legends = [...container.querySelectorAll('legend')].map((l) => l.textContent?.trim())
+  expect(legends).toContain(ru.settings.accentColor)
+})
+
+test('by default none is the one checked accent, and nothing is on <body>', async () => {
+  await mount()
+  expect(checkedValues('settings-accent-color')).toEqual(['none'])
+  expect(anyAccentOnBody()).toBe(false)
+})
+
+test('a stored accent is the one checked accent radio, independent of the background', async () => {
+  localStorage.setItem(ACCENT_KEY, '"blue"')
+  localStorage.setItem(BG_KEY, '"red"')
+  await mount()
+  expect(checkedValues('settings-accent-color')).toEqual(['blue'])
+  expect(checkedValues('settings-background')).toEqual(['red'])
+})
+
+for (const raw of ['{not json', '7', '"Purple"', '"code"']) {
+  test(`garbage accent in storage (${raw}) checks none, without errors`, async () => {
+    localStorage.setItem(ACCENT_KEY, raw)
+    await mount()
+    expect(checkedValues('settings-accent-color')).toEqual(['none'])
+    expect(errors).toEqual([])
+  })
+}
+
+test('choosing each accent sets accentColorAtom, storage and <body>, and never the background', async () => {
+  localStorage.setItem(BG_KEY, '"mint"')
+  await mount()
+  const wrong: string[] = []
+  for (const id of [...COLORS, ...GRADIENTS]) {
+    await choose('settings-accent-color', id)
+    if (store.get(accentColorAtom) !== id) wrong.push(`${id}: atom=${store.get(accentColorAtom)}`)
+    if (localStorage.getItem(ACCENT_KEY) !== JSON.stringify(id))
+      wrong.push(`${id}: storage=${localStorage.getItem(ACCENT_KEY)}`)
+    if (checkedValues('settings-accent-color').join() !== id)
+      wrong.push(`${id}: checked=${checkedValues('settings-accent-color').join()}`)
+    if (!accentOn(id)) wrong.push(`${id}: body lacks its accent tokens`)
+    if (store.get(backgroundAtom) !== 'mint') wrong.push(`${id}: background=${store.get(backgroundAtom)}`)
+    if (checkedValues('settings-background').join() !== 'mint') wrong.push(`${id}: background radio moved`)
+  }
+  expect(wrong).toEqual([])
+  expect(localStorage.getItem(BG_KEY)).toBe('"mint"')
+
+  await choose('settings-accent-color', 'none')
+  expect(store.get(accentColorAtom)).toBe('none')
+  expect(checkedValues('settings-accent-color')).toEqual(['none'])
+  expect(anyAccentOnBody()).toBe(false)
+  expect(store.get(backgroundAtom)).toBe('mint')
+})
+
+test('choosing a background leaves the accent alone', async () => {
+  localStorage.setItem(ACCENT_KEY, '"pink"')
+  await mount()
+  await choose('settings-background', 'ocean')
+  expect(store.get(accentColorAtom)).toBe('pink')
+  expect(checkedValues('settings-accent-color')).toEqual(['pink'])
+  expect(localStorage.getItem(ACCENT_KEY)).toBe('"pink"')
+})
+
+test('each accent swatch previews its own --primary, and none previews the plain foreground', async () => {
+  await mount()
+  const tileOf = (r: HTMLInputElement) =>
+    [...(r.closest('label')?.querySelectorAll('span') ?? [])].find((el) => classesOf(el).includes('size-12'))
+  const wrong = accentRadios().flatMap((r) => {
+    const tile = tileOf(r)
+    if (r.value === 'none') return classesOf(tile).includes('bg-foreground') ? [] : ['none']
+    const id = r.value as keyof typeof ACCENT_COLOR_CLASS_NAME
+    return classesOf(tile).includes('bg-primary') && hasAll(tile, ACCENT_COLOR_CLASS_NAME[id]) ? [] : [id]
+  })
+  expect(wrong).toEqual([])
 })

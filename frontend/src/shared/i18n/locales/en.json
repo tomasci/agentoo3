@@ -613,6 +613,8 @@
       "doodles": "Doodles",
       "geometric": "Geometric"
     },
+    "accentColor": "Accent colour",
+    "accentColorHint": "The colour of main buttons, links and checked controls — the things that ask for your attention. Pick the same colour as the background to match it, or any other. Gradients use their middle colour. Stored in this browser, like the theme.",
     "themeDark": "Dark",
     "themeLight": "Light",
     "sessionsHeading": "Session limit",

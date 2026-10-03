@@ -2,7 +2,13 @@ import { Outlet, useLocation } from '@tanstack/react-router'
 import { useAtom, useAtomValue } from 'jotai'
 import type { CSSProperties } from 'react'
 import { useEffect } from 'react'
-import { BackgroundBackdrop, GLASS_CLASS_NAME, useBackdropActive } from '@/features/appearance'
+import {
+  BackgroundBackdrop,
+  GLASS_CLASS_NAME,
+  useAccentColor,
+  useBackdropActive,
+  useHighlightTint,
+} from '@/features/appearance'
 import { WhatsNewScreen } from '@/features/whats-new'
 import { cn } from '@/shared/lib/utils'
 import {
@@ -31,6 +37,11 @@ export function RootLayout() {
     root.classList.toggle('dark', theme === 'dark')
     root.style.colorScheme = theme
   }, [theme])
+
+  // Reader-wide, like the theme above — not scoped to `Shell` the way
+  // `useHighlightTint` is: the bare-shell editor launcher below still shows
+  // its own primary buttons, and those are calls to attention too.
+  useAccentColor()
 
   const { pathname } = useLocation()
 
@@ -95,6 +106,12 @@ function Shell() {
   // Mounted here, once: the workspace is kept in step with the URL on every
   // page, not only while the tab bar happens to be looking.
   useWorkspaceSync()
+
+  // Tints every hover/selected/open highlight to the reader's chosen
+  // background colour or gradient — see features/appearance's own
+  // `useHighlightTint` for why this lives in `Shell` rather than
+  // `RootLayout`, next to `useBackdropActive` below.
+  useHighlightTint()
 
   const { pathname } = useLocation()
   const mode = shellModeForPath(pathname)

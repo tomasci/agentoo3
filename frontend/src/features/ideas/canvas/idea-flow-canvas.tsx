@@ -51,7 +51,13 @@ const XY_THEME_CLASSNAME = cn(
   '[--xy-background-color:var(--background)]',
   '[--xy-background-pattern-color:var(--border)]',
   '[--xy-controls-button-background-color:var(--card)]',
-  '[--xy-controls-button-background-color-hover:var(--muted)]',
+  // `--accent`, not `--muted`: a chosen background re-points `--accent`
+  // per hue on `document.body` (features/appearance's `useHighlightTint`),
+  // but this hover is React Flow's own base.css rule reading an `--xy-*`
+  // variable, not a Tailwind `hover:bg-muted` utility on an `a`/`button`/
+  // `tr` — the one case that body-level tint can't reach, so it has to
+  // be pointed at the tinted token directly, here, instead.
+  '[--xy-controls-button-background-color-hover:var(--accent)]',
   '[--xy-controls-button-color:var(--muted-foreground)]',
   '[--xy-controls-button-color-hover:var(--foreground)]',
   '[--xy-controls-button-border-color:var(--border)]',

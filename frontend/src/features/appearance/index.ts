@@ -1,5 +1,8 @@
+export { AccentColorField } from './components/accent-color-field'
 export { BackgroundBackdrop } from './components/background-backdrop'
 export { BackgroundFields } from './components/background-fields'
 export { BackgroundPattern } from './components/background-pattern'
+export { useAccentColor } from './hooks/use-accent-color'
 export { useBackdropActive } from './hooks/use-backdrop-active'
+export { useHighlightTint } from './hooks/use-highlight-tint'
 export { GLASS_CLASS_NAME } from './lib/catalog'

@@ -92,6 +92,25 @@ test('StatusDot only animates when pulse is set', () => {
   expect(pulsing).toContain('animate-pulse')
 })
 
+test('StatusDot root carries data-fixed-tone for every tone, so a chosen accent never recolours it', () => {
+  // The marker features/appearance's ACCENT_COLOR_FIXED_TONE_CLASS_NAME
+  // scopes `--primary` back for — `accent` tone is `bg-primary` itself.
+  const tones = ['neutral', 'accent', 'success', 'warning', 'danger'] as const
+  const unmarked = tones.filter((tone) => {
+    const dot = dom(<StatusDot tone={tone} pulse={tone === 'warning'} />).firstElementChild
+    return dot?.tagName.toLowerCase() !== 'span' || !dot.hasAttribute('data-fixed-tone')
+  })
+  expect(unmarked).toEqual([])
+})
+
+test('StatusBadge keeps the marker on its dot, not on the badge text', () => {
+  const badge = dom(<StatusBadge tone="accent">Live</StatusBadge>)
+  const marked = [...badge.querySelectorAll('[data-fixed-tone]')]
+  expect(marked).toHaveLength(1)
+  expect(marked[0]?.getAttribute('aria-hidden')).toBe('true')
+  expect(marked[0]?.textContent).toBe('')
+})
+
 // --- StatusBadge ---
 
 test('StatusBadge renders an outline badge with a tone dot and its children', () => {
