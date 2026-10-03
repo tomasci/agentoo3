@@ -1,5 +1,6 @@
 import { OpenAPIHono } from '@hono/zod-openapi'
 import { cors } from 'hono/cors'
+import { HTTPException } from 'hono/http-exception'
 import { logger as httpLogger } from 'hono/logger'
 import { env } from '@/env'
 import { attachmentsRouter } from '@/features/attachments/routes'
@@ -16,6 +17,7 @@ import { sessionsRouter } from '@/features/sessions/routes'
 import { sourcesRouter } from '@/features/sources/routes'
 import { sshKeysRouter } from '@/features/ssh-keys/routes'
 import { systemRouter } from '@/features/system/routes'
+import { whatsNewRouter } from '@/features/whats-new/routes'
 import { AppError, errorBody } from '@/lib/errors'
 import { logger } from '@/lib/logger'
 import { openApiValidationHook } from '@/lib/openapi-hook'
@@ -61,6 +63,7 @@ export function createApp() {
   app.route('/api', editorProxyRouter)
   app.route('/api', ideasRouter)
   app.route('/api', systemRouter)
+  app.route('/api', whatsNewRouter)
 
   app.doc('/api/openapi.json', {
     openapi: '3.1.0',
@@ -71,6 +74,23 @@ export function createApp() {
     if (error instanceof AppError) {
       logger.warn(`${error.status} ${error.message}`)
       return c.json(errorBody(error), error.status as 400)
+    }
+    // Hono's own request parsing throws this before any route handler (or its
+    // OpenAPI schema's own `openApiValidationHook`) ever runs — a malformed
+    // JSON body, chiefly (see hono's validator.ts) — so it never reaches here
+    // as an AppError, and previously fell through to the generic 500 below
+    // for what is, from a caller's point of view, exactly the same kind of
+    // 400 this API returns everywhere else. Nothing in this codebase throws
+    // an HTTPException itself (grep confirms it), so every instance reaching
+    // this point came from Hono/its middleware, not from a handler that
+    // chose 500 and would be surprised to see it become one.
+    if (error instanceof HTTPException) {
+      if (error.status >= 500) {
+        logger.error(error)
+      } else {
+        logger.warn(`${error.status} ${error.message}`)
+      }
+      return c.json({ error: error.message || 'Request failed' }, error.status)
     }
     logger.error(error)
     return c.json({ error: 'Internal server error' }, 500)

@@ -1421,5 +1421,21 @@
     "source": "Markdown source",
     "showSource": "Edit the markdown source",
     "showFormatted": "Back to formatted view"
+  },
+  "whatsNew": {
+    "installedTitle": "Update {{version}} installed",
+    "installedSubtitle": "Here's what's new",
+    "manualTitle": "What's new",
+    "manualSubtitle": "You're on version {{version}}",
+    "close": "Got it",
+    "closeX": "Close",
+    "statusBarLabel": "What's new",
+    "changelogLabel": "Changelog",
+    "dismissFailed": "Couldn't save that you closed this — it may show again next time",
+    "kind": {
+      "new": "New",
+      "improved": "Improved",
+      "fixed": "Fixed"
+    }
   }
 }

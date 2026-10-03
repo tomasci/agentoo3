@@ -46,7 +46,7 @@ src/
   app/                 router, root layout, shell chrome (sidebar, tab bar, status bar)
   features/            one directory per feature, self-contained
     appearance/  docker/  editor/  health/  ideas/  library/  projects/
-    sessions/  settings/  ssh-keys/  storage/  system/
+    sessions/  settings/  ssh-keys/  storage/  system/  whats-new/
   shared/
     api/               client config + generated/ (kubb output, git-ignored)
     components/        hand-written app compositions, one barrel
@@ -74,6 +74,60 @@ barrel, regenerated with `npx shadcn@latest add` and never hand-edited (see
 a `toast` re-export — with the one barrel a feature actually imports through
 (`@/shared/components`). Dependency direction is one-way: features →
 `shared/components` → `shared/ui` → `@base-ui/react`.
+
+### Adding a changelog entry
+
+Two Markdown files at the **repo root** — `CHANGELOG.md` (English) and
+`CHANGELOG.ru.md` (Russian), kept in step — drive the "What's new" screen (an
+operator sees it full-screen right after an update, and can reopen it from the
+version number in the status bar). Readable on GitHub by design, not just
+inside the app. When a commit ships something user-visible, add a release at
+the **top** of both files, with the version that commit will produce — the
+pre-commit hook bumps `version.json`'s build by one per commit, so check it
+rather than guessing:
+
+```
+## 1.2.150 — 2026-10-02
+
+### New
+- One line, present tense, what the operator can now do.
+
+### Improved
+- One line about something that already existed.
+
+### Fixed
+- One line naming the problem that's gone.
+```
+
+The heading is `## <major.minor.build> — <date>` (`YYYY-MM-DD`; a hyphen, en
+dash or em dash all work as the separator). Each kind section — `New` /
+`Improved` / `Fixed` in English, `Новое` / `Улучшено` / `Исправлено` in
+Russian — appears **at most once**, in that order, and only if it has
+entries; 1–4 short one-liners per release is plenty. Anything above the first
+`## ` heading (the title, the one-paragraph intro, the link to the other
+language) is free-form and ignored by the parser.
+
+Both files are parsed and merged by `features/whats-new/model/
+changelog-markdown.ts` — a small, dependency-free parser, not a Markdown
+library, because `vite.config.ts` needs to run it at config-load time, before
+a `@/...` alias would even resolve — into the shape `features/whats-new/model/
+changelog.schema.ts` validates with zod, the same "fail loudly rather than
+render a blank line" rule the old hand-edited JSON had. `vite.config.ts`
+`define`s the result as `__CHANGELOG__`, so **the build fails** (with a
+message naming the file, line, and what's wrong) on a malformed heading, a
+bullet outside a kind section, or the two languages disagreeing on versions,
+dates, kinds or how many changes a kind has — keeping both files in step is
+enforced, not just asked for. The version at the top of both files has to be
+the one **this commit** will actually produce once the hook bumps the build
+number, not the one already in `version.json` when you start editing.
+
+`bun test` never runs Vite, so `tests/setup.ts` parses the same two files the
+same way and seeds `globalThis.__CHANGELOG__` itself, before any test can
+import `model/changelog.ts` — component tests render the real changelog, not
+a fixture. `vite dev` also can't pick up an edit to either file on its own
+(`define` is fixed at config-load time); a small inline plugin in
+`vite.config.ts` watches both and calls `server.restart()` when either
+changes, which re-reads and re-parses them from scratch.
 
 ## Styling
 

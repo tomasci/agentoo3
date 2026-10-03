@@ -170,6 +170,14 @@ async function mount(path = '/sessions') {
   client.setQueryData([{ url: '/api/projects' }], PROJECTS)
   client.setQueryData([{ url: '/api/ssh-keys' }], [])
   client.setQueryData([{ url: '/api/health' }], { claudeCredential: true, version: '0.1.41' })
+  // The status bar's version button and the "what's new" screen
+  // (app/root-layout.tsx's Shell) query this on every mount — seeded for the
+  // same reason as every other query here, not because this file has
+  // anything of its own to say about that screen.
+  client.setQueryData(
+    [{ url: '/api/whats-new' }],
+    { installedVersion: null, installedAt: null, pending: false },
+  )
   client.setQueryData([{ url: '/api/docker/detection' }], { enabled: true, projects: [] })
   for (const p of PROJECTS) {
     client.setQueryData([{ url: '/api/projects/:id/sessions', params: { id: p.id } }], [])

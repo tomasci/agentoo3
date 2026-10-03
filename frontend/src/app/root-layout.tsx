@@ -3,6 +3,7 @@ import { useAtom, useAtomValue } from 'jotai'
 import type { CSSProperties } from 'react'
 import { useEffect } from 'react'
 import { BackgroundBackdrop, GLASS_CLASS_NAME, useBackdropActive } from '@/features/appearance'
+import { WhatsNewScreen } from '@/features/whats-new'
 import { cn } from '@/shared/lib/utils'
 import {
   isBareShellPath,
@@ -155,6 +156,11 @@ function Shell() {
       </div>
 
       <StatusBar />
+
+      {/* Mounted once, here rather than providers.tsx: the bare editor
+          launcher route (isBareShellPath, above) renders with no Shell at
+          all, and the "Update installed" screen must never show there. */}
+      <WhatsNewScreen />
     </SidebarProvider>
   )
 }
