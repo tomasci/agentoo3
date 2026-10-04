@@ -2,6 +2,11 @@
 
 The What's new screen inside agentoo shows this same list after each update — reopen it any time via the version number in the status bar. Newest release first. Also available in [Russian](CHANGELOG.ru.md).
 
+## 1.3.167 — 2026-10-04
+
+### Improved
+- Creating a session now opens it straight away, instead of leaving you on the sessions list.
+
 ## 1.3.165 — 2026-10-03
 
 ### New

@@ -14,11 +14,16 @@
 //   - a project that is not ready still disables the submit even when an
 //     orchestrator exists (project-sessions-page.test.tsx's status tests run
 //     with no agents at all, so since the zero-orchestrator gate landed they
-//     no longer prove the status gate on their own).
+//     no longer prove the status gate on their own);
+//   - none of the submits that send nothing move the reader off the list,
+//     and one that does send lands on the new session's page.
 //
 // Same harness as tests/project-sessions-page.test.tsx: the real router and
 // page, the real English bundle, the generated clients mocked per-file
-// through ./mock-module.
+// through ./mock-module. A successful create navigates to the session page,
+// so the two clients that page fetches on its own (messages, files) are
+// mocked too — only so it renders quietly; its session DTO comes from the
+// cache the create seeds.
 //
 // Assertions compare primitives, never DOM nodes: bun pretty-printing a
 // happy-dom element on failure takes minutes.
@@ -35,6 +40,8 @@ import { mockModule } from './mock-module'
 
 const LIST_CLIENT = '@/shared/api/generated/clients/getApiProjectsIdSessions'
 const CREATE_CLIENT = '@/shared/api/generated/clients/postApiProjectsIdSessions'
+const MESSAGES_CLIENT = '@/shared/api/generated/clients/getApiSessionsIdMessages'
+const FILES_CLIENT = '@/shared/api/generated/clients/getApiSessionsIdFiles'
 
 const T = '2026-09-04T10:00:00.000Z'
 
@@ -74,6 +81,14 @@ await mockModule(CREATE_CLIENT, () => ({
     createCalls.push({ path: { ...opts.path }, body: { ...opts.body } })
     return { data: session({ id: 'new-1', orchestrator: String(opts.body.orchestrator) }) }
   },
+}))
+await mockModule(MESSAGES_CLIENT, () => ({
+  getApiSessionsIdMessages: async () => ({ data: { messages: [], hasOlder: false } }),
+}))
+await mockModule(FILES_CLIENT, () => ({
+  getApiSessionsIdFiles: async () => ({
+    data: { files: [], usage: { fileCount: 0, sizeBytes: 0, maxFiles: 20, maxSessionBytes: 0 } },
+  }),
 }))
 
 class InertEventSource {
@@ -123,6 +138,7 @@ let currentProject = project()
 let currentAgents: AgentSummary[] = []
 
 let container: HTMLDivElement
+let router: ReturnType<typeof createRouter>
 let client: QueryClient
 let root: Root
 
@@ -137,7 +153,7 @@ const settle = async (ticks = 8) => {
 async function mount() {
   container = document.createElement('div')
   document.body.append(container)
-  const router = createRouter({
+  router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: ['/projects/p1/sessions'] }),
   })
@@ -188,6 +204,9 @@ afterEach(async () => {
 })
 
 // --- helpers ---------------------------------------------------------------
+
+const LIST_PATH = '/projects/p1/sessions'
+const pathname = () => router.state.location.pathname
 
 const REQUIRED = 'Choose an orchestrator'
 const PLACEHOLDER = 'Choose an orchestrator'
@@ -295,6 +314,7 @@ test('submit with nothing picked sends no request and shows the inline error und
 
   expect(createCalls).toEqual([])
   expect(dialog()).not.toBeNull()
+  expect(pathname()).toBe(LIST_PATH)
   expect(fieldError()?.textContent?.trim()).toBe(REQUIRED)
   // Under the trigger, inside the same field, replacing the hint.
   expect(Boolean(trigger().compareDocumentPosition(fieldError() as Node) & 4)).toBe(true)
@@ -321,6 +341,7 @@ test('Enter-style form submission with nothing picked also sends nothing and sho
   await submitForm()
   expect(createCalls).toEqual([])
   expect(fieldError()?.textContent?.trim()).toBe(REQUIRED)
+  expect(pathname()).toBe(LIST_PATH)
 })
 
 test('submitting twice with nothing picked still sends nothing', async () => {
@@ -354,6 +375,7 @@ test('after the error, picking one and submitting sends a body carrying that orc
   await chooseOrchestrator('second')
   await click(submitButton(), 'submit')
   expect(createCalls).toEqual([{ path: { id: 'p1' }, body: { orchestrator: 'second' } }])
+  expect(pathname()).toBe('/projects/p1/sessions/new-1')
 })
 
 test('switching from one orchestrator to another sends the last one picked', async () => {
@@ -376,6 +398,7 @@ test('zero orchestrator agents: the submit is disabled and the empty-library hin
   expect(dialog()?.textContent).not.toContain(HINT)
   await click(submitButton(), 'disabled submit')
   expect(createCalls).toEqual([])
+  expect(pathname()).toBe(LIST_PATH)
   expect(optionNames(await openOptions())).toEqual([])
 })
 
@@ -385,6 +408,7 @@ test('zero orchestrator agents: Enter-style form submission sends nothing either
   await openDialog()
   await submitForm()
   expect(createCalls).toEqual([])
+  expect(pathname()).toBe(LIST_PATH)
 })
 
 // --- close and reopen ------------------------------------------------------
@@ -445,5 +469,6 @@ for (const status of ['pending', 'cloning', 'failed'] as const) {
     expect(submitButton().disabled).toBe(true)
     await click(submitButton(), 'disabled submit')
     expect(createCalls).toEqual([])
+    expect(pathname()).toBe(LIST_PATH)
   })
 }
