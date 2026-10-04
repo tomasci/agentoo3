@@ -100,6 +100,12 @@ async function mount(path: string) {
     [{ url: '/api/whats-new' }],
     { installedVersion: null, installedAt: null, pending: false },
   )
+  // The notification bell (app/tab-bar.tsx) polls this on every shell
+  // mount too — seeded for the same reason as every other query here.
+  client.setQueryData(
+    [{ url: '/api/notifications' }],
+    { items: [], hasUnread: false, truncated: false },
+  )
   client.setQueryData([{ url: '/api/docker/detection' }], { enabled: true, projects: [] })
   client.setQueryData(
     [{ url: '/api/sessions/overview' }, { window: '1d' }],

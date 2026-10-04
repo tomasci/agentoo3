@@ -222,6 +222,37 @@ export async function getSuggestion(id: string): Promise<LibrarySuggestionDto> {
   return detailFromRow(row)
 }
 
+/**
+ * Just enough of a pending suggestion for the notifications bell
+ * (features/notifications/service.ts) to list it — never `listSuggestions`,
+ * which reads every library file off disk and resolves source sessions for
+ * each row; this feeds a poll from every open tab, not a review screen.
+ */
+export interface PendingSuggestionHead {
+  id: string
+  kind: LibraryKind
+  action: 'create' | 'modify'
+  name: string
+  title: string
+  createdAt: Date
+}
+
+export async function listPendingSuggestionHeads(limit: number): Promise<PendingSuggestionHead[]> {
+  return db
+    .select({
+      id: librarySuggestions.id,
+      kind: librarySuggestions.kind,
+      action: librarySuggestions.action,
+      name: librarySuggestions.name,
+      title: librarySuggestions.title,
+      createdAt: librarySuggestions.createdAt,
+    })
+    .from(librarySuggestions)
+    .where(eq(librarySuggestions.status, 'pending'))
+    .orderBy(desc(librarySuggestions.createdAt))
+    .limit(limit)
+}
+
 // --- writing (the learning engine's only entry point for a new suggestion) --
 
 export interface InsertSuggestionInput {

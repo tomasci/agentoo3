@@ -72,6 +72,12 @@ async function mount(path: string, projects = PROJECTS) {
     [{ url: '/api/whats-new' }],
     { installedVersion: null, installedAt: null, pending: false },
   )
+  // The notification bell (app/tab-bar.tsx) polls this on every shell
+  // mount too — seeded for the same reason as every other query here.
+  client.setQueryData(
+    [{ url: '/api/notifications' }],
+    { items: [], hasUnread: false, truncated: false },
+  )
   // The Docker page's own tests (docker-page.test.tsx) cover that dashboard;
   // this file only needs the projects list/overview's small "Docker
   // detected" indicator (projects-table.tsx, project-overview.tsx) to find

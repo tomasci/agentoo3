@@ -1439,5 +1439,19 @@
       "improved": "Improved",
       "fixed": "Fixed"
     }
+  },
+  "notifications": {
+    "bell": "Notifications",
+    "bellUnread": "Notifications, unread",
+    "title": "Notifications",
+    "loadFailed": "Could not load notifications",
+    "empty": {
+      "title": "Nothing to show",
+      "description": "Unchecked session results and learning suggestions awaiting review show up here."
+    },
+    "unread": "Unread",
+    "truncated": "Showing the most recent only",
+    "allSessions": "All sessions",
+    "allSuggestions": "All suggestions"
   }
 }

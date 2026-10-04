@@ -1,6 +1,7 @@
 import { Plus, Settings, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { GLASS_CLASS_NAME, useBackdropActive } from '@/features/appearance'
+import { NotificationBell } from '@/features/notifications'
 import { useProjects } from '@/features/projects'
 import { cn } from '@/shared/lib/utils'
 import type { Tab, TabKind } from '@/shared/store/tabs'
@@ -205,6 +206,14 @@ export function TabBar({ mode }: { mode: TabKind }) {
       <nav aria-label={t('tabs.label')} className="flex min-w-0 flex-1 md:hidden">
         <TabSwitcher />
       </nav>
+
+      {/* Global, every mode (system, project, new tab) and both the desktop
+          row and the phone switcher above — the one piece of this bar that
+          isn't a tab at all, so it sits outside both `nav`s rather than
+          inside either shape. No glass pill of its own: unlike the tab
+          list/[+] pill, the operator wants this small and plain, not a
+          second surface drawing the eye. */}
+      <NotificationBell />
     </header>
   )
 }

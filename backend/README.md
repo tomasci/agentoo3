@@ -246,6 +246,48 @@ and there is no backfill: guessing a historical `settledAt` from `updatedAt`
 would flag a pile of old, already-seen sessions as unchecked the moment this
 shipped, for no result anyone actually needs to look at.
 
+### Notifications
+
+The topbar bell reuses the unchecked-results query above, plus pending
+`library_suggestions` rows (see "Session learning" further down), rather than
+tracking either a second time: `GET /notifications` derives its feed live, on
+every request, from exactly the same `uncheckedSql` and `status = 'pending'`
+filter the System tab and the Library review queue already use, so there is no
+second notion of membership to keep in sync with the two screens that already
+define it.
+
+The only state this feature actually owns is one read-through watermark —
+`notifications_read_through` in `system_settings`, `{ readThrough:
+<ISO string> }` — because there are no users or logins here, so "read" can only
+ever mean "read on this installation", not "read by this operator". Opening
+the bell calls `POST /notifications/read` with the newest item it is showing;
+the server clamps that value to the feed's *actual* newest item at the moment
+the request lands and takes the max against whatever was already stored, so
+the watermark only ever moves forward, a stale or clock-skewed value from the
+client can never rewind it, and an item that settles in the gap between a GET
+and the POST that follows it stays unread instead of being silently swept in.
+
+`unread` is computed by comparing each item's timestamp against the watermark
+in TypeScript, at millisecond precision, and deliberately never in SQL:
+`library_suggestions.created_at` is a Postgres `defaultNow()` column, which
+carries microsecond precision, while the watermark is a JS `Date.toISOString()`
+string, which cannot name anything finer than a millisecond. A SQL `created_at
+> readThrough` comparison would keep comparing that extra, unrepresentable
+fraction of a millisecond against a watermark that can never catch up to it —
+the newest suggestion in any given millisecond would read unread forever, no
+matter how many times it was marked read. Comparing two values that have both
+already been rounded to the same millisecond resolution is what makes "mark
+read" actually stick.
+
+The feed is capped at 50 items (newest first, a session before a suggestion on
+an exact timestamp tie), with `truncated` set when more exist — this is a
+topbar bell, not a paginated inbox, and nobody needs the 51st unread item
+before dealing with the first fifty. Marking read never reaches into either
+source table: it does not set a session's `seenAt` (only `POST
+/sessions/{id}/seen` does that, and only opening that specific session should)
+and it does not change a suggestion's `status` (only applying or rejecting it
+does). Seeing that something happened is not the same as having checked it.
+
 ### Running a turn
 
 A **turn** is the unit of work, not a session. `POST /sessions/{id}/messages`

@@ -73,6 +73,14 @@ await mockModule('@/shared/api/generated/clients/deleteApiLibrarySuggestionsId',
     return { data: undefined }
   },
 }))
+// A successful delete now also invalidates the notification bell's own feed
+// (use-learning.ts's `invalidateSuggestionLists`, shared by apply/reject/
+// delete) — mocked rather than left to the real client so that invalidation
+// refetches against a route this file otherwise never answers, instead of
+// a real, console-logged 404.
+await mockModule('@/shared/api/generated/clients/getApiNotifications', () => ({
+  getApiNotifications: async () => ({ data: { items: [], hasUnread: false, truncated: false } }),
+}))
 
 const { routeTree } = await import('../src/app/router')
 
@@ -133,6 +141,12 @@ async function mount(i18n: I18n = english) {
   client.setQueryData(
     [{ url: '/api/whats-new' }],
     { installedVersion: null, installedAt: null, pending: false },
+  )
+  // The notification bell (app/tab-bar.tsx) polls this on every shell
+  // mount too — seeded for the same reason as every other query here.
+  client.setQueryData(
+    [{ url: '/api/notifications' }],
+    { items: [], hasUnread: false, truncated: false },
   )
   client.setQueryData([{ url: '/api/docker/detection' }], { enabled: true, projects: [] })
   client.setQueryData(
