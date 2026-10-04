@@ -731,10 +731,14 @@ export const ideaFiles = pgTable(
 
 // --- system settings -----------------------------------------------------
 
-// A small key/value store for admin-configurable overrides that do not merit
-// a column or a table of their own — see features/system/settings.ts for the
-// one key that lives here today (max_concurrent_sessions). "No row" means
-// "use the built-in default" rather than an invalid state, following the same
+// A small key/value store for admin-configurable overrides, plus small bits
+// of server-side state, that do not merit a column or a table of their own —
+// see features/system/settings.ts for the key that lives here today
+// (max_concurrent_sessions), and features/notifications/schema.ts for
+// notifications_read_through, the single read-through watermark the in-app
+// notifications bell persists (there being no users/auth in this app, "per
+// installation" is as granular as its read state gets). "No row" means "use
+// the built-in default" rather than an invalid state, following the same
 // absent-means-default model features/system/prompts.ts already uses for a
 // saved-file-vs-fallback prompt: a reset deletes the row instead of writing
 // the default value back into it, so the default stays one thing (a constant

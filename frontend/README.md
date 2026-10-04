@@ -45,8 +45,8 @@ bun run hooks       # install lefthook git hooks
 src/
   app/                 router, root layout, shell chrome (sidebar, tab bar, status bar)
   features/            one directory per feature, self-contained
-    appearance/  docker/  editor/  health/  ideas/  library/  projects/
-    sessions/  settings/  ssh-keys/  storage/  system/  whats-new/
+    appearance/  docker/  editor/  health/  ideas/  library/  notifications/
+    projects/  sessions/  settings/  ssh-keys/  storage/  system/  whats-new/
   shared/
     api/               client config + generated/ (kubb output, git-ignored)
     components/        hand-written app compositions, one barrel
@@ -354,6 +354,19 @@ page is full-bleed instead: its body has no padding, and the page draws its
 own scrolling transcript and composer edge to edge. The editor launcher
 (`features/editor`) skips all of this — no tab bar, no sidebar, no status
 bar — because it opens in its own browser tab, not inside the workspace.
+
+A bell sits at the right-hand end of the tab bar (`features/notifications`,
+mounted once in `TabBar`, after both its `nav`s), the same reasoning as the
+status bar at the other end of the shell: unchecked session results and
+learning suggestions awaiting review are not any one project's business, so
+the control that surfaces them belongs to the shell, not a route — it shows
+on every page, every tab, system or project. It carries a small dot while
+anything in its feed is unread and nothing else — no count, anywhere, on
+purpose, the same restraint the status bar already applies to SSH keys.
+Read state lives on the server (`GET`/`POST /api/notifications`): opening the
+panel marks what it just showed as read there, not in `localStorage` or a
+Jotai atom, so it agrees with whatever else is reading the same feed rather
+than keeping its own second opinion.
 
 Below `md` (768px), the sidebar becomes shadcn's `Sheet`, opened by a
 `SidebarTrigger` in the tab bar and closed again on every navigation, so a tap

@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-query'
 import { getApiSessionsIdMessages } from '@/shared/api/generated/clients/getApiSessionsIdMessages'
 import { deleteApiSessionsIdMutationOptions } from '@/shared/api/generated/hooks/useDeleteApiSessionsId'
+import { getApiNotificationsQueryKey } from '@/shared/api/generated/hooks/useGetApiNotifications'
 import {
   getApiProjectsIdSessionsQueryKey,
   getApiProjectsIdSessionsQueryOptions,
@@ -289,6 +290,11 @@ export function useMarkSessionSeen() {
       void queryClient.invalidateQueries({
         queryKey: getApiProjectsIdSessionsQueryKey({ path: { id: data.projectId } }),
       })
+      // This session just left the bell's own feed too (it only lists
+      // *unchecked* results) — invalidated rather than patched locally,
+      // since the feed also mixes in suggestions this response knows
+      // nothing about.
+      void queryClient.invalidateQueries({ queryKey: getApiNotificationsQueryKey() })
     },
   })
 }

@@ -2,6 +2,11 @@
 
 The What's new screen inside agentoo shows this same list after each update — reopen it any time via the version number in the status bar. Newest release first. Also available in [Russian](CHANGELOG.ru.md).
 
+## 1.4.170 — 2026-10-04
+
+### New
+- A bell in the top bar collects unchecked session results and learning suggestions awaiting review, with a red dot while something is unread.
+
 ## 1.3.169 — 2026-10-04
 
 ### Improved
