@@ -59,10 +59,18 @@ function useInvalidate(projectId: string) {
 }
 
 export function useCreateSession(projectId: string) {
+  const queryClient = useQueryClient()
   const invalidate = useInvalidate(projectId)
   return useMutation({
     ...postApiProjectsIdSessionsMutationOptions(),
-    onSuccess: () => invalidate(),
+    onSuccess: (data) => {
+      // The dialog navigates straight to this session on success (see
+      // new-session-dialog.tsx), so its detail query is seeded with the DTO
+      // the create response already carries — otherwise the session page's
+      // first render is a loading state for data this response already has.
+      queryClient.setQueryData(getApiSessionsIdQueryKey({ path: { id: data.id } }), data)
+      invalidate()
+    },
   })
 }
 

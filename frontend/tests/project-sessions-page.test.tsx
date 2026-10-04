@@ -4,9 +4,16 @@
 // searchable data table:
 //
 //   1. the create form lives in a modal opened from the page header — the
-//      request body it builds, success closing it, an API error shown inside
-//      it, a stale error never surviving a close/reopen, and the submit gated
-//      on the project being `ready`;
+//      request body it builds, an API error shown inside it, a stale error
+//      never surviving a close/reopen, and the submit gated on the project
+//      being `ready`. A successful create closes it and navigates to the new
+//      session's own page, by the id the POST returned, with that session's
+//      detail query already seeded from the response (the page renders its
+//      title while its own GET is still held open) and the project's list
+//      invalidated. Every path that must *not* move the reader — an API
+//      error, a gated or invalid submit, a success landing after the reader
+//      cancelled (or cancelled and started again), or after they left the
+//      page — is pinned to the location it should stay on;
 //   2. the list is a four-column table (Title link, Date, Status, actions)
 //      with none of the old card's extra fields, in the API's own order, and
 //      an Open/Delete menu whose Delete confirms first and toasts a failure;
@@ -79,10 +86,14 @@ let sessions: Session[] = []
 let listCalls = 0
 let createCalls: CreateCall[] = []
 let createFailure: unknown = null
+/** The id the create mock hands back — never anything the form sent. */
+let createdId = 'new-1'
 /** When set, the create client awaits this before settling. */
 let createGate: Promise<void> | null = null
 let deleteCalls: DeleteCall[] = []
 let deleteFailure: unknown = null
+/** When set, the single-session GET awaits this before answering. */
+let sessionGate: Promise<void> | null = null
 
 await mockModule(LIST_CLIENT, () => ({
   getApiProjectsIdSessions: async () => {
@@ -95,7 +106,7 @@ await mockModule(CREATE_CLIENT, () => ({
     createCalls.push({ path: { ...opts.path }, body: { ...opts.body } })
     if (createGate) await createGate
     if (createFailure) throw createFailure
-    const created = session({ id: 'new-1', title: (opts.body.title as string) ?? null })
+    const created = session({ id: createdId, title: (opts.body.title as string) ?? null })
     sessions = [created, ...sessions]
     return { data: created }
   },
@@ -109,9 +120,12 @@ await mockModule(DELETE_CLIENT, () => ({
   },
 }))
 await mockModule(SESSION_CLIENT, () => ({
-  getApiSessionsId: async (opts: { path: { id: string } }) => ({
-    data: sessions.find((s) => s.id === opts.path.id) ?? session({ id: opts.path.id }),
-  }),
+  getApiSessionsId: async (opts: { path: { id: string } }) => {
+    if (sessionGate) await sessionGate
+    return {
+      data: sessions.find((s) => s.id === opts.path.id) ?? session({ id: opts.path.id }),
+    }
+  },
 }))
 await mockModule(MESSAGES_CLIENT, () => ({
   getApiSessionsIdMessages: async () => ({ data: { messages: [], hasOlder: false } }),
@@ -137,6 +151,9 @@ afterAll(() => {
 
 const { routeTree } = await import('../src/app/router')
 const { Toaster, toast } = await import('../src/shared/ui/toast')
+const { getApiSessionsIdQueryKey } = await import(
+  '../src/shared/api/generated/hooks/useGetApiSessionsId'
+)
 
 const project = (overrides: Record<string, unknown> = {}) => ({
   id: 'p1',
@@ -217,8 +234,10 @@ beforeEach(() => {
   createCalls = []
   createFailure = null
   createGate = null
+  createdId = 'new-1'
   deleteCalls = []
   deleteFailure = null
+  sessionGate = null
   currentProject = project()
   currentAgents = []
 })
@@ -346,6 +365,11 @@ const menuItemLabels = () =>
     (el) => el.textContent?.trim() ?? '',
   )
 
+const LIST_PATH = '/projects/p1/sessions'
+const pathname = () => router.state.location.pathname
+/** The session page's own heading (its title), or null off that page. */
+const pageHeading = () => main().querySelector('h1')?.textContent?.trim() ?? null
+
 const alertDialog = () => document.body.querySelector('[role="alertdialog"]') as HTMLElement | null
 
 // --- 1. the New session dialog ---------------------------------------------
@@ -415,7 +439,9 @@ test('whitespace-only title and base branch are omitted, not sent as "" or "   "
   expect(createCalls[0]?.body).toEqual({ orchestrator: 'lead' })
 })
 
-test('a successful create closes the dialog and the new session shows up in the list', async () => {
+test("a successful create closes the dialog and opens the new session's page", async () => {
+  // Rewritten from "…and the new session shows up in the list": a create now
+  // takes the reader to the session rather than leaving them on the list.
   sessions = [session({ id: 's1', title: 'Old one' })]
   currentAgents = [agent('lead', 'orchestrator')]
   await mount()
@@ -425,6 +451,64 @@ test('a successful create closes the dialog and the new session shows up in the 
   await click(submitButton(), 'submit')
   expect(createCalls.length).toBe(1)
   expect(dialog()).toBeNull()
+  expect(pathname()).toBe('/projects/p1/sessions/new-1')
+  expect(pageHeading()).toBe('Fresh one')
+})
+
+test('the destination is the id the POST returned, not anything typed into the form', async () => {
+  createdId = 'srv-7f3a91'
+  currentAgents = [agent('lead', 'orchestrator')]
+  await mount()
+  await openDialog()
+  // Every free-text field holds something that could pass for an id.
+  await type(input('Title'), 'typed-id')
+  await type(input('Base branch'), 'branch-id')
+  await chooseOrchestrator('lead')
+  await click(submitButton(), 'submit')
+  expect(pathname()).toBe('/projects/p1/sessions/srv-7f3a91')
+})
+
+test("the new session's page renders its title from the create response while its own GET is still held", async () => {
+  // A GET that never answers: anything the page shows about the session came
+  // from the cache the create seeded, not from this request.
+  sessionGate = new Promise<void>(() => {})
+  currentAgents = [agent('lead', 'orchestrator')]
+  await mount()
+  await openDialog()
+  await type(input('Title'), 'Seeded title')
+  await chooseOrchestrator('lead')
+  await click(submitButton(), 'submit')
+
+  expect(pathname()).toBe('/projects/p1/sessions/new-1')
+  expect(pageHeading()).toBe('Seeded title')
+  expect(main().textContent).not.toContain('Loading')
+  const cached = client.getQueryData(getApiSessionsIdQueryKey({ path: { id: 'new-1' } })) as
+    | Session
+    | undefined
+  expect(cached?.id).toBe('new-1')
+  expect(cached?.title).toBe('Seeded title')
+  expect(cached?.orchestrator).toBe(null)
+})
+
+test('after a create, going back to the list shows the new session (the list was invalidated)', async () => {
+  sessions = [session({ id: 's1', title: 'Old one' })]
+  currentAgents = [agent('lead', 'orchestrator')]
+  await mount()
+  expect(rowTitles()).toEqual(['Old one'])
+  const listCallsBefore = listCalls
+  await openDialog()
+  await type(input('Title'), 'Fresh one')
+  await chooseOrchestrator('lead')
+  await click(submitButton(), 'submit')
+  expect(pathname()).toBe('/projects/p1/sessions/new-1')
+
+  await act(async () => {
+    router.history.back()
+  })
+  await settle()
+  expect(pathname()).toBe(LIST_PATH)
+  // The client's staleTime is infinite, so only an invalidation refetches.
+  expect(listCalls).toBeGreaterThan(listCallsBefore)
   expect(rowTitles()).toEqual(['Fresh one', 'Old one'])
 })
 
@@ -440,11 +524,13 @@ test('while the create is in flight the submit is disabled and reads Creating…
   await click(submitButton(), 'submit')
   expect(submitButton().disabled).toBe(true)
   expect(submitButton().textContent?.trim()).toBe('Creating…')
+  expect(pathname()).toBe(LIST_PATH)
   await act(async () => {
     release()
   })
   await settle()
   expect(dialog()).toBeNull()
+  expect(pathname()).toBe('/projects/p1/sessions/new-1')
 })
 
 test("an API error is shown inside the dialog, which stays open", async () => {
@@ -464,6 +550,8 @@ test("an API error is shown inside the dialog, which stays open", async () => {
   expect(main().textContent).not.toContain('Branch "nope" does not exist')
   // And the reader's input is still there to fix.
   expect(input('Base branch').value).toBe('nope')
+  // Still on the list: a failure goes nowhere.
+  expect(pathname()).toBe(LIST_PATH)
 })
 
 test('an error with no API message of its own falls back to "Could not create the session"', async () => {
@@ -474,6 +562,7 @@ test('an error with no API message of its own falls back to "Could not create th
   await chooseOrchestrator('lead')
   await click(submitButton(), 'submit')
   expect(dialog()?.textContent).toContain('Could not create the session')
+  expect(pathname()).toBe(LIST_PATH)
 })
 
 test('Cancel after an error, then reopening, shows no stale error', async () => {
@@ -536,8 +625,97 @@ test('closing the dialog while a create is still in flight, then reopening after
   })
   await settle()
 
+  expect(pathname()).toBe(LIST_PATH)
+
   const reopened = await openDialog()
   expect(reopened.textContent).not.toContain('late failure')
+})
+
+for (const how of ['Cancel', 'Escape'] as const) {
+  test(`a create that succeeds after ${how} closed the dialog does not navigate`, async () => {
+    let release: () => void = () => {}
+    createGate = new Promise<void>((r) => {
+      release = r
+    })
+    currentAgents = [agent('lead', 'orchestrator')]
+    await mount()
+    await openDialog()
+    await type(input('Title'), 'Abandoned')
+    await chooseOrchestrator('lead')
+    await click(submitButton(), 'submit')
+    expect(createCalls.length).toBe(1)
+
+    if (how === 'Cancel') {
+      await click(buttonsByText(dialog() as HTMLElement, 'Cancel')[0], 'Cancel')
+    } else {
+      await act(async () => {
+        document.activeElement?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+        )
+      })
+      await settle()
+    }
+    expect(dialog()).toBeNull()
+
+    await act(async () => {
+      release()
+    })
+    await settle()
+
+    expect(pathname()).toBe(LIST_PATH)
+    expect(dialog()).toBeNull()
+  })
+}
+
+test('a create that succeeds after Cancel still shows up in the list the reader stayed on', async () => {
+  // The dialog's stale guard skips only the navigation: the session exists
+  // server-side either way, and the list has to say so without a reload.
+  let release: () => void = () => {}
+  createGate = new Promise<void>((r) => {
+    release = r
+  })
+  currentAgents = [agent('lead', 'orchestrator')]
+  await mount()
+  await openDialog()
+  await type(input('Title'), 'Abandoned')
+  await chooseOrchestrator('lead')
+  await click(submitButton(), 'submit')
+  await click(buttonsByText(dialog() as HTMLElement, 'Cancel')[0], 'Cancel')
+  expect(rowTitles()).toEqual([])
+
+  await act(async () => {
+    release()
+  })
+  await settle()
+  expect(rowTitles()).toEqual(['Abandoned'])
+})
+
+test('a create that succeeds after the reader already left the page does not pull them to it', async () => {
+  let release: () => void = () => {}
+  createGate = new Promise<void>((r) => {
+    release = r
+  })
+  sessions = [session({ id: 'elsewhere', title: 'Elsewhere' })]
+  currentAgents = [agent('lead', 'orchestrator')]
+  await mount()
+  await openDialog()
+  await chooseOrchestrator('lead')
+  await click(submitButton(), 'submit')
+
+  await act(async () => {
+    await router.navigate({
+      to: '/projects/$projectId/sessions/$sessionId',
+      params: { projectId: 'p1', sessionId: 'elsewhere' },
+    })
+  })
+  await settle()
+  expect(pathname()).toBe('/projects/p1/sessions/elsewhere')
+
+  await act(async () => {
+    release()
+  })
+  await settle()
+  expect(pathname()).toBe('/projects/p1/sessions/elsewhere')
 })
 
 test('a create that succeeds after the dialog was cancelled and reopened does not close or wipe the new one', async () => {
@@ -566,6 +744,7 @@ test('a create that succeeds after the dialog was cancelled and reopened does no
 
   expect(dialog()).not.toBeNull()
   expect(dialog() ? input('Title').value : null).toBe('Second attempt, half typed')
+  expect(pathname()).toBe(LIST_PATH)
 })
 
 for (const status of ['pending', 'cloning', 'failed'] as const) {
@@ -577,6 +756,7 @@ for (const status of ['pending', 'cloning', 'failed'] as const) {
     expect(dialog()?.textContent).toContain('The project has to finish setup first.')
     await click(submitButton(), 'submit')
     expect(createCalls).toEqual([])
+    expect(pathname()).toBe(LIST_PATH)
   })
 }
 
