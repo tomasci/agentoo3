@@ -2,6 +2,13 @@
 
 The What's new screen inside agentoo shows this same list after each update — reopen it any time via the version number in the status bar. Newest release first. Also available in [Russian](CHANGELOG.ru.md).
 
+## 1.3.169 — 2026-10-04
+
+### Improved
+- New installs now start with agents and skills updated by Session learning; a library you already have is left as it is.
+- The architect and frontend developer check the version of a library actually installed before relying on it, and the orchestrator confirms why a check failed before skipping it and that a push really landed.
+- The browser skill measures layout bugs instead of judging them from a screenshot, and project conventions treat a pasted browser request as a live secret.
+
 ## 1.3.167 — 2026-10-04
 
 ### Improved
