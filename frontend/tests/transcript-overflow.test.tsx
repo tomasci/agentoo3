@@ -30,10 +30,13 @@
 // scrolling. Those need a real engine.
 
 import { expect, test } from 'bun:test'
+import i18next from 'i18next'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
+import { I18nextProvider } from 'react-i18next'
 import { buildTranscript } from '../src/features/sessions/lib/transcript'
 import { Transcript } from '../src/features/sessions/components/transcript'
+import en from '../src/shared/i18n/locales/en.json'
 
 type M = Parameters<typeof Transcript>[0]['messages'][number]
 
@@ -399,3 +402,226 @@ test('the tool name wraps anywhere — the one keyword that changes min-content'
 // could push the column wider than the row — is fixed at the source, in that
 // file's own `sm:grid-cols-[max-content_minmax(0,1fr)]` plus `min-w-0
 // wrap-anywhere` on `dd`, not worked around here.
+
+// --- 4. text that is not code: the wrap rule everything else inherits ----------
+//
+// The reported case was not a code block at all: an agent's final reply
+// ending in a bare GitHub "open a pull request" URL, rendered as a link, stuck
+// out past the answer card on a phone and let the whole transcript pan
+// sideways. Prose has no `Code wrap` to lean on; what lets an unbroken run
+// shrink inside a grid/flex item is `overflow-wrap: anywhere`, which inherits.
+// So these assert the overflow-wrap each element *inherits* — the nearest
+// ancestor declaring one wins — over a fixture carrying every non-code site
+// that can hold such a run: an answer's prose, an answer's model id, the error
+// and notice frames, and a raw JSON key in a tool input.
+
+const OPERATOR_REPLY =
+  "I didn't open a pull request. GitHub's link for one is https://github.com/tomasci/agentoo3/pull/new/agentoo/s-f3e4bf18."
+const PR_URL = 'https://github.com/tomasci/agentoo3/pull/new/agentoo/s-f3e4bf18'
+const LONG_MODEL = `claude-${'experimental-preview-'.repeat(6)}20261003`
+const LONG_KEY = `k${'_very_long_json_key'.repeat(5)}`
+
+const OVERFLOW_WRAP: Record<string, string> = {
+  'wrap-anywhere': 'anywhere',
+  'wrap-break-word': 'break-word',
+  'wrap-normal': 'normal',
+  'break-words': 'break-word',
+  'break-normal': 'normal',
+}
+
+function inheritedWrap(el: Element | null): string {
+  for (let node = el; node; node = node.parentElement) {
+    for (const cls of node.classList) {
+      const value = OVERFLOW_WRAP[cls]
+      if (value) return value
+    }
+  }
+  return 'normal'
+}
+
+const withModel = (t: string, model: string) => ({
+  message: { model, content: [{ type: 'text', text: t }] },
+})
+
+/** Two turns, so two answers: the operator's reply exactly as reported, under
+ *  a model id with no break of its own, and a second one carrying the other
+ *  wide markdown shapes (inline path, table, fence). */
+const phoneTurns = (): M[] => {
+  n = 0
+  return [
+    msg({ type: 'prompt', payload: { text: 'did you open a PR?' } }),
+    msg({
+      type: 'assistant',
+      title: 'orchestrator: running tools',
+      payload: {
+        message: {
+          content: [{ type: 'tool_use', id: 'tu-key', name: 'Write', input: { [LONG_KEY]: 'v' } }],
+        },
+      },
+    }),
+    msg({ type: 'error', title: 'runner error', payload: { message: `failed: ${LONG_TOKEN}` } }),
+    msg({ type: 'notice', title: 'runner notice', payload: { message: `resumed: ${LONG_TOKEN}` } }),
+    msg({
+      type: 'assistant',
+      title: 'orchestrator: replying',
+      payload: withModel(`${OPERATOR_REPLY}\n\n- pushed \`04b7ef0\``, LONG_MODEL),
+    }),
+    msg({ type: 'result', title: 'Turn complete', payload: { subtype: 'success' } }),
+    msg({ type: 'prompt', payload: { text: 'and the rest?' } }),
+    msg({
+      type: 'assistant',
+      title: 'orchestrator: replying',
+      payload: withModel(
+        [
+          `Edited \`${LONG_TOKEN}\`.`,
+          '',
+          '| column | value |',
+          '| --- | --- |',
+          `| path | ${PR_URL} |`,
+        ].join('\n'),
+        'short-model',
+      ),
+    }),
+    msg({ type: 'result', title: 'Turn complete', payload: { subtype: 'success' } }),
+  ]
+}
+
+/** The answer cards, picked out by buildTranscript's own node kinds rather
+ *  than by a class, since rows render in node order. */
+const answerRows = (container: Element, messages: M[]) => {
+  const kinds = buildTranscript(messages).map((node) => node.kind)
+  return [...grid(container).children]
+    .filter((_, i) => kinds[i] === 'answer')
+    .map((row) => {
+      // Inside the `data-transcript-row` wrapper, the card itself.
+      if (!row.firstElementChild) throw new Error('empty answer row')
+      return row.firstElementChild
+    })
+}
+
+test('the phone fixture renders both answers with their prose, model and table', async () => {
+  // Guards the tests below against an empty set: each one scans these rows.
+  const messages = phoneTurns()
+  const container = await render(messages)
+  const answers = answerRows(container, messages)
+  expect(answers.length).toBe(2)
+  expect(answers[0]?.textContent).toContain("GitHub's link for one is")
+  expect(answers[0]?.textContent).toContain(LONG_MODEL)
+  expect(answers[1]?.querySelector('table')).not.toBeNull()
+})
+
+test("the operator's URL, and every other run of prose in an answer, inherits wrap-anywhere", async () => {
+  const messages = phoneTurns()
+  const container = await render(messages)
+  const answers = answerRows(container, messages)
+
+  const link = answers[0]?.querySelector(`a[href="${PR_URL}"]`) ?? null
+  expect(link?.textContent).toBe(PR_URL)
+  expect(inheritedWrap(link)).toBe('anywhere')
+
+  // Every element of the reply's body holding text of its own — the card's
+  // last child, after the time/model/copy meta row — outside the two boxes
+  // that scroll themselves (a fence, and the table, covered next).
+  const bodies = answers.map((answer) => answer.lastElementChild)
+  expect(bodies.map((body) => body?.textContent?.includes("GitHub's link"))).toEqual([true, false])
+  const offenders = bodies
+    .flatMap((body) => [...(body?.querySelectorAll('*') ?? [])])
+    .filter((el) => !el.closest('pre, table'))
+    .filter((el) =>
+      [...el.childNodes].some((c) => c.nodeType === 3 && (c.textContent ?? '').trim() !== ''),
+    )
+    .filter((el) => inheritedWrap(el) !== 'anywhere')
+    .map((el) => `${el.tagName}: ${(el.textContent ?? '').slice(0, 40)}`)
+  expect(offenders).toEqual([])
+})
+
+test("an answer's table cells wrap at word boundaries, not anywhere", async () => {
+  const messages = phoneTurns()
+  const container = await render(messages)
+  const cells = [...(answerRows(container, messages)[1]?.querySelectorAll('th, td') ?? [])]
+  expect(cells.length).toBe(4)
+  expect(cells.map(inheritedWrap)).toEqual(cells.map(() => 'break-word'))
+})
+
+test("an answer's model id breaks anywhere", async () => {
+  const messages = phoneTurns()
+  const container = await render(messages)
+  const model = [...(answerRows(container, messages)[0]?.querySelectorAll('span') ?? [])].find(
+    (el) => el.textContent === LONG_MODEL,
+  )
+  if (!model) throw new Error('model id not rendered')
+  expect(model.classList.contains('wrap-anywhere')).toBe(true)
+})
+
+test('the error and notice frames wrap their own message anywhere', async () => {
+  const container = await render(phoneTurns())
+  await openAll(container)
+  const descriptions = [...container.querySelectorAll('[data-slot="alert-description"]')]
+  const error = descriptions.find((d) => d.textContent === `failed: ${LONG_TOKEN}`)
+  const notice = descriptions.find((d) => d.textContent === `resumed: ${LONG_TOKEN}`)
+  if (!error || !notice) throw new Error('error/notice frame not rendered')
+  expect(inheritedWrap(error)).toBe('anywhere')
+  expect(inheritedWrap(notice)).toBe('anywhere')
+})
+
+test("a tool input's raw JSON key breaks anywhere", async () => {
+  const container = await render(phoneTurns())
+  await openAll(container)
+  const term = [...container.querySelectorAll('dt')].find((dt) => dt.textContent === LONG_KEY)
+  if (!term) throw new Error('tool input key not rendered')
+  expect(inheritedWrap(term)).toBe('anywhere')
+})
+
+test("an event row's model id is capped and truncated, not left to crush the title", async () => {
+  // `phoneTurns()` carries LONG_MODEL on its answers only; this is the event
+  // row's meta slot, which renders the timestamp plus the model of an
+  // `assistant` message. Uncapped (`shrink-0` alone), Chromium at 390px laid
+  // that meta out 600px wide and squeezed the row title to 0px — so the slot
+  // is pinned to the same `max-w-[40%] truncate` cap as `note`, with the full
+  // id kept reachable in the inner span's tooltip.
+  // A private `en` instance (never react-i18next's process-wide default — see
+  // tests/transcript-attachments.test.tsx): the tooltip is an interpolated
+  // string, and an uninitialised `t()` returns the bare key without the id.
+  const english = i18next.createInstance()
+  await english.init({
+    lng: 'en',
+    fallbackLng: 'en',
+    resources: { en: { translation: en } },
+    interpolation: { escapeValue: false },
+  })
+  n = 0
+  const messages = [
+    msg({ type: 'prompt', payload: { text: 'go' } }),
+    msg({
+      type: 'assistant',
+      title: 'orchestrator: running tools',
+      payload: {
+        message: {
+          model: LONG_MODEL,
+          content: [{ type: 'tool_use', id: 'tu-m', name: 'Write', input: { path: 'a' } }],
+        },
+      },
+    }),
+  ]
+  const container = document.createElement('div')
+  document.body.append(container)
+  await act(async () => {
+    createRoot(container).render(
+      <I18nextProvider i18n={english}>
+        <Transcript messages={messages} sessionId="s1" />
+      </I18nextProvider>,
+    )
+  })
+  const trigger = triggers(container).find((b) =>
+    (b.textContent ?? '').includes('orchestrator: running tools'),
+  )
+  if (!trigger) throw new Error('event row not rendered')
+  const model = [...trigger.querySelectorAll('span')].find((el) => el.textContent === LONG_MODEL)
+  if (!model) throw new Error('model id not rendered in the event row')
+  const meta = model.parentElement
+  // The trigger's own trailing slot, not some wrapper further in.
+  expect(meta?.parentElement).toBe(trigger)
+  expect(meta?.classList.contains('max-w-[40%]')).toBe(true)
+  expect(meta?.classList.contains('truncate')).toBe(true)
+  expect(model.getAttribute('title')).toBe(`Model: ${LONG_MODEL}`)
+})

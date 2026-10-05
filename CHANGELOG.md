@@ -19,6 +19,11 @@ The What's new screen inside agentoo shows this same list after each update — 
 ### Improved
 - Creating a session now opens it straight away, instead of leaving you on the sessions list.
 
+## 1.3.166 — 2026-10-03
+
+### Fixed
+- Long links and other unbroken text in a session's history now wrap on a phone instead of letting the history scroll sideways.
+
 ## 1.3.165 — 2026-10-03
 
 ### New

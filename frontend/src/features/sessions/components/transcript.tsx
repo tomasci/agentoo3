@@ -100,7 +100,9 @@ function TranscriptDisclosure({
           </span>
         )}
         {meta && (
-          <span className="shrink-0 text-[0.6875rem] text-muted-foreground tabular-nums">
+          // Capped like `note` above: an event's meta can carry a long model id, and
+          // without a cap it refuses to shrink and squeezes the title to 0px.
+          <span className="max-w-[40%] shrink-0 truncate text-[0.6875rem] text-muted-foreground tabular-nums">
             {meta}
           </span>
         )}
@@ -194,13 +196,16 @@ function MessageBody({
       {error && (
         <Alert variant="destructive">
           <OctagonXIcon />
-          <AlertDescription>{error}</AlertDescription>
+          {/* The runner's own message, not markdown and not ours to shorten —
+              wrap it ourselves rather than let an unbroken run in it widen
+              the card. */}
+          <AlertDescription className="wrap-anywhere">{error}</AlertDescription>
         </Alert>
       )}
       {notice && (
         <Alert role="status">
           <TriangleAlertIcon />
-          <AlertDescription>{notice}</AlertDescription>
+          <AlertDescription className="wrap-anywhere">{notice}</AlertDescription>
         </Alert>
       )}
       {/* Agent output is markdown, and reads as noise without it. The copy
@@ -492,8 +497,10 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
           <span className="flex items-center justify-self-end gap-2">
             {time}
             {node.model && (
+              // A model id is one unbroken token with no spaces to wrap at
+              // on its own.
               <span
-                className="text-[0.6875rem] text-muted-foreground"
+                className="wrap-anywhere text-[0.6875rem] text-muted-foreground"
                 title={t('sessions.transcript.model', { model: node.model })}
               >
                 {node.model}

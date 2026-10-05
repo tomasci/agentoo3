@@ -667,6 +667,47 @@ test('the simulated container reports one row-height per rendered transcript row
   await unmount()
 })
 
+// --- 1b. the scroll container never pans sideways ----------------------------
+//
+// The one place this file asserts class names, against its own rule above,
+// because there is no behaviour to observe instead: happy-dom has no
+// `scrollWidth`, and the regression is purely a computed-style one. A
+// container with `overflow-y: auto` computes `overflow-x: auto` too unless
+// told otherwise, so any wide descendant the per-element wrapping missed made
+// the whole transcript pan sideways on a phone; `overflow-x-hidden` is the
+// guard that clips it instead.
+
+const UNBROKEN = `E_${'NO_BREAK_OPPORTUNITY_'.repeat(8)}`
+
+test('the scroll container scrolls vertically and clips horizontally', async () => {
+  respond = () => ({ messages: range(1, 3), hasOlder: false })
+  await mount()
+  expect(scroller.classList.contains('overflow-y-auto')).toBe(true)
+  expect(scroller.classList.contains('overflow-x-hidden')).toBe(true)
+  expect(scroller.classList.contains('overflow-x-auto')).toBe(false)
+  await unmount()
+})
+
+test("the session's own last error and a failed first page wrap their text anywhere", async () => {
+  respond = () => ({ messages: range(1, 3), hasOlder: false })
+  await mount({ lastError: UNBROKEN })
+  const lastError = [...container.querySelectorAll('[data-slot="alert-description"]')].find(
+    (el) => el.textContent === UNBROKEN,
+  )
+  expect(lastError?.classList.contains('wrap-anywhere')).toBe(true)
+  await unmount()
+
+  respond = () => {
+    throw new Error(UNBROKEN)
+  }
+  await mount()
+  await settle(() => scroller.querySelector('[data-slot="alert-description"]') !== null)
+  const loadFailed = scroller.querySelector('[data-slot="alert-description"]')
+  expect(loadFailed).not.toBeNull()
+  expect(loadFailed?.classList.contains('wrap-anywhere')).toBe(true)
+  await unmount()
+})
+
 test('the load-older sentinel is observed only while there is an older page, and lets go on unmount', async () => {
   // A sentinel that outlives its own observer — or an observer nobody ever
   // disconnects — keeps re-arming a fetch nobody asked for.

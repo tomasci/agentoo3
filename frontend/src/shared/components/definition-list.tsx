@@ -38,7 +38,10 @@ export function DefinitionList({ items, layout = 'inline' }: DefinitionListProps
     >
       {items.map((item) => (
         <div key={item.id} className={cn(layout === 'inline' && 'sm:contents')}>
-          <dt className="text-muted-foreground">{item.term}</dt>
+          {/* A term is usually a short label, but `ToolInput` (sessions'
+              transcript) passes a raw JSON key here, which can be an
+              arbitrarily long unbroken token with nothing else to shrink it. */}
+          <dt className="wrap-anywhere text-muted-foreground">{item.term}</dt>
           <dd className="min-w-0 wrap-anywhere text-foreground">{item.description}</dd>
         </div>
       ))}

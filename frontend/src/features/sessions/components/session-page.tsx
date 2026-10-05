@@ -715,7 +715,8 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
       <div className="p-4 lg:p-6">
         <Alert variant="destructive">
           <OctagonXIcon />
-          <AlertDescription>
+          {/* The backend's own error text, not ours to shorten. */}
+          <AlertDescription className="wrap-anywhere">
             {apiErrorMessage(session.error, t('sessions.loadFailed'))}
           </AlertDescription>
         </Alert>
@@ -1033,12 +1034,16 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
       {data.lastError && (
         <Alert variant="destructive" className="shrink-0">
           <OctagonXIcon />
-          <AlertDescription>{data.lastError}</AlertDescription>
+          <AlertDescription className="wrap-anywhere">{data.lastError}</AlertDescription>
         </Alert>
       )}
 
       <div
-        className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain pr-1"
+        // `overflow-y-auto` forces the x-axis to compute `auto` too, so any
+        // residual overflow we haven't caught elsewhere would otherwise let
+        // the whole history pan sideways rather than wrap; `overflow-x-hidden`
+        // is a guard clipping that instead.
+        className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-y-contain pr-1"
         ref={scroller}
         onScroll={onScroll}
         onTouchStart={onTouchStart}
@@ -1054,7 +1059,7 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
           // session simply has nothing in it yet.
           <Alert variant="destructive">
             <OctagonXIcon />
-            <AlertDescription>
+            <AlertDescription className="wrap-anywhere">
               {apiErrorMessage(messages.error, t('sessions.transcript.loadFailed'))}
             </AlertDescription>
           </Alert>

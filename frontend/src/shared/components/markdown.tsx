@@ -115,9 +115,15 @@ const components: Components = {
   ),
   // Wrap wide tables rather than letting them push the page sideways, and
   // route the rest of the GFM table through the same parts every other table
-  // in the app uses.
+  // in the app uses. `wrap-break-word` resets the root's inherited
+  // `wrap-anywhere`: GFM's auto table layout sizes each column to its
+  // content, and `overflow-wrap: anywhere` would shrink every column's
+  // min-content down to one character, breaking words mid-letter instead of
+  // just letting this wrapper's own `overflow-x-auto` take the overflow.
+  // `break-word` still breaks an over-long token at the cell edge, just
+  // without changing how the columns size themselves.
   table: ({ children, node: _node, ...props }) => (
-    <div className="mb-3 overflow-x-auto">
+    <div className="mb-3 overflow-x-auto wrap-break-word">
       <Table {...props}>{children}</Table>
     </div>
   ),
@@ -170,7 +176,13 @@ export function Markdown({
   return (
     <div
       className={cn(
-        '[&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
+        // Model output can carry a long unbroken token — a URL, a path, a
+        // hash — with no break opportunity of its own; `wrap-anywhere`
+        // inherits into every element below (headings, list items, links,
+        // blockquotes, inline code) and, unlike `break-word`, also lowers
+        // their min-content size, which is what actually lets them shrink
+        // inside a flex/grid item instead of pushing it wider.
+        'wrap-anywhere [&>*:first-child]:mt-0 [&>*:last-child]:mb-0',
         compact ? 'text-sm' : 'text-base',
       )}
     >
