@@ -40,14 +40,23 @@ let cached: TimezoneOption[] | null = null
 /**
  * Every IANA zone `Intl` knows about, labelled with its current UTC offset
  * and sorted alphabetically, with `UTC` itself pinned first: it is the
- * schedule's own default (see `LearningScheduleCard`'s `DEFAULT_VALUES`), so
- * it needs to be in the list and easy to find regardless of whether the
- * engine's `Intl.supportedValuesOf` happens to enumerate it — added by hand,
- * deduped against whatever the engine already returned, rather than left to
- * chance. `Intl.supportedValuesOf` is the modern, standard source for the
- * rest (no package to keep in sync with the IANA database ourselves) — on a
- * browser old enough to lack it, this falls back to a short, common list
- * rather than leaving the field with nothing to pick.
+ * default both callers start a fresh schedule from (`LearningScheduleCard`'s
+ * `DEFAULT_VALUES`, `features/automations`' create dialog), so it needs to be
+ * in the list and easy to find regardless of whether the engine's
+ * `Intl.supportedValuesOf` happens to enumerate it — added by hand, deduped
+ * against whatever the engine already returned, rather than left to chance.
+ * `Intl.supportedValuesOf` is the modern, standard source for the rest (no
+ * package to keep in sync with the IANA database ourselves) — on a browser
+ * old enough to lack it, this falls back to a short, common list rather than
+ * leaving the field with nothing to pick.
+ *
+ * Lives in `shared/` rather than a feature's own `lib/`, unlike most small
+ * formatting helpers here (see `features/library/lib/format.ts`'s comment on
+ * why those stay duplicated per feature): both `features/settings` (the
+ * learning schedule) and `features/automations` (each automation's own
+ * schedule) need the exact same zone list and offset arithmetic, and
+ * `timezoneOptions`'s module-level cache would otherwise exist twice, doing
+ * the same `Intl.supportedValuesOf` work independently per feature.
  */
 export function timezoneOptions(): TimezoneOption[] {
   if (cached) return cached

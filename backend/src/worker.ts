@@ -2,16 +2,19 @@
 // the session turns that run Claude, and the one-shot idea-to-prompt calls.
 
 import { env } from '@/env'
+import { sweepAutomations } from '@/features/automations/scheduler'
 import { sweepIdeaHandoffs } from '@/features/ideas/handoff'
 import { logger } from '@/lib/logger'
 import {
   enqueueEditorReap,
   ensureAttachmentsGcSchedule,
+  ensureAutomationSweepSchedule,
   ensureEditorReapSchedule,
   ensureIdeaHandoffSweepSchedule,
   ensureTurnReconcileSchedule,
 } from '@/queue'
 import { startAttachmentsGcWorker } from '@/queue/attachments-gc.worker'
+import { startAutomationSweepWorker } from '@/queue/automation-sweep.worker'
 import { startDockerOpWorker } from '@/queue/docker-op.worker'
 import { startEditorOpWorker } from '@/queue/editor-op.worker'
 import { startIdeaHandoffSweepWorker, startIdeaTurnEndedWorker } from '@/queue/idea-handoff.worker'
@@ -40,6 +43,7 @@ const workers = [
   // reconcile loop that keeps BullMQ's job scheduler matching the saved
   // setting — see queue/learning-schedule.worker.ts's own header.
   startLearningScheduleWorker(),
+  startAutomationSweepWorker(),
 ]
 
 // Idempotent — see ensureAttachmentsGcSchedule's own comment — so running it
@@ -49,6 +53,7 @@ await ensureAttachmentsGcSchedule()
 await ensureTurnReconcileSchedule()
 await ensureIdeaHandoffSweepSchedule()
 await ensureEditorReapSchedule()
+await ensureAutomationSweepSchedule()
 
 // The other reconciliation trigger, alongside the schedule above: run once
 // right now, for whatever piled up while nothing was sweeping at all — most
@@ -65,6 +70,16 @@ await reconcileTurns()
 await sweepIdeaHandoffs().catch((error) => {
   logger.error(
     `Idea handoff sweep at boot failed: ${error instanceof Error ? error.message : String(error)}`,
+  )
+})
+
+// Same reasoning, for the automation sweep: an automation whose enqueue
+// never even reached this queue (the worker process died before the
+// schedule was registered, or Redis was briefly unreachable) sits invisible
+// to BullMQ until this runs once for real, right at boot.
+await sweepAutomations().catch((error) => {
+  logger.error(
+    `Automation sweep at boot failed: ${error instanceof Error ? error.message : String(error)}`,
   )
 })
 

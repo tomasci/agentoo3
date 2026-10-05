@@ -150,6 +150,7 @@
     "system": "System",
     "configuration": "Configuration",
     "ideas": "Ideas",
+    "automations": "Automations",
     "projectSettings": "Settings",
     "env": "Env files"
   },
@@ -1417,6 +1418,135 @@
         "title": "Remove file?",
         "confirm": "Remove \"{{name}}\" from this idea?"
       }
+    }
+  },
+  "automations": {
+    "heading": "Automations",
+    "lead": "Each automation fires a prompt into a brand-new session on its own schedule.",
+    "newAutomation": "New automation",
+    "loadFailed": "Could not load automations",
+    "empty": "No automations yet.",
+    "notFound": "That automation does not exist.",
+    "active": "Active",
+    "paused": "Paused",
+    "pause": "Pause",
+    "resume": "Resume",
+    "never": "Never",
+    "table": {
+      "name": "Name",
+      "schedule": "Schedule",
+      "timezone": "Timezone",
+      "nextRun": "Next run",
+      "lastRun": "Last run",
+      "runCount": "Runs",
+      "active": "Active",
+      "pause": "Pause \"{{name}}\"",
+      "resume": "Resume \"{{name}}\"",
+      "pauseFailed": "Could not change whether this automation is paused",
+      "actionsFor": "Actions for \"{{name}}\""
+    },
+    "form": {
+      "createHeading": "New automation",
+      "editHeading": "Edit automation",
+      "name": "Name",
+      "namePlaceholder": "Nightly dependency check",
+      "prompt": "Prompt",
+      "promptPlaceholder": "What should the session do each time this fires?",
+      "scheduleKind": "Schedule",
+      "time": "Time",
+      "days": "Days",
+      "everyHours": "Every N hours",
+      "everyHoursHint": "Counts from midnight — for example, every 6 hours runs at 00:00, 06:00, 12:00 and 18:00.",
+      "minute": "Minute",
+      "customCron": "Cron expression",
+      "customCronHint": "Five fields: minute hour day-of-month month day-of-week.",
+      "timezone": "Timezone",
+      "preview": "Next runs",
+      "previewLoading": "Checking…",
+      "previewInvalid": "This schedule is not valid.",
+      "previewFailed": "Could not preview this schedule",
+      "previewEmpty": "No upcoming runs to show yet.",
+      "orchestrator": "Orchestrator",
+      "orchestratorPlaceholder": "Choose an orchestrator",
+      "orchestratorHint": "The agent that drives each session this automation creates.",
+      "orchestratorEmpty": "No orchestrator agents in the library yet. Add one with role: orchestrator.",
+      "baseBranch": "Base branch",
+      "baseBranchHint": "Cut this automation's session worktree from this branch instead of the project default, each time it fires.",
+      "budget": "Spend cap (USD)",
+      "budgetHint": "Optional hard ceiling for each session this automation creates.",
+      "startPaused": "Start paused",
+      "startPausedHint": "Create it without firing yet — turn it on later from the list or this automation's own page.",
+      "createFailed": "Could not create the automation",
+      "updateFailed": "Could not save the automation",
+      "errors": {
+        "nameRequired": "Give the automation a name",
+        "nameTooLong": "Name is too long",
+        "nameInvalid": "Name may not contain control characters",
+        "promptRequired": "Write a prompt for this automation to run",
+        "promptTooLong": "Prompt is too long",
+        "orchestratorRequired": "Choose an orchestrator",
+        "orchestratorTooLong": "Name is too long",
+        "budgetInvalid": "Enter a positive whole number",
+        "budgetTooHigh": "Spend cap is too high",
+        "timezoneRequired": "Choose a timezone",
+        "timeInvalid": "Enter a valid time",
+        "daysRequired": "Choose at least one day",
+        "cronRequired": "Enter a cron expression",
+        "cronTooLong": "Cron expression is too long"
+      }
+    },
+    "schedule": {
+      "kind": {
+        "daily": "Every day",
+        "weekdays": "Weekdays (Mon–Fri)",
+        "weekends": "Weekends (Sat, Sun)",
+        "days": "Specific days",
+        "hourly": "Every N hours",
+        "custom": "Custom"
+      },
+      "day": {
+        "sun": "Sun",
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat"
+      },
+      "describe": {
+        "daily": "Every day at {{time}}",
+        "weekdays": "Weekdays at {{time}}",
+        "weekends": "Weekends at {{time}}",
+        "days": "{{days}} at {{time}}",
+        "everyHour": "Every hour at :{{minute}}",
+        "everyNHours": "Every {{n}} hours at :{{minute}}",
+        "custom": "Custom: {{cron}}"
+      }
+    },
+    "delete": {
+      "title": "Delete automation?",
+      "confirm": "Delete \"{{name}}\"? Sessions it already created are kept.",
+      "failed": "Could not delete the automation"
+    },
+    "detail": {
+      "backToList": "Back to automations",
+      "nextRun": "Next run: {{when}}",
+      "promptHeading": "Prompt"
+    },
+    "runs": {
+      "heading": "Run history",
+      "empty": "No runs yet.",
+      "emptyWithNext": "No runs yet — next run {{when}}.",
+      "loadFailed": "Could not load the run history",
+      "status": {
+        "dispatching": "Starting",
+        "dispatched": "Started",
+        "failed": "Failed"
+      },
+      "scheduledFor": "Fired",
+      "startedAt": "Started",
+      "unchecked": "Unchecked",
+      "sessionDeleted": "Session deleted"
     }
   },
   "markdownField": {

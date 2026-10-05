@@ -876,6 +876,114 @@ budget batching.ts packs session digests against. See `.env.example` for
 every default.
 
 
+## Automations
+
+Per-project, cron-scheduled prompts. Each one has a name, a 5-field cron
+expression plus an IANA timezone, a free-text prompt, and a `paused` flag.
+When its schedule comes due, the system creates a **brand-new session** for
+the project, seeded with the prompt, and links it to the automation that
+created it — never a reuse or an append of an earlier automation-created
+session, even one still open or running. A paused automation stays visible
+and editable, but never fires; an edit takes effect on the automation's next
+run, and a delete stops every future one. See `features/automations/` for
+the HTTP surface and `db/schema.ts`'s own `automations`/`automation_runs`
+tables, modelled deliberately on the Idea Manager's `ideas`/`idea_runs`
+pair above — read that section first if this one looks familiar.
+
+### A DB-driven sweep, not a job scheduler per automation
+
+The learning job's own schedule (above) is a single, admin-configured daily
+tick, which is exactly the shape a BullMQ job scheduler fits: one setting,
+one scheduler, a worker-side reconcile loop keeping the two in sync. An
+automation is a *user-created row*, arbitrarily many of them, each editable
+and deletable independently — mirroring that approach would mean upserting
+and removing a BullMQ job scheduler on every create/edit/delete/pause, with
+the API writing to Redis directly (or the worker polling Postgres for
+*schedule changes* on top of the schedule itself) just to keep the two
+stores from drifting apart.
+
+Instead, each automation carries its own `next_run_at` in Postgres, and a
+single short-interval sweep (`features/automations/scheduler.ts`'s
+`sweepAutomations`, every 15s — `queue/automation-sweep.worker.ts`) asks one
+question: which automations are due? `paused` is a `WHERE` clause, not a
+second flag the sweep has to cross-check against the stored schedule — a
+paused row is never even in `automations_due_idx` (a partial index on
+`next_run_at WHERE paused = false`) for that query to find. Pausing,
+resuming, editing the cron, or deleting an automation outright are all just
+ordinary writes to this one row; none of them touch Redis, and none of them
+need a worker-side reconcile loop to notice. That is the entire reason this
+is a sweep over a stored column rather than the learning job's own
+scheduler-per-schedule shape: *this* feature has many independent schedules
+that change constantly, and a stored `next_run_at` is the one place
+"due right now" and "currently paused" can never disagree with each other.
+
+### The claim is a conditional UPDATE, not a check-then-act
+
+Exactly like `claimIdeaForHandoff` (above), two sweep ticks — or a scheduled
+tick landing on top of the worker-boot sweep — racing the same due
+automation must converge on exactly one of them winning. The claim is a
+single UPDATE, conditioned on the exact `next_run_at` the candidate was read
+with a moment ago (`WHERE id = ? AND paused = false AND next_run_at = <the
+due value>`), in the same transaction as the `automation_runs` insert that
+records the firing. No row back from the UPDATE means someone else already
+claimed, edited, paused or deleted it since the read; a unique violation on
+`automation_runs_occurrence_key` (one row per `(automation_id,
+scheduled_for)`) means two sweeps landed on the exact same due occurrence at
+once. Both are a clean skip, never a crash and never a double-fire.
+
+### One catch-up run, never a burst
+
+If the worker was down across several of an automation's own occurrences —
+an outage spanning days, say, for an hourly schedule — the claim recomputes
+`next_run_at` as the first occurrence strictly *after the sweep's own
+`now`*, not after the stale `next_run_at` it just claimed. That is what
+turns "several missed occurrences" into exactly one run (for the due instant
+that was actually stored) with the schedule landing cleanly back on track,
+rather than the sweep churning through every occurrence it missed one tick
+at a time.
+
+### Always a new session, never a reuse
+
+Unlike the Idea Manager, which lazily creates one session per idea and
+reuses it across every followup, an automation's sweep calls `createSession`
+on *every* firing, with no lookup of any earlier run's session at all. An
+automation is meant to be reviewed and closed out like any other session —
+the point of a recurring prompt is a fresh run each time, not a single
+conversation that grows forever across unrelated occurrences weeks apart.
+The session's title names the automation and the fired occurrence's own
+wall-clock time, rendered in the automation's own timezone: `<name> ·
+YYYY-MM-DD HH:mm`.
+
+Dispatch (`createSession`, then persisting the new session id immediately,
+then `sendMessage`) happens *outside* the claiming transaction — neither
+call belongs inside one, since both reach their own queues and the
+filesystem. The prompt actually sent, and the orchestrator/base branch/
+budget used, are read off the row the claim itself returned, not off a stale
+in-memory copy — which is what makes an edit saved between two firings take
+effect on the very next one.
+
+### The 5-minute floor
+
+Every firing creates a git worktree and spends model budget, so a schedule
+finer than that is refused outright, with a message saying so —
+`features/automations/cron.ts`'s `validateCron` walks a candidate schedule's
+next ~100 occurrences and rejects it if any two consecutive ones land less
+than 5 minutes apart. The same function backs `POST
+/automations/schedule-preview`'s own `valid`/`error` fields, so create,
+update and the live preview the UI calls while an operator is still typing
+can never disagree about what counts as a schedulable cron.
+
+### A stalled dispatch is not retried
+
+A run still `dispatching` more than ten minutes after its own `startedAt`
+almost certainly lost the worker process that was holding it — mid
+`createSession` or mid `sendMessage`, most likely a restart — and is marked
+`failed` with a sentence saying so, on every sweep tick. Never re-dispatched:
+exactly the same "never retry, it may have already spent real money" policy
+a session turn's own recovery follows (see "A turn that was killed is not a
+turn that failed" above). The next occurrence proceeds normally regardless.
+
+
 ## Commands
 
 ```

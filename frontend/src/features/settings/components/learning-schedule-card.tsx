@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { apiErrorMessage } from '@/features/projects/lib/api-error'
 import type { LearningSchedule } from '@/shared/api/generated/types/LearningSchedule'
 import { Loading, toast } from '@/shared/components'
+import { timezoneOptions, zoneWithOffset } from '@/shared/lib/timezones'
 import { Alert, AlertDescription } from '@/shared/ui/alert'
 import { Button } from '@/shared/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
@@ -22,7 +23,6 @@ import { Spinner } from '@/shared/ui/spinner'
 import { Switch } from '@/shared/ui/switch'
 import { useSystemSettings, useUpdateSystemSettings } from '../hooks/use-system-settings'
 import { formatDateTime } from '../lib/format'
-import { timezoneOptions, zoneWithOffset } from '../lib/timezones'
 import {
   type LearningScheduleFormValues,
   learningScheduleFormSchema,

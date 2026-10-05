@@ -228,7 +228,7 @@ test('the next run is shown with the shared date formatter and "your local time"
 
 // UTC is the schedule's own default (DEFAULT_SCHEDULE above) — the Select
 // pins it first and labels it bare "UTC" rather than "UTC (UTC+0)" (see
-// src/features/settings/lib/timezones.ts's own comment on why that
+// src/shared/lib/timezones.ts's own comment on why that
 // parenthetical would just repeat the zone's name back at the reader), and
 // the schedule line below reads "Daily at 04:00 (UTC)." for the same reason.
 test('UTC is offered in the timezone Select, labelled bare, and the schedule line reads cleanly', async () => {

@@ -1,4 +1,5 @@
 import { useParams } from '@tanstack/react-router'
+import { AutomationDetailPage, AutomationsListPage } from '@/features/automations'
 import { DockerPage } from '@/features/docker'
 import { EditorLauncher } from '@/features/editor'
 import { EnvFilesPage } from '@/features/env-files'
@@ -53,6 +54,18 @@ export function ProjectIdeasRoute() {
 export function IdeaDetailRoute() {
   const { projectId, ideaId } = useParams({ from: '/projects/$projectId/ideas/$ideaId' })
   return <IdeaDetailPage projectId={projectId} ideaId={ideaId} />
+}
+
+export function ProjectAutomationsRoute() {
+  const { projectId } = useParams({ from: '/projects/$projectId' })
+  return <AutomationsListPage projectId={projectId} />
+}
+
+export function AutomationDetailRoute() {
+  const { projectId, automationId } = useParams({
+    from: '/projects/$projectId/automations/$automationId',
+  })
+  return <AutomationDetailPage projectId={projectId} automationId={automationId} />
 }
 
 export function SessionRoute() {

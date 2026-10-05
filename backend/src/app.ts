@@ -4,6 +4,7 @@ import { HTTPException } from 'hono/http-exception'
 import { logger as httpLogger } from 'hono/logger'
 import { env } from '@/env'
 import { attachmentsRouter } from '@/features/attachments/routes'
+import { automationsRouter } from '@/features/automations/routes'
 import { dockerRouter } from '@/features/docker/routes'
 import { editorProxyRouter } from '@/features/editor/proxy'
 import { editorRouter } from '@/features/editor/routes'
@@ -63,6 +64,7 @@ export function createApp() {
   app.route('/api', editorRouter)
   app.route('/api', editorProxyRouter)
   app.route('/api', ideasRouter)
+  app.route('/api', automationsRouter)
   app.route('/api', systemRouter)
   app.route('/api', whatsNewRouter)
   app.route('/api', notificationsRouter)

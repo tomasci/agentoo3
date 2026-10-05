@@ -45,7 +45,8 @@ bun run hooks       # install lefthook git hooks
 src/
   app/                 router, root layout, shell chrome (sidebar, tab bar, status bar)
   features/            one directory per feature, self-contained
-    appearance/  docker/  editor/  health/  ideas/  library/  notifications/
+    appearance/  automations/  docker/  editor/  health/  ideas/  library/
+    notifications/
     projects/  sessions/  settings/  ssh-keys/  storage/  system/  whats-new/
   shared/
     api/               client config + generated/ (kubb output, git-ignored)
@@ -440,6 +441,8 @@ TanStack Router, defined in code rather than by file convention
 | `/projects/$projectId` | redirects to `/projects/$projectId/sessions` |
 | `/projects/$projectId/sessions` | that project's sessions |
 | `/projects/$projectId/settings` | project settings: details, SSH key, retry, delete |
+| `/projects/$projectId/automations` | that project's automations: a name, cron schedule, prompt and the session settings each run starts with |
+| `/projects/$projectId/automations/$automationId` | one automation's settings and run history |
 | `/ssh-keys` | SSH keys |
 
 `/sessions` (`features/sessions/components/sessions-dashboard-page.tsx`) is

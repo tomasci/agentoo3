@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import {
   BookOpen,
+  CalendarClock,
   Container,
   FileKey,
   Gauge,
@@ -280,6 +281,23 @@ function ProjectNav({ projectId, glass }: { projectId: string; glass: boolean })
               >
                 <Lightbulb />
                 <span>{t('nav.ideas')}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            {/* Non-exact: the detail route (`/automations/$automationId`) is a
+                child page of the same section, the same reason Ideas above is. */}
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                render={
+                  <Link
+                    to="/projects/$projectId/automations"
+                    params={{ projectId }}
+                    activeProps={{ 'aria-current': 'page', 'data-active': '' }}
+                    activeOptions={{ exact: false }}
+                  />
+                }
+              >
+                <CalendarClock />
+                <span>{t('nav.automations')}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>

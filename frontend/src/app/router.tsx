@@ -20,8 +20,10 @@ import { buttonVariants } from '@/shared/ui/button'
 import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from '@/shared/ui/empty'
 import { ProjectLayout } from './project-layout'
 import {
+  AutomationDetailRoute,
   IdeaDetailRoute,
   NewTabRoute,
+  ProjectAutomationsRoute,
   ProjectDockerRoute,
   ProjectEnvRoute,
   ProjectIdeasRoute,
@@ -199,6 +201,22 @@ const ideaDetailRoute = createRoute({
   component: IdeaDetailRoute,
 })
 
+// Project Automations: a per-project schedule that fires a prompt into a
+// brand-new session on a cron — the list.
+const projectAutomationsRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/automations',
+  component: ProjectAutomationsRoute,
+})
+
+// One automation's own settings and run history. A child of the project
+// layout, same reason `ideaDetailRoute` above is.
+const automationDetailRoute = createRoute({
+  getParentRoute: () => projectRoute,
+  path: '/automations/$automationId',
+  component: AutomationDetailRoute,
+})
+
 // The global library. Editors are their own pages rather than dialogs: a prompt
 // is the length of a document, and a document deserves an address.
 const libraryRoute = createRoute({
@@ -348,6 +366,8 @@ export const routeTree = rootRoute.addChildren([
     projectLibraryRoute,
     projectIdeasRoute,
     ideaDetailRoute,
+    projectAutomationsRoute,
+    automationDetailRoute,
     projectSettingsRoute,
   ]),
   // Literal segments before the agents/skills `$name` routes, the same

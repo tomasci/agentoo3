@@ -729,6 +729,128 @@ export const ideaFiles = pgTable(
   ],
 )
 
+// --- automations ------------------------------------------------------------
+//
+// Per-project, cron-scheduled prompts. Every firing creates a BRAND-NEW
+// session — never a reuse or an append of an earlier automation-created one,
+// even if that one is still open or running — so there is no `sessionId`
+// column here the way `ideas.sessionId` lazily holds one: the session-linking
+// pattern is instead `automationRuns` below, which mirrors `ideaRuns` above on
+// purpose (read that table's own header first; the two are structurally the
+// same idea — "one row per time this thing dispatched into a session" — with
+// a sweep in place of a board move as the trigger). See backend/README.md's
+// own "Automations" section for the scheduler story this table feeds.
+
+export const automationRunStatusEnum = pgEnum('automation_run_status', [
+  'dispatching',
+  'dispatched',
+  'failed',
+])
+
+export const automations = pgTable(
+  'automations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    prompt: text('prompt').notNull(),
+    // A standard 5-field cron expression — the single source of truth for
+    // this automation's schedule. No preset columns ("every day at",
+    // "every hour"): a preset is a UI convenience for building this string,
+    // never a second representation of the schedule for this table to keep
+    // in sync with it.
+    cron: text('cron').notNull(),
+    // The IANA zone `cron` is evaluated in — a schedule with no zone is
+    // ambiguous the moment a host or an operator crosses one.
+    timezone: text('timezone').notNull(),
+    paused: boolean('paused').notNull().default(false),
+    // These three mirror what createSession accepts, same reasoning as
+    // ideas.orchestrator/baseBranch/maxBudgetUsd above: the session is
+    // created lazily, at each firing, rather than once up front, so they
+    // have to live here instead of on a session row that does not exist yet.
+    // Unlike an idea, though, createSession refuses to create a session
+    // with no orchestrator at all (features/sessions/service.ts), and an
+    // automation has no human in the loop to hit that 400 and fix it on the
+    // next click — so orchestrator is required here, not nullable.
+    orchestrator: text('orchestrator').notNull(),
+    baseBranch: text('base_branch'),
+    maxBudgetUsd: integer('max_budget_usd'),
+    // The next due instant, or null exactly while paused — "paused" is a
+    // WHERE clause, not a second flag the sweep has to cross-check against
+    // this column. See backend/README.md's "Automations" section for why a
+    // stored next_run_at (rather than re-deriving it from cron on every
+    // tick) is what lets an edit or a delete take effect with no Redis
+    // reconciliation of its own.
+    nextRunAt: timestamp('next_run_at', { withTimezone: true }),
+    // The scheduled instant of the most recent firing — not "whenever the
+    // sweep happened to run", the same distinction learningRuns.windowEnd
+    // draws against "whenever the worker got around to it".
+    lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('automations_project_idx').on(t.projectId),
+    // The sweep's one read shape: every automation due to fire, right now,
+    // that is not paused. A plain index on next_run_at would also have to
+    // filter paused rows out of every row it returned; this partial index
+    // means a paused automation is never even in the index for that query to
+    // find, not merely excluded from its result.
+    index('automations_due_idx').on(t.nextRunAt).where(sql`${t.paused} = false`),
+  ],
+)
+
+// One row per firing — the durable session link, mirroring idea_runs above
+// field for field (see that table's own comment for why that shape, not a
+// fresh one, is the right model here). `scheduledFor` is this run's own
+// identity within its automation: automation_runs_occurrence_key below is
+// what makes "fire this exact cron occurrence twice" a database-level
+// impossibility rather than a check-then-insert race the sweep would have to
+// get right on its own.
+export const automationRuns = pgTable(
+  'automation_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    automationId: uuid('automation_id')
+      .notNull()
+      .references(() => automations.id, { onDelete: 'cascade' }),
+    // ON DELETE SET NULL: deleting a session must not delete the run record
+    // that explains what it was for — same reasoning as idea_runs.sessionId.
+    sessionId: uuid('session_id').references(() => sessions.id, { onDelete: 'set null' }),
+    // messages cascade-deletes with its session, so cascading here too would
+    // erase this attribution record whenever a session is deleted — mirrors
+    // idea_runs.promptMessageId's identical comment above.
+    promptMessageId: uuid('prompt_message_id').references(() => messages.id, {
+      onDelete: 'set null',
+    }),
+    // The cron occurrence this run fired for — the due instant read at claim
+    // time, never "now": see automation_runs_occurrence_key below.
+    scheduledFor: timestamp('scheduled_for', { withTimezone: true }).notNull(),
+    // Snapshot of the prompt actually sent, taken from the automation row at
+    // the moment this run claimed it — not a live join to automations.prompt,
+    // which a later edit would otherwise rewrite retroactively under this
+    // row's feet.
+    prompt: text('prompt').notNull(),
+    status: automationRunStatusEnum('status').notNull().default('dispatching'),
+    // A human-readable sentence, set only when status = 'failed'.
+    error: text('error'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('automation_runs_automation_idx').on(t.automationId),
+    index('automation_runs_session_idx').on(t.sessionId),
+    // The database-level guard against firing one occurrence twice — two
+    // sweeps landing on the same due automation at once (or a redelivered
+    // tick) always converge on exactly one INSERT succeeding and the other
+    // catching a clean unique-violation skip (lib/errors.ts's
+    // isUniqueViolation), the identical discipline idea_runs_open_key
+    // documents for a different race.
+    uniqueIndex('automation_runs_occurrence_key').on(t.automationId, t.scheduledFor),
+  ],
+)
+
 // --- system settings -----------------------------------------------------
 
 // A small key/value store for admin-configurable overrides, plus small bits
@@ -931,6 +1053,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   libraryItems: many(projectLibraryItems),
   sshKey: one(sshKeys, { fields: [projects.sshKeyId], references: [sshKeys.id] }),
   ideas: many(ideas),
+  automations: many(automations),
 }))
 
 export const sshKeysRelations = relations(sshKeys, ({ many }) => ({
@@ -1002,6 +1125,23 @@ export const ideaRunsRelations = relations(ideaRuns, ({ one }) => ({
 
 export const ideaFilesRelations = relations(ideaFiles, ({ one }) => ({
   idea: one(ideas, { fields: [ideaFiles.ideaId], references: [ideas.id] }),
+}))
+
+export const automationsRelations = relations(automations, ({ one, many }) => ({
+  project: one(projects, { fields: [automations.projectId], references: [projects.id] }),
+  runs: many(automationRuns),
+}))
+
+export const automationRunsRelations = relations(automationRuns, ({ one }) => ({
+  automation: one(automations, {
+    fields: [automationRuns.automationId],
+    references: [automations.id],
+  }),
+  session: one(sessions, { fields: [automationRuns.sessionId], references: [sessions.id] }),
+  promptMessage: one(messages, {
+    fields: [automationRuns.promptMessageId],
+    references: [messages.id],
+  }),
 }))
 
 export const learningRunsRelations = relations(learningRuns, ({ many }) => ({
