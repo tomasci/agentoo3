@@ -23,6 +23,7 @@ import {
   getApiLibrarySuggestionsIdQueryKey,
   getApiLibrarySuggestionsIdQueryOptions,
 } from '@/shared/api/generated/hooks/useGetApiLibrarySuggestionsId'
+import { getApiNotificationsQueryKey } from '@/shared/api/generated/hooks/useGetApiNotifications'
 import { postApiLibraryLearningRunsMutationOptions } from '@/shared/api/generated/hooks/usePostApiLibraryLearningRuns'
 import { postApiLibrarySuggestionsIdApplyMutationOptions } from '@/shared/api/generated/hooks/usePostApiLibrarySuggestionsIdApply'
 import { postApiLibrarySuggestionsIdRejectMutationOptions } from '@/shared/api/generated/hooks/usePostApiLibrarySuggestionsIdReject'
@@ -100,6 +101,11 @@ export function useSuggestion(id: string) {
  *  unparemeterized key clears all of them at once (partial match). */
 function invalidateSuggestionLists(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: getApiLibrarySuggestionsQueryKey() })
+  // Applying, rejecting or deleting a suggestion all run through here, and
+  // all three can take it out of the bell's own feed (it only lists
+  // *pending* suggestions) — covered once, here, rather than in each of the
+  // three mutations below.
+  void queryClient.invalidateQueries({ queryKey: getApiNotificationsQueryKey() })
 }
 
 export function useApplySuggestion(id: string) {

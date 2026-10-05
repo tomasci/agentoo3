@@ -124,6 +124,12 @@ async function mount(path = '/library') {
     disk: { usedBytes: 1, totalBytes: 2, usedPercent: 30, path: '/' },
   })
   client.setQueryData([{ url: '/api/docker/detection' }], { enabled: true, projects: [] })
+  // The notification bell (app/tab-bar.tsx) polls this on every shell
+  // mount too — seeded for the same reason as every other query here.
+  client.setQueryData(
+    [{ url: '/api/notifications' }],
+    { items: [], hasUnread: false, truncated: false },
+  )
   client.setQueryData([{ url: '/api/library/suggestions' }, { status: 'pending' }], [])
   client.setQueryData([{ url: '/api/library/suggestions' }, { status: 'rejected' }], [])
   client.setQueryData(

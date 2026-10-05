@@ -393,6 +393,43 @@ export async function getSessionsOverview(
 }
 
 /**
+ * Just enough of an unchecked session for the notifications bell
+ * (features/notifications/service.ts) to list it — never the full
+ * SessionDto (its message counts, pending prompts, idea lookup), which a
+ * poll from every open tab has no use for. `uncheckedSql` stays private to
+ * this file; this is its only export, so the bell's membership can never
+ * drift from what the System tab's own `unchecked` list considers unchecked.
+ */
+export interface UncheckedSessionHead {
+  id: string
+  projectId: string
+  projectName: string
+  title: string | null
+  status: SessionDto['status']
+  settledAt: Date
+}
+
+export async function listUncheckedSessionHeads(limit: number): Promise<UncheckedSessionHead[]> {
+  const rows = await db
+    .select({
+      id: sessions.id,
+      projectId: sessions.projectId,
+      projectName: projects.name,
+      title: sessions.title,
+      status: sessions.status,
+      settledAt: sessions.settledAt,
+    })
+    .from(sessions)
+    .innerJoin(projects, eq(projects.id, sessions.projectId))
+    .where(uncheckedSql)
+    .orderBy(desc(sessions.settledAt))
+    .limit(limit)
+  // uncheckedSql's own first clause is `settledAt is not null`, so this is
+  // never actually null here — only the column's declared type says it could be.
+  return rows.map((row) => ({ ...row, settledAt: row.settledAt as Date }))
+}
+
+/**
  * The three facts docker/scope.ts needs to resolve a session's own worktree —
  * never the whole session row, so that module (and anything else outside
  * this feature that only needs "where does this session run") does not reach

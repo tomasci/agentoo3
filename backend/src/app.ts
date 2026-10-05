@@ -12,6 +12,7 @@ import { healthRouter } from '@/features/health/routes'
 import { ideasRouter } from '@/features/ideas/routes'
 import { learningRouter } from '@/features/learning/routes'
 import { libraryRouter } from '@/features/library/routes'
+import { notificationsRouter } from '@/features/notifications/routes'
 import { projectsRouter } from '@/features/projects/routes'
 import { sessionsRouter } from '@/features/sessions/routes'
 import { sourcesRouter } from '@/features/sources/routes'
@@ -64,6 +65,7 @@ export function createApp() {
   app.route('/api', ideasRouter)
   app.route('/api', systemRouter)
   app.route('/api', whatsNewRouter)
+  app.route('/api', notificationsRouter)
 
   app.doc('/api/openapi.json', {
     openapi: '3.1.0',

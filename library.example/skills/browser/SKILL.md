@@ -1,6 +1,11 @@
 ---
 name: browser
-description: Use when you need to load a page in a real browser and check what it actually does — navigate a URL, read the rendered content, click or type, take a screenshot, or check for console errors and failed network requests. Use to verify a running app from the outside, the way a user would hit it, not by reading its source.
+description: >-
+  Use when you need to load a page in a real browser and check what it actually
+  does — navigate a URL, read the rendered content, click or type, take a
+  screenshot, or check for console errors and failed network requests. Use to
+  verify a running app from the outside, the way a user would hit it, not by
+  reading its source.
 ---
 
 # Browser
@@ -49,6 +54,28 @@ A page that loads is not a passing page. Load it, then check the specific
 thing you were asked to check — an element, its text, a value on the page —
 in the snapshot. "It came back with a 200" and "the page loaded" are not
 assertions.
+
+## Layout and geometry bugs need a measurement, not a look
+
+Some bugs are not about content or state at all but about geometry — a card
+stretching to match a taller row neighbour, two elements overlapping, text
+causing the page to scroll sideways, a control wrapping (or failing to wrap)
+at a given width. Neither tool above answers this: the accessibility snapshot
+carries no position or size information, and a screenshot shows the symptom
+to a human but gives you nothing to assert against — "it looks fine" is not a
+result you can report with confidence, and a before/after pair of screenshots
+only proves something changed, not what.
+
+For this class of bug, use whatever tool in your `mcp__playwright__*` set runs
+a script against the live page (commonly `browser_evaluate` — list your tools
+if the exact name is not obvious) and read back real numbers:
+`getBoundingClientRect()` on the elements in question, `scrollWidth` versus
+`clientWidth` to detect overflow, or the `offsetHeight` of siblings in the
+same row to detect a stretch. Resize or set the viewport to the width the bug
+was reported at — these bugs are routinely width-dependent — take the
+measurement before the fix and the same measurement after it, and report the
+actual numbers rather than a visual impression. That comparison is what tells
+a fixed layout apart from one that merely looks different.
 
 ## Console and network are part of the check
 

@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-query'
 import { getApiSessionsIdMessages } from '@/shared/api/generated/clients/getApiSessionsIdMessages'
 import { deleteApiSessionsIdMutationOptions } from '@/shared/api/generated/hooks/useDeleteApiSessionsId'
+import { getApiNotificationsQueryKey } from '@/shared/api/generated/hooks/useGetApiNotifications'
 import {
   getApiProjectsIdSessionsQueryKey,
   getApiProjectsIdSessionsQueryOptions,
@@ -59,10 +60,18 @@ function useInvalidate(projectId: string) {
 }
 
 export function useCreateSession(projectId: string) {
+  const queryClient = useQueryClient()
   const invalidate = useInvalidate(projectId)
   return useMutation({
     ...postApiProjectsIdSessionsMutationOptions(),
-    onSuccess: () => invalidate(),
+    onSuccess: (data) => {
+      // The dialog navigates straight to this session on success (see
+      // new-session-dialog.tsx), so its detail query is seeded with the DTO
+      // the create response already carries — otherwise the session page's
+      // first render is a loading state for data this response already has.
+      queryClient.setQueryData(getApiSessionsIdQueryKey({ path: { id: data.id } }), data)
+      invalidate()
+    },
   })
 }
 
@@ -281,6 +290,11 @@ export function useMarkSessionSeen() {
       void queryClient.invalidateQueries({
         queryKey: getApiProjectsIdSessionsQueryKey({ path: { id: data.projectId } }),
       })
+      // This session just left the bell's own feed too (it only lists
+      // *unchecked* results) — invalidated rather than patched locally,
+      // since the feed also mixes in suggestions this response knows
+      // nothing about.
+      void queryClient.invalidateQueries({ queryKey: getApiNotificationsQueryKey() })
     },
   })
 }

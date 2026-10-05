@@ -1,3 +1,4 @@
+import { useNavigate } from '@tanstack/react-router'
 import { useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAgents } from '@/features/library'
@@ -27,6 +28,11 @@ const NEW_SESSION_FORM_ID = 'new-session-form'
  * rather than react-hook-form: the fields, their hints and the request body
  * they build are unchanged from before, and there is nothing here a resolver
  * would buy back.
+ *
+ * A successful create navigates straight to the new session's own page —
+ * the reader asked to start a session, not to watch one appear in a list. A
+ * create the user already cancelled does not navigate (see the generation
+ * guard in onCreate's onSuccess below).
  */
 export function NewSessionDialog({
   projectId,
@@ -47,6 +53,7 @@ export function NewSessionDialog({
   // settles.
   const { data: agents, isSuccess: agentsLoaded } = useAgents()
   const create = useCreateSession(projectId)
+  const navigate = useNavigate()
 
   const [title, setTitle] = useState('')
   const [orchestrator, setOrchestrator] = useState('')
@@ -140,9 +147,17 @@ export function NewSessionDialog({
         },
       },
       {
-        onSuccess: () => {
+        onSuccess: (data) => {
+          // Stale when the user already cancelled this attempt (Cancel,
+          // Escape, overlay) while the request was in flight — they have
+          // moved on, so a session landing a moment later must not yank them
+          // onto its page.
           if (generationRef.current !== myGeneration) return
           close()
+          void navigate({
+            to: '/projects/$projectId/sessions/$sessionId',
+            params: { projectId, sessionId: data.id },
+          })
         },
         onError: (e) => {
           if (generationRef.current !== myGeneration) return
