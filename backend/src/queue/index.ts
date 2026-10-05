@@ -9,6 +9,7 @@ export const QUEUE_TURN_ENDED = 'turn-ended'
 export const QUEUE_TURN_RECONCILE = 'turn-reconcile'
 export const QUEUE_IDEA_PROMPT = 'idea-prompt'
 export const QUEUE_IDEA_HANDOFF_SWEEP = 'idea-handoff-sweep'
+export const QUEUE_AUTOMATION_SWEEP = 'automation-sweep'
 export const QUEUE_DOCKER_OP = 'docker-op'
 export const QUEUE_EDITOR_OP = 'editor-op'
 // The learning-schedule queue: the daily tick that decides *whether* a
@@ -89,6 +90,15 @@ export interface IdeaPromptJob {
 }
 
 export interface IdeaHandoffSweepJob {
+  reason: 'scheduled'
+}
+
+/** The project-automations sweep's own tick — see
+ * features/automations/scheduler.ts's `sweepAutomations` for the body this
+ * runs on every fire, and backend/README.md's "Automations" section for why
+ * it is a DB-driven sweep rather than one BullMQ job scheduler per
+ * automation. */
+export interface AutomationSweepJob {
   reason: 'scheduled'
 }
 
@@ -396,6 +406,49 @@ export async function ensureIdeaHandoffSweepSchedule() {
   await ideaHandoffSweepQueue.upsertJobScheduler(
     'idea-handoff-sweep',
     { every: IDEA_HANDOFF_SWEEP_INTERVAL_MS },
+    { name: 'sweep', data: { reason: 'scheduled' } },
+  )
+}
+
+/**
+ * How often the automation sweep (features/automations/scheduler.ts's
+ * `sweepAutomations`) runs — short, like the idea-handoff sweep just above
+ * and for the identical reason: paused is a WHERE clause and an edit takes
+ * effect on the row's next read, but a schedule that comes due still has to
+ * wait for a tick to notice, so that tick had better be short. A sixth queue
+ * rather than a ride on any existing schedule, for the same reason every
+ * other one here gets its own: this scans the automations table, not
+ * sessions or the ideas board, and ties its own cadence to nothing else.
+ * `concurrency: 1` on the worker that consumes this (see
+ * queue/automation-sweep.worker.ts) is for the same reason
+ * `idea-handoff-sweep`'s is — the sweep scans across every project's
+ * automations, not one row, so its concurrency has nothing to do with
+ * `WORKER_CONCURRENCY`.
+ */
+const AUTOMATION_SWEEP_INTERVAL_MS = 15_000
+
+export const automationSweepQueue = new Queue<AutomationSweepJob>(QUEUE_AUTOMATION_SWEEP, {
+  connection: redisConnection(),
+  defaultJobOptions: {
+    attempts: 1,
+    removeOnComplete: { count: 50 },
+    removeOnFail: { count: 50 },
+  },
+})
+
+export async function enqueueAutomationSweep(job: AutomationSweepJob) {
+  return automationSweepQueue.add('sweep', job)
+}
+
+/**
+ * Register the sweep's own schedule. Idempotent by construction, exactly
+ * like `ensureIdeaHandoffSweepSchedule` above — safe, and correct, to call on
+ * every worker boot.
+ */
+export async function ensureAutomationSweepSchedule() {
+  await automationSweepQueue.upsertJobScheduler(
+    'automation-sweep',
+    { every: AUTOMATION_SWEEP_INTERVAL_MS },
     { name: 'sweep', data: { reason: 'scheduled' } },
   )
 }

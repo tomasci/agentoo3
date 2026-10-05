@@ -305,6 +305,7 @@ test('picking a project fills in that same tab, and turns on project navigation'
     '/projects/p1/docker',
     '/projects/p1/env',
     '/projects/p1/ideas',
+    '/projects/p1/automations',
     '/projects/p1/library',
     '/projects/p1/settings',
   ])

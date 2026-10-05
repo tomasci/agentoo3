@@ -24,6 +24,17 @@ export const sessionSchema = z.object({
         'joined in the reverse direction (see that column in db/schema.ts). Null for a session ' +
         'created directly, without an idea behind it.',
     }),
+  automationId: z
+    .string()
+    .uuid()
+    .nullable()
+    .openapi({
+      description:
+        'The project automation that created this session — joined in the reverse direction ' +
+        'from automation_runs.session_id (see db/schema.ts), the same shape as ideaId just above. ' +
+        'Null for a session created directly, or handed off from an idea, without an automation ' +
+        'behind it.',
+    }),
   title: z.string().nullable(),
   status: sessionStatusSchema,
   orchestrator: z.string().nullable(),
@@ -139,8 +150,13 @@ export type SessionsOverviewDto = z.infer<typeof sessionsOverviewSchema>
  * whitespace would never be caught there, and would run with a blank one.
  * The trim is also what makes a value like "  lead  " persist as "lead"
  * rather than whatever whitespace the client happened to send.
+ *
+ * Exported (not module-private, unlike most of this file's small helpers):
+ * features/automations/schema.ts reuses it verbatim rather than restating
+ * the same trim-then-length rule a second time for an automation's own
+ * orchestrator field.
  */
-const orchestratorName = z.string().trim().min(1).max(64)
+export const orchestratorName = z.string().trim().min(1).max(64)
 
 export const createSessionSchema = z.object({
   title: z.string().min(1).max(200).optional(),

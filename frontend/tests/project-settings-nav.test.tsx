@@ -4,9 +4,10 @@
 //     bare /projects/<id> redirects there;
 //   - the old Overview page (details, SSH key, retry, delete) renders at
 //     /projects/<id>/settings;
-//   - the project sidebar lists Sessions, Docker, Ideas, Library in that
-//     order, with Settings alone in the sidebar *footer* — a sibling after the
-//     flex-1 content column, which is what pins it to the bottom;
+//   - the project sidebar lists Sessions, Docker, Env files, Ideas,
+//     Automations, Library in that order, with Settings alone in the
+//     sidebar *footer* — a sibling after the flex-1 content column, which is
+//     what pins it to the bottom;
 //   - Sessions stays current on a session's own page; Settings is current on
 //     /settings and nothing else is;
 //   - deleting the project from Settings still closes its tab.
@@ -263,6 +264,7 @@ test('project nav: Sessions, Docker, Env, Ideas, Library in the content; Setting
     { href: '/projects/p1/docker', label: 'Docker' },
     { href: '/projects/p1/env', label: 'Env files' },
     { href: '/projects/p1/ideas', label: 'Ideas' },
+    { href: '/projects/p1/automations', label: 'Automations' },
     { href: '/projects/p1/library', label: 'Agents & skills' },
   ])
   expect(linksIn(footer)).toEqual([{ href: '/projects/p1/settings', label: 'Settings' }])

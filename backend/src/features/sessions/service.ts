@@ -1,7 +1,15 @@
 import { and, count, desc, eq, getTableColumns, gt, gte, inArray, lt, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { sanitizeForDb } from '@/db/sanitize'
-import { ideas, messageFiles, messages, projects, sessionFiles, sessions } from '@/db/schema'
+import {
+  automationRuns,
+  ideas,
+  messageFiles,
+  messages,
+  projects,
+  sessionFiles,
+  sessions,
+} from '@/db/schema'
 import { env } from '@/env'
 import { deleteSessionFiles } from '@/features/attachments/storage'
 import { listScopeContainers } from '@/features/docker/containers'
@@ -156,12 +164,14 @@ function toDto(
   repoPath: string,
   messageCount: number,
   ideaId: string | null,
+  automationId: string | null,
   pendingPrompts = 0,
 ): SessionDto {
   return {
     id: row.id,
     projectId: row.projectId,
     ideaId,
+    automationId,
     title: row.title,
     status: row.status,
     orchestrator: row.orchestrator,
@@ -236,6 +246,28 @@ async function ideaIdsFor(sessionIds: string[]): Promise<Map<string, string>> {
   )
 }
 
+/**
+ * The automation that created each session, keyed by session id —
+ * structurally identical to `ideaIdsFor` just above, with the forward link
+ * living on `automation_runs.session_id` instead of `ideas.session_id`: each
+ * firing creates a brand-new session (features/automations/scheduler.ts), so
+ * there is no `automations.sessionId` column the other direction either, and
+ * `SessionDto.automationId` is a reverse lookup for the identical reason
+ * `ideaId` already is one.
+ */
+async function automationIdsFor(sessionIds: string[]): Promise<Map<string, string>> {
+  if (sessionIds.length === 0) return new Map()
+  const rows = await db
+    .select({ sessionId: automationRuns.sessionId, automationId: automationRuns.automationId })
+    .from(automationRuns)
+    .where(inArray(automationRuns.sessionId, sessionIds))
+  return new Map(
+    rows
+      .filter((r): r is { sessionId: string; automationId: string } => r.sessionId !== null)
+      .map((r) => [r.sessionId, r.automationId]),
+  )
+}
+
 export async function listSessions(projectId: string): Promise<SessionDto[]> {
   const project = await requireProject(projectId)
   const rows = await db
@@ -244,14 +276,22 @@ export async function listSessions(projectId: string): Promise<SessionDto[]> {
     .where(eq(sessions.projectId, projectId))
     .orderBy(desc(sessions.createdAt))
   const ids = rows.map((r) => r.id)
-  const [counts, pending, ideaIds] = await Promise.all([
+  const [counts, pending, ideaIds, automationIds] = await Promise.all([
     countsFor(ids),
     pendingFor(ids),
     ideaIdsFor(ids),
+    automationIdsFor(ids),
   ])
   const repo = projectRepo(project.slug)
   return rows.map((r) =>
-    toDto(r, repo, counts.get(r.id) ?? 0, ideaIds.get(r.id) ?? null, pending.get(r.id) ?? 0),
+    toDto(
+      r,
+      repo,
+      counts.get(r.id) ?? 0,
+      ideaIds.get(r.id) ?? null,
+      automationIds.get(r.id) ?? null,
+      pending.get(r.id) ?? 0,
+    ),
   )
 }
 
@@ -259,16 +299,18 @@ export async function getSession(id: string): Promise<SessionDto> {
   const [row] = await db.select(sessionColumns).from(sessions).where(eq(sessions.id, id)).limit(1)
   if (!row) throw notFound('Session')
   const project = await requireProject(row.projectId)
-  const [counts, pending, ideaIds] = await Promise.all([
+  const [counts, pending, ideaIds, automationIds] = await Promise.all([
     countsFor([row.id]),
     pendingFor([row.id]),
     ideaIdsFor([row.id]),
+    automationIdsFor([row.id]),
   ])
   return toDto(
     row,
     projectRepo(project.slug),
     counts.get(row.id) ?? 0,
     ideaIds.get(row.id) ?? null,
+    automationIds.get(row.id) ?? null,
     pending.get(row.id) ?? 0,
   )
 }
@@ -318,10 +360,11 @@ function toOverviewDto(
   row: OverviewRow,
   messageCount: number,
   ideaId: string | null,
+  automationId: string | null,
   pendingPrompts: number,
 ): OverviewSessionDto {
   return {
-    ...toDto(row, projectRepo(row.projectSlug), messageCount, ideaId, pendingPrompts),
+    ...toDto(row, projectRepo(row.projectSlug), messageCount, ideaId, automationId, pendingPrompts),
     projectName: row.projectName,
   }
 }
@@ -370,10 +413,11 @@ export async function getSessionsOverview(
 
   const allRows = [...runningRows, ...uncheckedRows, ...recentRows]
   const ids = [...new Set(allRows.map((r) => r.id))]
-  const [counts, pending, ideaIds] = await Promise.all([
+  const [counts, pending, ideaIds, automationIds] = await Promise.all([
     countsFor(ids),
     pendingFor(ids),
     ideaIdsFor(ids),
+    automationIdsFor(ids),
   ])
 
   const dto = (row: OverviewRow) =>
@@ -381,6 +425,7 @@ export async function getSessionsOverview(
       row,
       counts.get(row.id) ?? 0,
       ideaIds.get(row.id) ?? null,
+      automationIds.get(row.id) ?? null,
       pending.get(row.id) ?? 0,
     )
 
@@ -397,8 +442,10 @@ export async function getSessionsOverview(
  * (features/notifications/service.ts) to list it — never the full
  * SessionDto (its message counts, pending prompts, idea lookup), which a
  * poll from every open tab has no use for. `uncheckedSql` stays private to
- * this file; this is its only export, so the bell's membership can never
- * drift from what the System tab's own `unchecked` list considers unchecked.
+ * this file; this and `sessionSummariesFor` just below are its only two
+ * exports, so neither the bell's membership nor an automation run's own
+ * `unchecked` flag (features/automations/service.ts) can ever drift from
+ * what the System tab's own `unchecked` list considers unchecked.
  */
 export interface UncheckedSessionHead {
   id: string
@@ -427,6 +474,37 @@ export async function listUncheckedSessionHeads(limit: number): Promise<Unchecke
   // uncheckedSql's own first clause is `settledAt is not null`, so this is
   // never actually null here — only the column's declared type says it could be.
   return rows.map((row) => ({ ...row, settledAt: row.settledAt as Date }))
+}
+
+/** Just enough of an arbitrary set of sessions for AutomationRunDto's own
+ * `session` field (features/automations/schema.ts) — one batched query for
+ * however many runs a page of `GET /automations/{id}/runs` carries, never one
+ * lookup per run. Unlike `listUncheckedSessionHeads` above this does not
+ * filter by `uncheckedSql`, only selects it: a dispatched run's session is
+ * shown whether or not it happens to be unchecked right now. */
+export interface SessionSummary {
+  id: string
+  title: string | null
+  status: SessionDto['status']
+  totalCostUsd: number
+  unchecked: boolean
+}
+
+export async function sessionSummariesFor(
+  sessionIds: string[],
+): Promise<Map<string, SessionSummary>> {
+  if (sessionIds.length === 0) return new Map()
+  const rows = await db
+    .select({
+      id: sessions.id,
+      title: sessions.title,
+      status: sessions.status,
+      totalCostUsd: sessions.totalCostUsd,
+      unchecked: uncheckedSql,
+    })
+    .from(sessions)
+    .where(inArray(sessions.id, sessionIds))
+  return new Map(rows.map((row) => [row.id, row]))
 }
 
 /**

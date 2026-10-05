@@ -137,6 +137,10 @@ function rowsFor(table: string, grouped: boolean, sortedBySeq: boolean): Row[] {
   // ahead of the grouped branch. None of this file's fixtures link an idea to
   // the session, so an empty result is the honest answer.
   if (table === 'ideas') return []
+  // automationIdsFor's select, mirroring ideaIdsFor just above for the
+  // identical reason: none of this file's fixtures link an automation to the
+  // session either.
+  if (table === 'automation_runs') return []
   // countsFor and pendingFor are the only projected selects that group by
   // session — `grouped` (set by the fake `groupBy` below) is what tells those
   // two apart from an ordinary row select that merely also carries a computed

@@ -23,19 +23,9 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { systemSettings } from '@/db/schema'
 import { logger } from '@/lib/logger'
+import { isKnownTimeZone } from '@/lib/time-zone'
 
 export const LEARNING_SCHEDULE_KEY = 'learning_schedule'
-
-/** Throws for a zone ICU does not recognise — the standard way to validate an
- * IANA zone name without a second dependency just for a lookup table. */
-function isKnownTimeZone(tz: string): boolean {
-  try {
-    new Intl.DateTimeFormat(undefined, { timeZone: tz })
-    return true
-  } catch {
-    return false
-  }
-}
 
 export const learningScheduleSchema = z
   .object({

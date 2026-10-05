@@ -25,7 +25,7 @@ export function formatDateTime(value: string | null): string {
   return date ? DATE_TIME.format(date) : ''
 }
 
-/** `Asia/Tokyo, UTC+9` — mirrors `features/settings/lib/timezones.ts`'s
+/** `Asia/Tokyo, UTC+9` — mirrors `shared/lib/timezones.ts`'s
  *  own `zoneWithOffset` (same computation, comma-joined rather than
  *  bracketed so it reads inline in a sentence), duplicated rather than
  *  imported for the same reason this file keeps its own `formatDateTime`

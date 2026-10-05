@@ -1,13 +1,14 @@
-// The timezone picker's own helpers (src/features/settings/lib/timezones.ts):
-// the offset computed per zone, and the full option list the Select in
-// settings/components/learning-schedule-card.tsx renders. `UTC` is the
-// schedule's own default (see that card's `DEFAULT_VALUES`), so it gets its
-// own cases here rather than being left to whatever a zone happens to format
-// to — see that file's own comment on why it reads bare rather than with a
-// "(UTC+0)" that would just repeat the name back.
+// The timezone picker's own helpers (src/shared/lib/timezones.ts): the offset
+// computed per zone, and the full option list the Select in
+// settings/components/learning-schedule-card.tsx (and features/automations'
+// own schedule builder) renders. `UTC` is the learning schedule's own default
+// (see that card's `DEFAULT_VALUES`), so it gets its own cases here rather
+// than being left to whatever a zone happens to format to — see that file's
+// own comment on why it reads bare rather than with a "(UTC+0)" that would
+// just repeat the name back.
 
 import { expect, test } from 'bun:test'
-import { timezoneOptions, zoneWithOffset } from '../src/features/settings/lib/timezones'
+import { timezoneOptions, zoneWithOffset } from '../src/shared/lib/timezones'
 
 test('UTC is offered in the Select, pinned first, labelled bare', () => {
   const zones = timezoneOptions()
