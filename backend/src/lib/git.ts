@@ -1,7 +1,7 @@
-import { mkdir, readdir, stat } from 'node:fs/promises'
+import { mkdir, readdir, realpath, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { logger } from './logger'
-import { readBounded } from './spawn'
+import { readBounded, sleep } from './spawn'
 
 export interface GitResult {
   ok: boolean
@@ -130,6 +130,42 @@ export async function git(
 export async function isGitRepo(path: string): Promise<boolean> {
   const result = await git(['rev-parse', '--is-inside-work-tree'], path)
   return result.ok && result.stdout === 'true'
+}
+
+/**
+ * Whether `path` is itself the top level of a work tree — not merely
+ * somewhere *inside* one.
+ *
+ * `isGitRepo`'s `--is-inside-work-tree` is also true for a plain, ordinary
+ * folder that simply sits *inside* a larger, enclosing repository — and
+ * PROJECTS_DIR itself commonly does, since a real install's PROJECTS_DIR
+ * lives inside agentoo's own checkout. A project whose `repo/` is not a git
+ * repository at all would then read back as "available", with an identity
+ * write landing in the *enclosing* repository's config instead of failing —
+ * not a hypothetical, see this function's own test fixtures for the exact
+ * nesting that was found on a real box. Comparing `path`'s own realpath
+ * against `--show-toplevel`'s (also realpath'd, so a resolved path and git's
+ * own answer are compared on the same terms) is what tells "is the root"
+ * apart from "is merely somewhere inside one".
+ *
+ * Returns false rather than throwing for a path that does not exist (a
+ * `repo/` the setup worker never created) or a symlink whose target was
+ * removed (an adopted folder deleted out from under a project) — both are
+ * ordinary "not a repo root" answers a caller can act on, not failures to
+ * propagate. A subdirectory of a real repo also reads false here, on purpose:
+ * an adopted folder that turns out to be a subfolder of a bigger repository
+ * is not a case this feature supports, rather than one it gets wrong.
+ */
+export async function isRepoRoot(path: string): Promise<boolean> {
+  try {
+    const real = await realpath(path)
+    const top = await git(['rev-parse', '--show-toplevel'], real)
+    if (!top.ok) return false
+    const topReal = await realpath(top.stdout)
+    return topReal === real
+  } catch {
+    return false
+  }
 }
 
 export async function currentBranch(path: string): Promise<string | undefined> {
@@ -305,6 +341,238 @@ export async function configureRepoSsh(
     return result.exitCode === 5 ? { ...result, ok: true } : result
   }
   return git(['config', '--local', 'core.sshCommand', sshCommand], repoPath)
+}
+
+/** One `user.name`/`user.email` pair, as read back from git config. Unset
+ * reads as null, never as '' — `git config --get` exits 1 for "not set",
+ * which is the ordinary state of a project nobody has configured, not an
+ * error. */
+export interface GitIdentity {
+  name: string | null
+  email: string | null
+}
+
+export interface RepoIdentity {
+  local: GitIdentity
+  effective: GitIdentity
+  configPath: string
+}
+
+async function readIdentityValue(
+  repoPath: string,
+  key: 'user.name' | 'user.email',
+  scope: 'local' | 'effective',
+): Promise<string | null> {
+  const args = scope === 'local' ? ['config', '--local', '--get', key] : ['config', '--get', key]
+  const result = await git(args, repoPath)
+  // `--get` already resolves a hand-edited, multi-valued key (two `user.name`
+  // lines left over from an earlier edit) to its *last* line, the identical
+  // rule git itself applies the moment it actually commits — so there is
+  // nothing extra to do here for that case.
+  return result.ok ? result.stdout : null
+}
+
+/**
+ * The identity a plain `git commit` in `repoPath` would actually carry, read
+ * two ways: `local` is only what this repository's own config holds — the
+ * exact thing the Settings UI edits, and the exact thing a hand-edit of
+ * `.git/config` already shows up as, since both read and write the same file.
+ * `effective` additionally resolves global/system config, so the UI can say
+ * "nothing set here, but your global config still supplies one" instead of
+ * reporting a flat, misleading "unset".
+ *
+ * `configPath` is resolved through `--git-common-dir`, never
+ * `join(repoPath, '.git', 'config')`: an adopted project's `repo/` is a
+ * symlink to the operator's own folder (see paths.ts), and a session
+ * worktree's `.git` is a *file* pointing elsewhere entirely — `--git-common-dir`
+ * is the one query that resolves to the real, shared config path regardless
+ * of which of those `repoPath` happens to be, which is what lets the UI show
+ * a path the operator could actually go edit by hand.
+ */
+export async function readRepoIdentity(repoPath: string): Promise<RepoIdentity> {
+  const [localName, localEmail, effectiveName, effectiveEmail, commonDir] = await Promise.all([
+    readIdentityValue(repoPath, 'user.name', 'local'),
+    readIdentityValue(repoPath, 'user.email', 'local'),
+    readIdentityValue(repoPath, 'user.name', 'effective'),
+    readIdentityValue(repoPath, 'user.email', 'effective'),
+    git(['rev-parse', '--path-format=absolute', '--git-common-dir'], repoPath),
+  ])
+
+  return {
+    local: { name: localName, email: localEmail },
+    effective: { name: effectiveName, email: effectiveEmail },
+    // Falling back to `repoPath`/.git is only reachable if `repoPath` is not a
+    // git repo at all, which every caller already checks before getting here;
+    // it exists so this function degrades rather than throws if that check
+    // is ever skipped.
+    configPath: join(commonDir.ok ? commonDir.stdout : join(repoPath, '.git'), 'config'),
+  }
+}
+
+/** True once git's own stderr names the one failure mode worth telling a
+ * caller apart from every other: a concurrent write already holds the
+ * `.git/config` lock. Everything else — a bad key, a permissions error — is
+ * reported as-is; this one gets a "try again" instead, since the fix really is
+ * just that. */
+export function isConfigLockError(result: GitResult): boolean {
+  return result.stderr.includes('could not lock config file')
+}
+
+/**
+ * Attempts for one `git config` write that might lose a race for the
+ * `.git/config` lock file against another writer — an agent committing, a
+ * session's worktree being cut, another request for this same repo before
+ * `withRepoLock` existed to rule that last one out in-process. Agents and
+ * session creation only ever hold that lock for the length of a single git
+ * command, so a handful of short waits is enough to ride out the contention
+ * instead of handing the caller a 409 for a window measured in milliseconds.
+ */
+const CONFIG_LOCK_RETRY_BACKOFFS_MS = [20, 40, 80, 160]
+
+async function gitConfigWrite(args: string[], repoPath: string): Promise<GitResult> {
+  let result = await git(args, repoPath)
+  for (const backoff of CONFIG_LOCK_RETRY_BACKOFFS_MS) {
+    if (!isConfigLockError(result)) return result
+    await sleep(backoff)
+    result = await git(args, repoPath)
+  }
+  return result
+}
+
+/**
+ * Put `user.name` back to what it was before this call started, best effort.
+ *
+ * Only reachable once `user.email`'s write has failed after `user.name`'s own
+ * write already landed — the repo now has the *new* name paired with the
+ * *old* email, which is not a pair this feature ever offers to set on
+ * purpose. Restoring is attempted through the same retrying write as the
+ * original calls, but its own result is never surfaced: the caller is about
+ * to see the email failure that triggered this, and that is the one failure
+ * worth reporting, not a second one about the cleanup attempt.
+ */
+async function restoreName(repoPath: string, previousName: string | null): Promise<void> {
+  const args =
+    previousName === null
+      ? ['config', '--local', '--unset-all', 'user.name']
+      : ['config', '--local', '--replace-all', 'user.name', previousName]
+  await gitConfigWrite(args, repoPath)
+}
+
+/**
+ * Record (or clear) `user.name`/`user.email` in the repository's own
+ * config — the identity a plain `git commit`, with no `-c` flags, picks up in
+ * this repo and every worktree of it, since worktrees share this file.
+ * Mirrors `configureRepoSsh` above in every way that matters: `--local` so a
+ * hand-written global identity is never touched or overwritten, `--replace-all`
+ * so a key a human left with two lines (a stray hand-edit) collapses back to
+ * one instead of growing a third, and exit 5 on clear ("nothing to unset") is
+ * success, not failure — the normal state of a project nobody has configured.
+ *
+ * `identity: null` clears both keys. A non-null value always sets both
+ * together: a name with no email, or vice versa, is not a usable git identity,
+ * and the UI this backs only ever offers to set or clear the pair.
+ *
+ * Two git invocations apiece (name, then email) are never atomic on their
+ * own — `withRepoLock` (features/projects/service.ts) is what rules out a
+ * second *caller in this process* interleaving its own pair in between, but a
+ * concurrent writer outside this process (a human, an agent's own `git
+ * config`) can still land between them. `previousName`, captured before
+ * either write below, is what lets this function put the pair back into a
+ * consistent state — the one it had before this call — rather than leaving a
+ * new name paired with a stale email, if the second write of the pair fails
+ * after the first already landed.
+ */
+export async function configureRepoIdentity(
+  repoPath: string,
+  identity: { name: string; email: string } | null,
+): Promise<GitResult> {
+  const previousName = await readIdentityValue(repoPath, 'user.name', 'local')
+
+  if (!identity) {
+    const name = await gitConfigWrite(['config', '--local', '--unset-all', 'user.name'], repoPath)
+    const email = await gitConfigWrite(['config', '--local', '--unset-all', 'user.email'], repoPath)
+    const nameOk = name.ok || name.exitCode === 5
+    const emailOk = email.ok || email.exitCode === 5
+    if (nameOk && emailOk) return { ...email, ok: true }
+    if (nameOk && !emailOk) {
+      // user.name is already cleared and user.email is not — put the name
+      // back rather than leave the pair half-cleared.
+      await restoreName(repoPath, previousName)
+    }
+    // Whichever call actually failed is the one worth the caller seeing —
+    // "nothing to unset" on one key must never hide a real failure on the other.
+    return nameOk ? email : name
+  }
+
+  const name = await gitConfigWrite(
+    ['config', '--local', '--replace-all', 'user.name', identity.name],
+    repoPath,
+  )
+  if (!name.ok) return name
+
+  const email = await gitConfigWrite(
+    ['config', '--local', '--replace-all', 'user.email', identity.email],
+    repoPath,
+  )
+  if (email.ok) return email
+
+  await restoreName(repoPath, previousName)
+  return email
+}
+
+/**
+ * One chained promise per resolved repo path — every identity write
+ * (`configureRepoIdentity`) runs inside this, via `writeIdentity` in
+ * features/projects/service.ts, so two concurrent PUTs for the same project
+ * can never interleave their own name-then-email pair of git invocations.
+ *
+ * Without this, two concurrent PUTs — one for Alice, one for Bob — each write
+ * `user.name` then `user.email` as two separate, unsynchronized git
+ * invocations; the four writes can land in any order, and "Bob's name,
+ * Alice's email" is a perfectly legal interleaving of them, with both
+ * requests then reporting 200 off whichever half of the pair they happened
+ * to read back last. A `Map<string, Promise>` chain is enough: these writes
+ * only ever happen inside the API process, never the worker.
+ *
+ * Keyed by `realpath(repoPath)`, not the path string a caller happened to
+ * pass in — an adopted project's `repo/` is a symlink (see paths.ts), and
+ * this lock only does its job if every caller that ends up writing the same
+ * `.git/config` resolves to the same key, however each one spelled the path
+ * that got them there. Falling back to the raw path when `realpath` fails
+ * (the directory vanished between a caller's own availability check and this
+ * call) still serializes every call hitting that same failure identically;
+ * the write itself is what reports what actually happened.
+ */
+const repoLocks = new Map<string, Promise<void>>()
+
+/**
+ * Run `fn` only after every previously queued call for this repo has
+ * finished, success or failure — a rejection must release the lock for the
+ * next caller, not hold it forever.
+ */
+export async function withRepoLock<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
+  const key = await realpath(repoPath).catch(() => repoPath)
+  const previous = repoLocks.get(key) ?? Promise.resolve()
+  let release!: () => void
+  // What the *next* caller for this key waits on — a plain signal, not `fn`'s
+  // own result, so this call's success or failure never has to be observed by
+  // anyone but its own caller.
+  const next = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  repoLocks.set(key, next)
+
+  await previous
+  try {
+    return await fn()
+  } finally {
+    release()
+    // Drop the entry once nothing is queued behind this call — otherwise a
+    // repo touched once would hold a resolved promise in this map for the
+    // life of the process. Only safe to delete if we are still the most
+    // recent link: a caller that queued up after us has already replaced it.
+    if (repoLocks.get(key) === next) repoLocks.delete(key)
+  }
 }
 
 /** True when the repo has a commit. `git worktree add` fails on an unborn HEAD. */

@@ -1,12 +1,22 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import { AppError, errorBody } from '@/lib/errors'
-import { createProjectSchema, errorSchema, projectSchema, updateProjectSchema } from './schema'
 import {
+  createProjectSchema,
+  errorSchema,
+  gitIdentityInputSchema,
+  gitIdentityStateSchema,
+  projectSchema,
+  updateProjectSchema,
+} from './schema'
+import {
+  clearGitIdentity,
   createProject,
   deleteProject,
+  getGitIdentity,
   getProject,
   listProjects,
   retryProject,
+  setGitIdentity,
   updateProject,
 } from './service'
 
@@ -131,6 +141,79 @@ projectsRouter.openapi(
     await deleteProject(c.req.valid('param').id, c.req.valid('query').removeFiles === 'true')
     return c.body(null, 204)
   },
+)
+
+projectsRouter.openapi(
+  createRoute({
+    method: 'get',
+    path: '/projects/{id}/git-identity',
+    operationId: 'getProjectGitIdentity',
+    tags: ['projects'],
+    summary: "A project's git commit identity",
+    description:
+      "Reads straight off the project repo's own `.git/config` — there is no database copy. " +
+      '`available: false` (every other field null) when the project is not yet ready or its repo ' +
+      "is missing on disk; this is never a 500. `local` is only what this repository's own " +
+      'config holds, exactly what a hand edit of .git/config already shows; `effective` is what a ' +
+      'commit made here right now would actually carry once global/system config is also in play.',
+    request: { params: idParam },
+    responses: {
+      200: json(gitIdentityStateSchema, 'Current identity state'),
+      404: json(errorSchema, 'Not found'),
+    },
+  }),
+  async (c) => c.json(await getGitIdentity(c.req.valid('param').id), 200),
+)
+
+projectsRouter.openapi(
+  createRoute({
+    method: 'put',
+    path: '/projects/{id}/git-identity',
+    operationId: 'putProjectGitIdentity',
+    tags: ['projects'],
+    summary: "Set a project's git commit identity",
+    description:
+      "Writes user.name/user.email into the project repo's own `.git/config` (`--local`, never " +
+      'the global config), so every worktree, the editor and a human over ssh all pick it up. ' +
+      'Collapses a hand-edited, multi-valued key back to one line.',
+    request: { params: idParam, body: json(gitIdentityInputSchema, 'Name and email to set') },
+    responses: {
+      200: json(gitIdentityStateSchema, 'Saved'),
+      400: json(errorSchema, 'Invalid input'),
+      404: json(errorSchema, 'Not found'),
+      409: json(
+        errorSchema,
+        'The project is not ready (or its repo is missing), or the config file is locked by ' +
+          'another process — the message says which, and a lock is safe to retry.',
+      ),
+    },
+  }),
+  async (c) => c.json(await setGitIdentity(c.req.valid('param').id, c.req.valid('json')), 200),
+)
+
+projectsRouter.openapi(
+  createRoute({
+    method: 'delete',
+    path: '/projects/{id}/git-identity',
+    operationId: 'deleteProjectGitIdentity',
+    tags: ['projects'],
+    summary: "Clear a project's git commit identity",
+    description:
+      'Idempotent: clearing an identity that is already unset is still a 200. Once cleared, a ' +
+      'commit in this project falls back to whatever the global config supplies, or fails with ' +
+      '"Author identity unknown" if it supplies nothing either.',
+    request: { params: idParam },
+    responses: {
+      200: json(gitIdentityStateSchema, 'Cleared'),
+      404: json(errorSchema, 'Not found'),
+      409: json(
+        errorSchema,
+        'The project is not ready (or its repo is missing), or the config file is locked by ' +
+          'another process — the message says which, and a lock is safe to retry.',
+      ),
+    },
+  }),
+  async (c) => c.json(await clearGitIdentity(c.req.valid('param').id), 200),
 )
 
 // Surface AppError's status and recovery commands instead of a bare 500 —

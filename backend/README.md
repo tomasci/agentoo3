@@ -455,6 +455,42 @@ current branch". `git push` stays safe: `push.default` is `simple`, which
 refuses a branch whose upstream is named differently rather than quietly pushing
 a session's work onto main — verified, not assumed.
 
+### Git identity inside a session
+
+The service user's own `~/.gitconfig` has no `[user]` section, so a commit
+anywhere on the box fails with **"Author identity unknown"** unless something
+sets one. Rather than injecting a global default (whose identity would that
+be, across every project?) or a database column (a second place that could
+drift from what is actually on disk), `GET`/`PUT`/`DELETE
+/projects/{id}/git-identity` read and write exactly one thing: `user.name` /
+`user.email` in the project repo's own `.git/config` (`--local`, via
+`configureRepoIdentity` in `lib/git.ts` — the identical pattern
+`configureRepoSsh` above already uses for `core.sshCommand`).
+
+There is no other copy. The Settings UI and a hand edit of `.git/config` are
+the same file, so whichever wrote last wins and the other reads it back
+exactly — a project someone already configured by hand before this feature
+shipped shows up correctly in `GET`, never overwritten by a reconcile running
+anywhere else. Because worktrees share this config, every git invocation in
+the project picks the identity up: a session's own commits, the editor
+container, and a human running git over ssh, with **no `-c user.name=...`
+needed anywhere**. `GET` also reports `effective` — what a commit would
+actually carry once global/system config is taken into account too — so the
+UI can tell "nothing set here, but your global config still supplies one"
+apart from a project that will genuinely fail to commit.
+
+Clearing an identity (`DELETE`) is `--unset-all`, idempotent the same way
+`configureRepoSsh` is: unsetting an already-clear key is a plain success, not
+an error. Once cleared, a commit in that project falls back to whatever the
+global config supplies — or fails with "Author identity unknown" again if
+that supplies nothing either, which is the same failure this feature exists
+to let an operator fix per-project rather than by hand over ssh.
+
+**Commit signing is not handled.** This only ever writes `user.name` /
+`user.email`; `user.signingkey`, `commit.gpgsign` and everything GPG/SSH
+signing needs are untouched, and a project that needs signed commits still
+has to configure that by hand.
+
 ## SSH keys
 
 Stored in `SSH_KEYS_DIR`, which the installer pins in `.env`. The fallback is

@@ -4,14 +4,28 @@ import { db } from '@/db/client'
 import { projects } from '@/db/schema'
 import { keyPathFor } from '@/features/ssh-keys/service'
 import { resolveSource } from '@/lib/adopt-path'
-import { badRequest, conflict, notFound } from '@/lib/errors'
-import { configureRepoSsh, isGitRepo } from '@/lib/git'
+import { AppError, badRequest, conflict, notFound } from '@/lib/errors'
+import {
+  configureRepoIdentity,
+  configureRepoSsh,
+  isConfigLockError,
+  isGitRepo,
+  isRepoRoot,
+  readRepoIdentity,
+  withRepoLock,
+} from '@/lib/git'
 import { logger } from '@/lib/logger'
 import { assertInsideProjects, projectRepo, projectRoot, toSlug } from '@/lib/paths'
 import { checkRemoteUrl } from '@/lib/remote-url'
 import { gitSshCommand } from '@/lib/ssh'
 import { enqueueProjectSetup } from '@/queue'
-import type { CreateProjectInput, ProjectDto, UpdateProjectInput } from './schema'
+import type {
+  CreateProjectInput,
+  GitIdentityInput,
+  GitIdentityStateDto,
+  ProjectDto,
+  UpdateProjectInput,
+} from './schema'
 
 type ProjectRow = typeof projects.$inferSelect
 
@@ -208,4 +222,100 @@ export async function deleteProject(id: string, removeFiles: boolean): Promise<v
   }
 
   await db.delete(projects).where(eq(projects.id, id))
+}
+
+// --- git identity ----------------------------------------------------------
+
+async function requireProjectRow(id: string): Promise<ProjectRow> {
+  const [row] = await db.select().from(projects).where(eq(projects.id, id)).limit(1)
+  if (!row) throw notFound('Project')
+  return row
+}
+
+/**
+ * Whether there is a repository on disk this feature can actually act on.
+ * `status !== 'ready'` covers a project still cloning, stuck in
+ * `needs_manual`, or failed outright — all states where `repo/` may not exist
+ * yet, may be empty, or may be mid-write from the setup worker, none of which
+ * `readRepoIdentity`/`configureRepoIdentity` should be run against. `isRepoRoot`
+ * on top of that covers the narrower cases of a `ready` project whose
+ * adopted folder (a symlink the project does not own — see "existing"
+ * projects in paths.ts) was later moved or deleted out from under it, or
+ * whose `repo/` is a plain, non-git folder — never `isGitRepo`, whose
+ * `--is-inside-work-tree` also answers true for a folder that merely sits
+ * inside PROJECTS_DIR's own enclosing repository, which in a real install is
+ * agentoo's own checkout: that gate would read as available and send a write
+ * into agentoo's own `.git/config` rather than the project's. `isRepoRoot`
+ * requires `repo/` to itself be the top of a work tree, which only a real
+ * project repo (cloned, initialized, or adopted from an actual repo) is.
+ */
+async function repoAvailable(row: ProjectRow): Promise<boolean> {
+  return row.status === 'ready' && (await isRepoRoot(projectRepo(row.slug)))
+}
+
+const unavailableIdentity: GitIdentityStateDto = {
+  available: false,
+  configPath: null,
+  local: { name: null, email: null },
+  effective: { name: null, email: null },
+}
+
+export async function getGitIdentity(projectId: string): Promise<GitIdentityStateDto> {
+  const row = await requireProjectRow(projectId)
+  if (!(await repoAvailable(row))) return unavailableIdentity
+
+  return { available: true, ...(await readRepoIdentity(projectRepo(row.slug))) }
+}
+
+/**
+ * Shared by set and clear below: both need the same "is there a repo to
+ * write to" gate before touching git, and the same translation of whatever
+ * `configureRepoIdentity` reports into the three outcomes a caller can act
+ * on — success, "try again" (the config file is mid-write by something
+ * else), or an error neither of those input-validation layers could have
+ * caught.
+ */
+async function writeIdentity(
+  projectId: string,
+  identity: { name: string; email: string } | null,
+): Promise<GitIdentityStateDto> {
+  const row = await requireProjectRow(projectId)
+  if (!(await repoAvailable(row))) {
+    throw conflict('This project has no repository to set a git identity on right now')
+  }
+
+  const repo = projectRepo(row.slug)
+
+  // Held across the write *and* the read-back below: without this, a second
+  // request for the same repo (the concurrent-PUT race this whole function
+  // exists to close) can land its own write in between this call's write and
+  // its read, and this call would then answer with a state it never wrote.
+  return withRepoLock(repo, async () => {
+    const result = await configureRepoIdentity(repo, identity)
+    if (!result.ok) {
+      if (isConfigLockError(result)) {
+        throw conflict('The repository config is locked by another process; try again')
+      }
+      // Not a shape this feature's own validation predicts — surfacing it
+      // verbatim beats a generic message that hides what git actually said.
+      throw new AppError(result.stderr || 'git config failed', 500)
+    }
+
+    logger.info(`Git identity ${identity ? 'set' : 'cleared'} for project ${row.slug}`)
+    return { available: true, ...(await readRepoIdentity(repo)) }
+  })
+}
+
+export async function setGitIdentity(
+  projectId: string,
+  input: GitIdentityInput,
+): Promise<GitIdentityStateDto> {
+  return writeIdentity(projectId, { name: input.name, email: input.email })
+}
+
+/** Idempotent: clearing an identity that is already clear is a plain 200,
+ * same reasoning as `configureRepoIdentity`'s own exit-5 handling — there is
+ * nothing for a second clear to fail on. */
+export async function clearGitIdentity(projectId: string): Promise<GitIdentityStateDto> {
+  return writeIdentity(projectId, null)
 }

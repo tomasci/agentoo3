@@ -15,7 +15,10 @@
 // Mounted through the real router, the way tests/workspace.test.tsx mounts
 // the shell. The delete and project-list clients are mocked (./mock-module)
 // because the delete's own `onSuccess` refetches the list; the session page
-// the "session's own page" case lands on has its clients mocked too.
+// the "session's own page" case lands on has its clients mocked too. Settings'
+// own Git identity card is seeded a plain query-cache fixture rather than
+// mocked, the same shortcut this file already takes for ssh-keys/docker
+// detection/etc — its own behaviour is tests/git-identity-card.test.tsx's.
 //
 // What happy-dom cannot show: whether the footer is *visually* at the bottom.
 // There is no layout engine, so that part is checked structurally only — the
@@ -144,6 +147,19 @@ async function mount(path: string) {
   client.setQueryData([{ url: '/api/docker/detection' }], { enabled: true, projects: [] })
   for (const p of serverProjects) {
     client.setQueryData([{ url: '/api/projects/:id/sessions', params: { id: p.id } }], [])
+    // Settings' own new Git identity card (git-identity-card.test.tsx covers
+    // its own behaviour); seeded here only so this file's `/settings` mount
+    // does not reach for a backend neither it nor the GET's own fake exists
+    // for, the same reason every other query above is seeded.
+    client.setQueryData(
+      [{ url: '/api/projects/:id/git-identity', params: { id: p.id } }],
+      {
+        available: true,
+        configPath: `/srv/${p.name.toLowerCase()}/.git/config`,
+        local: { name: null, email: null },
+        effective: { name: null, email: null },
+      },
+    )
   }
   client.setQueryData(
     [{ url: '/api/sessions/overview' }, { window: '1d' }],
