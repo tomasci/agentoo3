@@ -2,6 +2,11 @@
 
 The What's new screen inside agentoo shows this same list after each update — reopen it any time via the version number in the status bar. Newest release first. Also available in [Russian](CHANGELOG.ru.md).
 
+## 1.4.173 — 2026-10-07
+
+### New
+- Claude Sonnet 5.5 and Haiku 5.5 can now be picked as an agent's or a session's model.
+
 ## 1.4.172 — 2026-10-07
 
 ### New
