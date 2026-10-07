@@ -26,6 +26,7 @@ import {
 } from '../hooks/use-projects'
 import { apiErrorMessage } from '../lib/api-error'
 import { isSshRemote } from '../lib/remote-url'
+import { GitIdentityCard } from './git-identity-card'
 import { ProjectStatusBadge } from './project-status'
 import { RecoveryPanel } from './recovery-panel'
 
@@ -234,6 +235,8 @@ export function ProjectOverview({
           </CardContent>
         </Card>
       )}
+
+      <GitIdentityCard projectId={project.id} />
 
       <Card>
         <CardHeader>

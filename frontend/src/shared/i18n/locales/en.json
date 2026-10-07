@@ -133,6 +133,32 @@
         "notDetected": "Not detected",
         "openDocker": "Open Docker"
       }
+    },
+    "gitIdentity": {
+      "heading": "Git identity",
+      "explain": "The name and email agents commit as in this project — stored in the project's own git config, so every session's worktree shares it.",
+      "configPathLead": "Editing this file by hand has the same effect:",
+      "name": "Name",
+      "email": "Email",
+      "clear": "Clear",
+      "saved": "Saved",
+      "saveFailed": "Could not save the git identity",
+      "cleared": "Cleared",
+      "clearFailed": "Could not clear the git identity",
+      "loadFailed": "Could not load the git identity",
+      "unavailable": "Not available yet — this can be set once the project finishes setting up.",
+      "statusSet": "Commits are authored as {{name}} <{{email}}>.",
+      "statusEffective": "Nothing is set for this project. Commits currently use the server-wide identity {{name}} <{{email}}>.",
+      "statusPartial": "Commits are authored as {{name}} <{{email}}>, part of it from the server-wide git config. Save both fields here to set an identity for this project.",
+      "statusMissing": "No git identity is configured. Commits made by agents in this project will fail until one is set.",
+      "errors": {
+        "nameRequired": "Enter a name",
+        "nameTooLong": "Name is too long",
+        "nameInvalid": "Name may not contain control characters, \"<\" or \">\", or start with \"-\"",
+        "emailRequired": "Enter an email",
+        "emailTooLong": "Email is too long",
+        "emailInvalid": "Enter a valid email address"
+      }
     }
   },
   "nav": {
