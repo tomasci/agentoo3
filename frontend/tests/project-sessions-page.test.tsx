@@ -14,9 +14,10 @@
 //      error, a gated or invalid submit, a success landing after the reader
 //      cancelled (or cancelled and started again), or after they left the
 //      page — is pinned to the location it should stay on;
-//   2. the list is a four-column table (Title link, Date, Status, actions)
-//      with none of the old card's extra fields, in the API's own order, and
-//      an Open/Delete menu whose Delete confirms first and toasts a failure;
+//   2. the list is a four-column table (Title link, Last updated, Status,
+//      actions) with none of the old card's extra fields, ordered by last
+//      activity, and an Open/Delete menu whose Delete confirms first and
+//      toasts a failure;
 //   3. a search box filters on the *displayed* title, says so when nothing
 //      matches, and is absent (with the table) when there are no sessions.
 //
@@ -76,6 +77,7 @@ const session = (overrides: Partial<Session> = {}): Session => ({
   pendingPrompts: 0,
   createdAt: T,
   updatedAt: T,
+  lastMessageAt: null,
   ...overrides,
 })
 
@@ -334,7 +336,11 @@ const chooseOrchestrator = async (optionText: string) => {
 const table = () => main().querySelector('table')
 const headerTexts = () =>
   [...(table()?.querySelectorAll('thead th') ?? [])].map((th) => th.textContent?.trim() ?? '')
-const bodyRows = () => [...(table()?.querySelectorAll('tbody tr') ?? [])] as HTMLElement[]
+// A group heading is a `tbody tr` too (one `th`, no `td`); these are the data rows.
+const bodyRows = () =>
+  [...(table()?.querySelectorAll('tbody tr') ?? [])].filter(
+    (row) => row.querySelector('th') === null,
+  ) as HTMLElement[]
 /** The title link text of each data row, in display order. */
 const rowTitles = () =>
   bodyRows()
@@ -770,10 +776,10 @@ test('a ready project: submit enabled, no finish-setup note', async () => {
 
 // --- 2. the sessions table -------------------------------------------------
 
-test('exactly four columns: Title, Date, Status and an unlabelled actions column', async () => {
+test('exactly four columns: Title, Last updated, Status and an unlabelled actions column', async () => {
   sessions = [session()]
   await mount()
-  expect(headerTexts()).toEqual(['Title', 'Date', 'Status', ''])
+  expect(headerTexts()).toEqual(['Title', 'Last updated', 'Status', ''])
   for (const row of bodyRows()) expect(row.querySelectorAll('td').length).toBe(4)
 })
 
@@ -830,25 +836,29 @@ test('an untitled session reads "Session <first 8 chars of id>"', async () => {
   )
 })
 
-test('the Date column carries date and time, and differs by both', async () => {
+test('the Last updated column carries date and time for older sessions, and differs by both', async () => {
+  // Years in the past, so all three sit under "Older" (full date and time)
+  // whatever day the suite runs on.
   sessions = [
-    session({ id: 'a', title: 'Morning', createdAt: '2026-03-14T08:05:00.000Z' }),
-    session({ id: 'b', title: 'Evening', createdAt: '2026-03-14T19:40:00.000Z' }),
-    session({ id: 'c', title: 'Next year', createdAt: '2027-03-14T08:05:00.000Z' }),
+    session({ id: 'a', title: 'Morning', createdAt: '2020-03-14T08:05:00.000Z' }),
+    session({ id: 'b', title: 'Evening', createdAt: '2020-03-14T19:40:00.000Z' }),
+    session({ id: 'c', title: 'Year later', createdAt: '2021-03-14T08:05:00.000Z' }),
   ]
   await mount()
-  const dates = bodyRows().map((r) => cellTexts(r)[1] ?? '')
+  const dateOf = Object.fromEntries(
+    bodyRows().map((r) => [r.querySelector('td a')?.textContent, cellTexts(r)[1] ?? '']),
+  )
   // Locale-independent: each carries its year, and two instants on the same
   // day (time differs) and a year apart (date differs) never render alike.
-  expect(dates[0]).toContain('2026')
-  expect(dates[2]).toContain('2027')
-  expect(dates[0]).not.toBe(dates[1])
-  expect(dates[0]).not.toBe(dates[2])
+  expect(dateOf.Morning).toContain('2020')
+  expect(dateOf['Year later']).toContain('2021')
+  expect(dateOf.Morning).not.toBe(dateOf.Evening)
+  expect(dateOf.Morning).not.toBe(dateOf['Year later'])
   // The same instant through the reader's own locale's date+time parts.
-  const d = new Date('2026-03-14T08:05:00.000Z')
-  expect(dates[0]).toContain(String(d.getFullYear()))
-  expect(dates[0]).toContain(String(d.getDate()))
-  expect(dates[0]).toContain(String(d.getMinutes()).padStart(2, '0'))
+  const d = new Date('2020-03-14T08:05:00.000Z')
+  expect(dateOf.Morning).toContain(String(d.getFullYear()))
+  expect(dateOf.Morning).toContain(String(d.getDate()))
+  expect(dateOf.Morning).toContain(String(d.getMinutes()).padStart(2, '0'))
 })
 
 for (const createdAt of ['', 'not-a-date']) {
@@ -875,14 +885,26 @@ test('the Status column shows the translated status for every status', async () 
   expect(main().textContent).not.toContain('sessions.status')
 })
 
-test('rows keep the API order, even when createdAt disagrees with it', async () => {
+test('rows are ordered by last activity, not by the order the API answered in or by createdAt', async () => {
+  // API order: Zulu, Alpha, Mike. Mike was created first but spoke last;
+  // Alpha has no messages, so its createdAt is its activity time.
   sessions = [
-    session({ id: 'x', title: 'Zulu', createdAt: '2026-01-01T00:00:00.000Z' }),
+    session({
+      id: 'x',
+      title: 'Zulu',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      lastMessageAt: '2026-08-01T00:00:00.000Z',
+    }),
     session({ id: 'y', title: 'Alpha', createdAt: '2026-06-01T00:00:00.000Z' }),
-    session({ id: 'z', title: 'Mike', createdAt: '2025-01-01T00:00:00.000Z' }),
+    session({
+      id: 'z',
+      title: 'Mike',
+      createdAt: '2025-01-01T00:00:00.000Z',
+      lastMessageAt: '2026-09-15T00:00:00.000Z',
+    }),
   ]
   await mount()
-  expect(rowTitles()).toEqual(['Zulu', 'Alpha', 'Mike'])
+  expect(rowTitles()).toEqual(['Mike', 'Zulu', 'Alpha'])
 })
 
 test('the actions menu has exactly Open and Delete', async () => {

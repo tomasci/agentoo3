@@ -1,4 +1,9 @@
-import { flexRender, type RowData, type Table as TableInstance } from '@tanstack/react-table'
+import {
+  flexRender,
+  type RowData,
+  type Row as RowModel,
+  type Table as TableInstance,
+} from '@tanstack/react-table'
 import type { ReactNode } from 'react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/ui/table'
 
@@ -36,6 +41,15 @@ interface DataTableProps<Row> {
   table: TableInstance<Row>
   /** Rendered instead of the body when the table has no rows. */
   empty?: ReactNode
+  /**
+   * Opt-in grouping: a heading row is rendered each time the returned `key`
+   * differs from the previous row's, so rows sharing a key are only grouped
+   * when they are already adjacent — the caller passes rows in group order
+   * (sort the data before it reaches the table; this never reorders). Each
+   * group is its own `<tbody>` headed by one non-interactive `rowgroup`
+   * cell. Unset, the body renders exactly as it always has.
+   */
+  groupBy?: (row: Row) => { key: string; label: ReactNode }
 }
 
 /**
@@ -49,9 +63,46 @@ interface DataTableProps<Row> {
  * once `display` was overridden to lay a row out as a card, and there is no
  * such override here.
  */
-export function DataTable<Row>({ table, empty }: DataTableProps<Row>) {
+export function DataTable<Row>({ table, empty, groupBy }: DataTableProps<Row>) {
   const rows = table.getRowModel().rows
   const columnCount = table.getAllLeafColumns().length
+
+  const renderRow = (row: RowModel<Row>) => (
+    <TableRow key={row.id}>
+      {row.getVisibleCells().map((cell) => {
+        const role = cell.column.columnDef.meta?.role
+        // A `secondary` cell can now be clipped by the `truncate` above —
+        // its own `title` is the only way left to read the rest, and only
+        // for a plain-string value: a rendered cell can be arbitrary JSX
+        // (a badge, a link), and there's no reliable "text" to lift out
+        // of that to put in an attribute.
+        const value = cell.getValue()
+        const title = role === 'secondary' && typeof value === 'string' ? value : undefined
+        return (
+          <TableCell
+            key={cell.id}
+            role={role === 'primary' ? 'rowheader' : undefined}
+            className={role && ROLE_CLASS[role]}
+            title={title}
+          >
+            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+          </TableCell>
+        )
+      })}
+    </TableRow>
+  )
+
+  // Only worth building when there is something to group: the empty state
+  // below is the same single body, grouped or not.
+  const groups: { key: string; label: ReactNode; rows: RowModel<Row>[] }[] = []
+  if (groupBy) {
+    for (const row of rows) {
+      const { key, label } = groupBy(row.original)
+      const last = groups[groups.length - 1]
+      if (last?.key === key) last.rows.push(row)
+      else groups.push({ key, label, rows: [row] })
+    }
+  }
 
   return (
     <Table>
@@ -69,40 +120,37 @@ export function DataTable<Row>({ table, empty }: DataTableProps<Row>) {
           </TableRow>
         ))}
       </TableHeader>
-      <TableBody>
-        {rows.length === 0 && empty ? (
-          <TableRow>
-            <TableCell colSpan={columnCount} className="h-24 text-center text-muted-foreground">
-              {empty}
-            </TableCell>
-          </TableRow>
-        ) : (
-          rows.map((row) => (
-            <TableRow key={row.id}>
-              {row.getVisibleCells().map((cell) => {
-                const role = cell.column.columnDef.meta?.role
-                // A `secondary` cell can now be clipped by the `truncate` above —
-                // its own `title` is the only way left to read the rest, and only
-                // for a plain-string value: a rendered cell can be arbitrary JSX
-                // (a badge, a link), and there's no reliable "text" to lift out
-                // of that to put in an attribute.
-                const value = cell.getValue()
-                const title = role === 'secondary' && typeof value === 'string' ? value : undefined
-                return (
-                  <TableCell
-                    key={cell.id}
-                    role={role === 'primary' ? 'rowheader' : undefined}
-                    className={role && ROLE_CLASS[role]}
-                    title={title}
-                  >
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
-                )
-              })}
+      {groups.length > 0 ? (
+        groups.map((group) => (
+          <TableBody key={group.key}>
+            {/* A section label, not a control: no hover fill (TableRow's own
+                would suggest it is clickable), and `rowgroup` so a screen
+                reader reads the rows below it as belonging to it. */}
+            <TableRow className="hover:bg-transparent">
+              <TableHead
+                scope="rowgroup"
+                colSpan={columnCount}
+                className="h-8 pt-3 text-xs text-muted-foreground"
+              >
+                {group.label}
+              </TableHead>
             </TableRow>
-          ))
-        )}
-      </TableBody>
+            {group.rows.map(renderRow)}
+          </TableBody>
+        ))
+      ) : (
+        <TableBody>
+          {rows.length === 0 && empty ? (
+            <TableRow>
+              <TableCell colSpan={columnCount} className="h-24 text-center text-muted-foreground">
+                {empty}
+              </TableCell>
+            </TableRow>
+          ) : (
+            rows.map(renderRow)
+          )}
+        </TableBody>
+      )}
     </Table>
   )
 }

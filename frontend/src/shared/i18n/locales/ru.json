@@ -279,6 +279,7 @@
     },
     "detailsFields": {
       "worktree": "Worktree",
+      "created": "Создана",
       "cost": "Стоимость"
     },
     "form": {
@@ -306,8 +307,13 @@
     "open": "Открыть",
     "table": {
       "title": "Название",
-      "date": "Дата",
+      "updated": "Обновлено",
       "status": "Статус"
+    },
+    "groups": {
+      "today": "Сегодня",
+      "yesterday": "Вчера",
+      "older": "Ранее"
     },
     "details": "Сведения о сессии",
     "stop": "Остановить",

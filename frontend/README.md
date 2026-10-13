@@ -16,6 +16,7 @@ come next.
 | Server state | TanStack Query + axios |
 | Client state | Jotai |
 | Forms | React Hook Form + Zod (via `@hookform/resolvers`) |
+| Dates | date-fns |
 | i18n | i18next + react-i18next, English and Russian |
 | Logging | consola |
 | Lint/format | Biome |
@@ -54,7 +55,7 @@ src/
     config/            parsed env
     hooks/             use-mobile.ts
     i18n/              i18next setup + locales (en, ru)
-    lib/               utils.ts (shadcn's `cn`), number-input.ts, logger.ts
+    lib/               utils.ts (shadcn's `cn`), number-input.ts, logger.ts, date.ts (date-fns formatters)
     store/             jotai atoms (theme, sidebar, tabs)
     ui/                generated shadcn components
   styles/              globals.css — shadcn's own generated theme, nothing else

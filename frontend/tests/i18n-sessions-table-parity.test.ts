@@ -21,7 +21,7 @@ const NEW_KEYS = [
   'sessions.searchPlaceholder',
   'sessions.noMatches',
   'sessions.table.title',
-  'sessions.table.date',
+  'sessions.table.updated',
   'sessions.table.status',
   'sessions.empty',
 ] as const
@@ -46,12 +46,12 @@ test('ru values are not copies of the en ones, and are written in Cyrillic', () 
   expect({ copied, latinOnly }).toEqual({ copied: [], latinOnly: [] })
 })
 
-test('sessions.table holds exactly title, date and status in both locales', () => {
+test('sessions.table holds exactly title, updated and status in both locales', () => {
   for (const bundle of [en, ru]) {
     expect(Object.keys(lookup(bundle, 'sessions.table') as object).sort()).toEqual([
-      'date',
       'status',
       'title',
+      'updated',
     ])
   }
 })

@@ -1,4 +1,4 @@
-import { and, count, desc, eq, getTableColumns, gt, gte, inArray, lt, sql } from 'drizzle-orm'
+import { and, count, desc, eq, getTableColumns, gt, gte, inArray, lt, max, sql } from 'drizzle-orm'
 import { db } from '@/db/client'
 import { sanitizeForDb } from '@/db/sanitize'
 import {
@@ -159,10 +159,18 @@ const uncheckedSql = sql<boolean>`(
  */
 const sessionColumns = { ...getTableColumns(sessions), unchecked: uncheckedSql }
 
+/** What one grouped pass over a session's `messages` rows yields — see messageStatsFor. */
+interface MessageStats {
+  count: number
+  lastMessageAt: Date | null
+}
+
+const NO_MESSAGES: MessageStats = { count: 0, lastMessageAt: null }
+
 function toDto(
   row: SessionRow & { unchecked: boolean },
   repoPath: string,
-  messageCount: number,
+  stats: MessageStats,
   ideaId: string | null,
   automationId: string | null,
   pendingPrompts = 0,
@@ -186,12 +194,13 @@ function toDto(
     sdkSessionId: row.sdkSessionId,
     maxBudgetUsd: row.maxBudgetUsd,
     lastError: row.lastError,
-    messageCount,
+    messageCount: stats.count,
     totalCostUsd: row.totalCostUsd,
     pendingPrompts,
     settledAt: row.settledAt ? row.settledAt.toISOString() : null,
     seenAt: row.seenAt ? row.seenAt.toISOString() : null,
     unchecked: row.unchecked,
+    lastMessageAt: stats.lastMessageAt ? stats.lastMessageAt.toISOString() : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }
@@ -214,14 +223,26 @@ async function pendingFor(sessionIds: string[]): Promise<Map<string, number>> {
   return new Map(rows.map((r) => [r.sessionId, Number(r.n)]))
 }
 
-async function countsFor(sessionIds: string[]): Promise<Map<string, number>> {
+/**
+ * Message count and newest-message time per session, from the one grouped
+ * query — the second aggregate rides along on a scan the count already pays
+ * for, rather than costing a query per session.
+ *
+ * Over every `messages` row regardless of type or `pending`, deliberately:
+ * agent and tool output, and a prompt still queued behind a running turn, all
+ * count as the session having been chatted in. A session with no rows is
+ * simply absent from the map; callers fall back to NO_MESSAGES.
+ */
+async function messageStatsFor(sessionIds: string[]): Promise<Map<string, MessageStats>> {
   if (sessionIds.length === 0) return new Map()
   const rows = await db
-    .select({ sessionId: messages.sessionId, n: count() })
+    .select({ sessionId: messages.sessionId, n: count(), lastMessageAt: max(messages.createdAt) })
     .from(messages)
     .where(inArray(messages.sessionId, sessionIds))
     .groupBy(messages.sessionId)
-  return new Map(rows.map((r) => [r.sessionId, Number(r.n)]))
+  return new Map(
+    rows.map((r) => [r.sessionId, { count: Number(r.n), lastMessageAt: r.lastMessageAt }]),
+  )
 }
 
 /**
@@ -268,6 +289,17 @@ async function automationIdsFor(sessionIds: string[]): Promise<Map<string, strin
   )
 }
 
+/**
+ * A project's sessions, newest activity first: `lastMessageAt ?? createdAt`
+ * descending, then `createdAt` descending. A session nobody has written to yet
+ * sorts by when it was created.
+ *
+ * Sorted here, after the aggregates come back, because the activity time is a
+ * `messages` aggregate rather than a `sessions` column — the SQL `order by`
+ * below only fixes the order of otherwise-equal keys, since Array.sort is
+ * stable. Not `updatedAt`: renaming a session or editing its settings bumps
+ * that, and neither should move a session to the top.
+ */
 export async function listSessions(projectId: string): Promise<SessionDto[]> {
   const project = await requireProject(projectId)
   const rows = await db
@@ -276,22 +308,26 @@ export async function listSessions(projectId: string): Promise<SessionDto[]> {
     .where(eq(sessions.projectId, projectId))
     .orderBy(desc(sessions.createdAt))
   const ids = rows.map((r) => r.id)
-  const [counts, pending, ideaIds, automationIds] = await Promise.all([
-    countsFor(ids),
+  const [stats, pending, ideaIds, automationIds] = await Promise.all([
+    messageStatsFor(ids),
     pendingFor(ids),
     ideaIdsFor(ids),
     automationIdsFor(ids),
   ])
   const repo = projectRepo(project.slug)
-  return rows.map((r) =>
+  const dtos = rows.map((r) =>
     toDto(
       r,
       repo,
-      counts.get(r.id) ?? 0,
+      stats.get(r.id) ?? NO_MESSAGES,
       ideaIds.get(r.id) ?? null,
       automationIds.get(r.id) ?? null,
       pending.get(r.id) ?? 0,
     ),
+  )
+  const activityMs = (s: SessionDto) => Date.parse(s.lastMessageAt ?? s.createdAt)
+  return dtos.sort(
+    (a, b) => activityMs(b) - activityMs(a) || Date.parse(b.createdAt) - Date.parse(a.createdAt),
   )
 }
 
@@ -299,8 +335,8 @@ export async function getSession(id: string): Promise<SessionDto> {
   const [row] = await db.select(sessionColumns).from(sessions).where(eq(sessions.id, id)).limit(1)
   if (!row) throw notFound('Session')
   const project = await requireProject(row.projectId)
-  const [counts, pending, ideaIds, automationIds] = await Promise.all([
-    countsFor([row.id]),
+  const [stats, pending, ideaIds, automationIds] = await Promise.all([
+    messageStatsFor([row.id]),
     pendingFor([row.id]),
     ideaIdsFor([row.id]),
     automationIdsFor([row.id]),
@@ -308,7 +344,7 @@ export async function getSession(id: string): Promise<SessionDto> {
   return toDto(
     row,
     projectRepo(project.slug),
-    counts.get(row.id) ?? 0,
+    stats.get(row.id) ?? NO_MESSAGES,
     ideaIds.get(row.id) ?? null,
     automationIds.get(row.id) ?? null,
     pending.get(row.id) ?? 0,
@@ -358,13 +394,13 @@ type OverviewRow = SessionRow & { unchecked: boolean; projectName: string; proje
 
 function toOverviewDto(
   row: OverviewRow,
-  messageCount: number,
+  stats: MessageStats,
   ideaId: string | null,
   automationId: string | null,
   pendingPrompts: number,
 ): OverviewSessionDto {
   return {
-    ...toDto(row, projectRepo(row.projectSlug), messageCount, ideaId, automationId, pendingPrompts),
+    ...toDto(row, projectRepo(row.projectSlug), stats, ideaId, automationId, pendingPrompts),
     projectName: row.projectName,
   }
 }
@@ -379,9 +415,9 @@ function toOverviewDto(
  * `unchecked` ignore `window` entirely; only `recent` is bounded by it, and
  * separately capped at OVERVIEW_RECENT_LIMIT rows regardless of window.
  *
- * messageCount/pendingPrompts/ideaId are batched once across the union of
- * every row from all three lists — the same countsFor/pendingFor/ideaIdsFor
- * listSessions itself uses — so a dashboard spanning every project in the
+ * messageCount/lastMessageAt/pendingPrompts/ideaId are batched once across the
+ * union of every row from all three lists — the same
+ * messageStatsFor/pendingFor/ideaIdsFor listSessions itself uses — so a dashboard spanning every project in the
  * system never costs an N+1.
  */
 export async function getSessionsOverview(
@@ -413,8 +449,8 @@ export async function getSessionsOverview(
 
   const allRows = [...runningRows, ...uncheckedRows, ...recentRows]
   const ids = [...new Set(allRows.map((r) => r.id))]
-  const [counts, pending, ideaIds, automationIds] = await Promise.all([
-    countsFor(ids),
+  const [stats, pending, ideaIds, automationIds] = await Promise.all([
+    messageStatsFor(ids),
     pendingFor(ids),
     ideaIdsFor(ids),
     automationIdsFor(ids),
@@ -423,7 +459,7 @@ export async function getSessionsOverview(
   const dto = (row: OverviewRow) =>
     toOverviewDto(
       row,
-      counts.get(row.id) ?? 0,
+      stats.get(row.id) ?? NO_MESSAGES,
       ideaIds.get(row.id) ?? null,
       automationIds.get(row.id) ?? null,
       pending.get(row.id) ?? 0,

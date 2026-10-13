@@ -17,6 +17,7 @@ import {
   StatusBadge,
   toast,
 } from '@/shared/components'
+import { formatDateTime } from '@/shared/lib/date'
 import { composerModeAtom } from '@/shared/store/ui'
 import { Alert, AlertDescription } from '@/shared/ui/alert'
 import { Button, buttonVariants } from '@/shared/ui/button'
@@ -112,7 +113,7 @@ function inLoadZone(sentinel: HTMLElement, scroller: HTMLElement): boolean {
 // `projectId` stays in the prop type — the route still supplies it — but is no
 // longer destructured: the only thing that read it was the back-to-list button.
 export function SessionPage({ sessionId }: { projectId: string; sessionId: string }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const session = useSession(sessionId)
@@ -729,8 +730,8 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
 
   // The header's details popover: set-once configuration, not live status —
   // orchestrator/branch/worktree only ever appear when the session actually
-  // has one; cost is always shown (including $0.0000), the same formatting
-  // the header used to render inline.
+  // has one; created and cost are always shown (cost including $0.0000, the
+  // same formatting the header used to render inline).
   const detailItems: DefinitionItem[] = [
     ...(data.orchestrator
       ? [
@@ -783,6 +784,11 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
           },
         ]
       : []),
+    {
+      id: 'created',
+      term: t('sessions.detailsFields.created'),
+      description: formatDateTime(data.createdAt, i18n.resolvedLanguage),
+    },
     {
       id: 'cost',
       term: t('sessions.detailsFields.cost'),

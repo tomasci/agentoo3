@@ -91,6 +91,16 @@ export const sessionSchema = z.object({
       'A result is waiting that the operator has not looked at: settledAt is set, status is ' +
       'not queued or running, and seenAt is null or older than settledAt.',
   }),
+  lastMessageAt: z
+    .string()
+    .nullable()
+    .openapi({
+      description:
+        "ISO-8601 timestamp of the newest message in this session (that message's createdAt), " +
+        'of any type — agent and tool output count, and so does a prompt still waiting in the ' +
+        'queue. Null when the session has no messages yet. Deliberately independent of ' +
+        'updatedAt, which renames and settings edits also bump.',
+    }),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

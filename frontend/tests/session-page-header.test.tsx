@@ -41,6 +41,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
 import type { GetApiSessionsIdStatus200 as SessionDto } from '../src/shared/api/generated/types/GetApiSessionsId'
+import { formatDateTime } from '../src/shared/lib/date'
 import { composerModeAtom } from '../src/shared/store/ui'
 import { mockModule } from './mock-module'
 
@@ -72,6 +73,7 @@ const session = (overrides: Partial<SessionDto> = {}): SessionDto => ({
   pendingPrompts: 0,
   createdAt: T,
   updatedAt: T,
+  lastMessageAt: null,
   ...overrides,
 })
 
@@ -453,11 +455,12 @@ test('the popover is titled sessions.details and lists every row a fully-configu
     ['sessions.meta.orchestrator', 'claude'],
     ['sessions.meta.branch', 'agentoo/s-x'],
     ['sessions.detailsFields.worktree', '/srv/wt/s-x'],
+    ['sessions.detailsFields.created', formatDateTime(T, 'en')],
     ['sessions.detailsFields.cost', '$1.5000'],
   ])
 })
 
-test('a bare session shows only the cost row, as $0.0000', async () => {
+test('a bare session shows only the created and cost rows, cost as $0.0000', async () => {
   currentSession = session({
     orchestrator: null,
     branch: null,
@@ -467,7 +470,10 @@ test('a bare session shows only the cost row, as $0.0000', async () => {
   })
   await mount()
   const p = await openDetails()
-  expect(rowsOf(p)).toEqual([['sessions.detailsFields.cost', '$0.0000']])
+  expect(rowsOf(p)).toEqual([
+    ['sessions.detailsFields.created', formatDateTime(T, 'en')],
+    ['sessions.detailsFields.cost', '$0.0000'],
+  ])
 })
 
 test('cost is formatted with exactly four decimals, rounding past the fourth', async () => {
@@ -481,21 +487,32 @@ test('orchestrator only: no branch or worktree rows', async () => {
   currentSession = session({ orchestrator: 'claude', branch: null })
   await mount()
   const terms = rowsOf(await openDetails()).map(([term]) => term)
-  expect(terms).toEqual(['sessions.meta.orchestrator', 'sessions.detailsFields.cost'])
+  expect(terms).toEqual([
+    'sessions.meta.orchestrator',
+    'sessions.detailsFields.created',
+    'sessions.detailsFields.cost',
+  ])
 })
 
 test('branch only: no orchestrator row', async () => {
   currentSession = session({ orchestrator: null, branch: 'agentoo/s-x' })
   await mount()
   const terms = rowsOf(await openDetails()).map(([term]) => term)
-  expect(terms).toEqual(['sessions.meta.branch', 'sessions.detailsFields.cost'])
+  expect(terms).toEqual([
+    'sessions.meta.branch',
+    'sessions.detailsFields.created',
+    'sessions.detailsFields.cost',
+  ])
 })
 
 test('a worktree path on a non-isolated session is not shown', async () => {
   currentSession = session({ isolated: false, worktreePath: '/srv/wt/s-x' })
   await mount()
   const p = await openDetails()
-  expect(rowsOf(p).map(([term]) => term)).toEqual(['sessions.detailsFields.cost'])
+  expect(rowsOf(p).map(([term]) => term)).toEqual([
+    'sessions.detailsFields.created',
+    'sessions.detailsFields.cost',
+  ])
   expect(p.textContent ?? '').not.toContain('/srv/wt/s-x')
 })
 
@@ -503,7 +520,7 @@ test('an isolated session with no worktree path shows no worktree row', async ()
   currentSession = session({ isolated: true, worktreePath: null })
   await mount()
   const terms = rowsOf(await openDetails()).map(([term]) => term)
-  expect(terms).toEqual(['sessions.detailsFields.cost'])
+  expect(terms).toEqual(['sessions.detailsFields.created', 'sessions.detailsFields.cost'])
 })
 
 // --- 10. transcript wrapper class -----------------------------------------
