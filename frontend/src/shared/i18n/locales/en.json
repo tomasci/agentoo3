@@ -279,6 +279,7 @@
     },
     "detailsFields": {
       "worktree": "Worktree",
+      "created": "Created",
       "cost": "Cost"
     },
     "form": {
@@ -306,8 +307,13 @@
     "open": "Open",
     "table": {
       "title": "Title",
-      "date": "Date",
+      "updated": "Last updated",
       "status": "Status"
+    },
+    "groups": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "older": "Older"
     },
     "details": "Session details",
     "stop": "Stop",

@@ -71,13 +71,15 @@ test('session-page.tsx, composer.tsx and transcript.tsx reference every new key'
   expect(unreferenced).toEqual([])
 })
 
-test('detailsFields holds exactly worktree and cost in both locales', () => {
+test('detailsFields holds exactly cost, created and worktree in both locales', () => {
   expect(Object.keys(lookup(en, 'sessions.detailsFields') as object).sort()).toEqual([
     'cost',
+    'created',
     'worktree',
   ])
   expect(Object.keys(lookup(ru, 'sessions.detailsFields') as object).sort()).toEqual([
     'cost',
+    'created',
     'worktree',
   ])
 })

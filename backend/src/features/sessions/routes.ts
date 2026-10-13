@@ -66,7 +66,11 @@ sessionsRouter.openapi(
     method: 'get',
     path: '/projects/{id}/sessions',
     tags: ['sessions'],
-    summary: "List a project's sessions",
+    summary: "List a project's sessions, newest activity first",
+    description:
+      'Ordered by lastMessageAt descending, falling back to createdAt for a session with no ' +
+      'messages yet, then by createdAt descending. Not by updatedAt: renaming a session or ' +
+      'editing its settings must not move it up the list.',
     request: { params: idParam },
     responses: {
       200: json(z.array(sessionSchema), 'Sessions'),

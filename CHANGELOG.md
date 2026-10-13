@@ -2,6 +2,12 @@
 
 The What's new screen inside agentoo shows this same list after each update — reopen it any time via the version number in the status bar. Newest release first. Also available in [Russian](CHANGELOG.ru.md).
 
+## 1.4.174 — 2026-10-13
+
+### Improved
+- A project's sessions are now ordered by their last message instead of when they were created, and grouped under Today, Yesterday, a heading per earlier day and Older; the list shows when each one was last updated.
+- A session's details popover now shows when the session was created.
+
 ## 1.4.173 — 2026-10-07
 
 ### New

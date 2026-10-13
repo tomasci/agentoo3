@@ -59,6 +59,7 @@ const session = (overrides: Partial<SessionDto> = {}): SessionDto => ({
   pendingPrompts: 0,
   createdAt: T,
   updatedAt: T,
+  lastMessageAt: null,
   ...overrides,
 })
 
@@ -206,7 +207,10 @@ test('both null: neither row', async () => {
   currentSession = session({ baseSha: null, baseBranch: null })
   await mount()
   const p = await openDetails()
-  expect(Object.keys(rowsOf(p))).toEqual(['sessions.detailsFields.cost'])
+  expect(Object.keys(rowsOf(p))).toEqual([
+    'sessions.detailsFields.created',
+    'sessions.detailsFields.cost',
+  ])
   expect(p.textContent ?? '').not.toContain('sessions.meta.baseSha')
   expect(p.textContent ?? '').not.toContain('sessions.meta.baseBranch')
 })

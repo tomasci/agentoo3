@@ -16,9 +16,15 @@ import {
   StatusBadge,
   toast,
 } from '@/shared/components'
+import { formatDateTime, formatDayLabel, formatTimeOfDay } from '@/shared/lib/date'
 import { Input } from '@/shared/ui/input'
 import { type Session, useDeleteSession } from '../hooks/use-sessions'
-import { formatDateTime } from '../lib/format'
+import {
+  activityTime,
+  type SessionGroupHeading,
+  sessionGroupOf,
+  sortSessions,
+} from '../lib/session-groups'
 import { STATUS_TONE } from '../lib/status'
 
 const columnHelper = createColumnHelper<Session>()
@@ -26,11 +32,14 @@ const columnHelper = createColumnHelper<Session>()
 /**
  * The project's sessions, replacing the old card grid. A shadcn `DataTable`
  * over a plain TanStack v8 instance (`ProjectsTable`'s own shape), so it
- * inherits sorting-free, pagination-free behaviour for free — the API's own
- * `createdAt desc` order is the only order this ever shows.
+ * inherits sorting-free, pagination-free behaviour for free — the one order
+ * this ever shows is last activity, newest first (`sortSessions`), split under
+ * plain Today / Yesterday / per-day / Older headings. Search filters first and
+ * a heading whose sessions were all filtered out goes with them.
  */
 export function SessionsTable({ sessions, projectId }: { sessions: Session[]; projectId: string }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const language = i18n.resolvedLanguage
   const navigate = useNavigate()
   const remove = useDeleteSession(projectId)
   const [pendingDelete, setPendingDelete] = useState<Session | null>(null)
@@ -70,10 +79,22 @@ export function SessionsTable({ sessions, projectId }: { sessions: Session[]; pr
           ),
         },
       ),
-      columnHelper.accessor('createdAt', {
-        header: () => t('sessions.table.date'),
+      // Time only under Today / Yesterday / a day heading — the heading is
+      // already the date — and the full date and time under Older, whose
+      // heading says nothing about it. `title` carries the full one either
+      // way, so a bare `14:32` can still be read in full on hover.
+      columnHelper.accessor((session) => activityTime(session), {
+        id: 'updated',
+        header: () => t('sessions.table.updated'),
         meta: { role: 'meta' },
-        cell: (info) => formatDateTime(info.getValue()),
+        cell: (info) => {
+          const value = info.getValue()
+          const full = formatDateTime(value, language)
+          const older = sessionGroupOf(info.row.original, new Date()).kind === 'older'
+          return (
+            <span title={full || undefined}>{older ? full : formatTimeOfDay(value, language)}</span>
+          )
+        },
       }),
       columnHelper.accessor('status', {
         header: () => t('sessions.table.status'),
@@ -118,15 +139,38 @@ export function SessionsTable({ sessions, projectId }: { sessions: Session[]; pr
         },
       }),
     ],
-    [t, navigate, projectId],
+    [t, language, navigate, projectId],
   )
 
+  // The API already answers newest-activity first; sorting here too means the
+  // order doesn't depend on whatever arrives in the cache. Memoised on the
+  // array itself so TanStack sees a stable `data` between renders.
+  const sorted = useMemo(() => sortSessions(sessions), [sessions])
+
   const table = useReactTable({
-    data: sessions,
+    data: sorted,
     columns,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
   })
+
+  // Judged against the clock at each render rather than when the data
+  // arrived, so a list left open past midnight regroups on its next render
+  // (a refetch, a keystroke in the search box) instead of staying frozen on
+  // yesterday's "Today".
+  const now = new Date()
+  const groupLabel = (heading: SessionGroupHeading) => {
+    switch (heading.kind) {
+      case 'today':
+        return t('sessions.groups.today')
+      case 'yesterday':
+        return t('sessions.groups.yesterday')
+      case 'day':
+        return formatDayLabel(heading.day, language)
+      case 'older':
+        return t('sessions.groups.older')
+    }
+  }
 
   // The title column's own filter value doubles as the search box's state —
   // one source of truth rather than a second `useState` that could drift
@@ -144,7 +188,14 @@ export function SessionsTable({ sessions, projectId }: { sessions: Session[]; pr
         className="max-w-sm"
       />
 
-      <DataTable table={table} empty={<span>{t('sessions.noMatches')}</span>} />
+      <DataTable
+        table={table}
+        empty={<span>{t('sessions.noMatches')}</span>}
+        groupBy={(session) => {
+          const heading = sessionGroupOf(session, now)
+          return { key: heading.key, label: groupLabel(heading) }
+        }}
+      />
 
       <ConfirmDialog
         open={pendingDelete !== null}

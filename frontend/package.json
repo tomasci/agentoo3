@@ -2,7 +2,7 @@
   "name": "agentoo-frontend",
   "private": true,
   "type": "module",
-  "version": "1.4.173",
+  "version": "1.4.174",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -34,6 +34,7 @@
     "class-variance-authority": "0.7.1",
     "cn": "0.4.0",
     "consola": "3.4.2",
+    "date-fns": "4.4.0",
     "i18next": "26.4.1",
     "i18next-browser-languagedetector": "8.2.1",
     "jotai": "2.20.3",
