@@ -12,6 +12,7 @@ import { attachmentsSystemPromptBlock } from '@/features/attachments/manifest'
 import { sessionAttachmentsSummary } from '@/features/attachments/service'
 import { composeEnvFor } from '@/features/docker/compose-env'
 import { syncProjectPlugin } from '@/features/library/service'
+import type { TurnMode } from '@/features/sessions/schema'
 import { keyPathFor } from '@/features/ssh-keys/service'
 import { withoutAppCredentials } from '@/lib/child-env'
 import { configureRepoSsh, isGitRepo } from '@/lib/git'
@@ -272,6 +273,59 @@ export function attachmentsHook(ownUploadsDir: string | null): HookCallbackMatch
   return { matcher: 'Read|Grep|Glob|Bash|Edit|Write|NotebookRead|NotebookEdit', hooks: [hook] }
 }
 
+/** The tools that write a file directly. Bash is deliberately absent: Q&A has
+ * to be able to run `git log` and `ls`, and `dontAsk` (see `optionsFor`) is what
+ * refuses the commands that change state, which no tool-name list could tell
+ * apart. */
+const QA_BLOCKED_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']
+
+/**
+ * Refuses every direct file write in a Q&A turn — a second layer under
+ * `permissionMode: 'dontAsk'`, not the first.
+ *
+ * `dontAsk` denies whatever is not pre-approved, but "pre-approved" is wider
+ * than this turn's own `allowedTools`: `settingSources: ['project']` loads the
+ * repo's `.claude/settings.json`, and an `allow` rule there for `Edit` would
+ * pass the check. A hook's deny is not subject to those rules. It also fires
+ * inside subagents, same as `attachmentsHook` (see its comment), so a
+ * delegated task cannot write either.
+ *
+ * Always a deny, never an 'allow', and `{}` for everything it does not match:
+ * an 'allow' from here would approve the edit it was written to stop.
+ */
+export function qaReadOnlyHook(): HookCallbackMatcher {
+  const hook: HookCallback = async (input) => {
+    if (input.hook_event_name !== 'PreToolUse' || !QA_BLOCKED_TOOLS.includes(input.tool_name)) {
+      return {}
+    }
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason:
+          "Q&A mode: this turn is answer-only, so files cannot be changed. Answer the user's message instead.",
+      },
+    }
+  }
+  return { matcher: QA_BLOCKED_TOOLS.join('|'), hooks: [hook] }
+}
+
+/** Read-only research and delegation tools a Q&A turn may use without being
+ * asked. An allow rule only — it does not change which tools exist, so the
+ * tool list the model (and the prompt cache) sees is the same as in Code. */
+const QA_ALLOWED_TOOLS = [
+  'Read',
+  'Grep',
+  'Glob',
+  'WebSearch',
+  'WebFetch',
+  'Agent',
+  'Task',
+  'TodoWrite',
+  'Skill',
+  'ToolSearch',
+]
+
 /**
  * Delete, from a just-assembled session env, any `AGENTOO_*` key that
  * `composeEnvFor` did not emit for this scope — `scoped` being that
@@ -347,12 +401,17 @@ function withoutInheritedAgentooKeys(
  * matches what the UI shows — and the roster in the prompt is read back out of
  * that directory rather than assembled separately, so the team the orchestrator
  * is told about is exactly the team the SDK loads.
+ *
+ * `mode` is this turn's, read off the prompt being answered, and these options
+ * are rebuilt from scratch every turn — which is why a Q&A turn's read-only
+ * permissions cannot outlive it, and the next Code turn needs no reset.
  */
 export async function optionsFor(
   session: typeof sessions.$inferSelect,
   slug: string,
   abortController: AbortController,
   sshKeyId: string | null = null,
+  mode: TurnMode = 'code',
 ): Promise<Options> {
   const cwd = session.worktreePath ?? projectRepo(slug)
   // Rebuilt now rather than trusted: the plugin directory is a copy of the
@@ -502,7 +561,11 @@ export async function optionsFor(
     // outside this project's roster, and (attachmentsHook) keeps a session's
     // file tools inside its own attachments directory.
     hooks: {
-      PreToolUse: [delegationHook(specialists), attachmentsHook(attachments?.uploadsDir ?? null)],
+      PreToolUse: [
+        delegationHook(specialists),
+        attachmentsHook(attachments?.uploadsDir ?? null),
+        ...(mode === 'qa' ? [qaReadOnlyHook()] : []),
+      ],
     },
     // The strong lever: `deny` rules bind in every permission mode, including
     // bypassPermissions, cover every tool (not just Bash), and resolve
@@ -528,8 +591,20 @@ export async function optionsFor(
     ...(attachments && { additionalDirectories: [attachments.uploadsDir] }),
     ...(budget !== undefined && { maxBudgetUsd: budget }),
     // Full tool access, deliberately: this runs on a single-user box behind a
-    // tailnet, and prompting for permission has nobody to ask.
-    permissionMode: 'bypassPermissions',
+    // tailnet, and prompting for permission has nobody to ask. A Q&A turn is the
+    // one exception, and 'dontAsk' is how it stays read-only without asking
+    // either: whatever is not pre-approved is denied outright, so `git log`
+    // passes on Claude Code's own read-only checks and a command that writes
+    // does not.
+    //
+    // Enforced through the permission mode, the allow list and the hook above,
+    // and not through `tools`, `disallowedTools` or a blanket `deny` rule: those
+    // change the tool list or the system prompt, and with them the prompt cache
+    // for a long session's whole resumed context, on every switch between Code
+    // and Q&A. The orchestrator's own `tools`/`disallowedTools` and the
+    // attachments rules above apply in both modes, unchanged.
+    permissionMode: mode === 'qa' ? 'dontAsk' : 'bypassPermissions',
+    ...(mode === 'qa' && { allowedTools: [...QA_ALLOWED_TOOLS] }),
     // The whole point of the transcript: without this only tool_use blocks come
     // back from subagents, and the delegated work is invisible.
     forwardSubagentText: true,

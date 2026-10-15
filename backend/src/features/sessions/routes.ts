@@ -314,8 +314,8 @@ sessionsRouter.openapi(
     },
   }),
   async (c) => {
-    const { text } = c.req.valid('json')
-    return c.json(await sendMessage(c.req.valid('param').id, text), 201)
+    const { text, mode } = c.req.valid('json')
+    return c.json(await sendMessage(c.req.valid('param').id, text, mode), 201)
   },
 )
 

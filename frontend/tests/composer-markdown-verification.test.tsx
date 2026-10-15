@@ -528,6 +528,8 @@ function DraftsParent(p: { initial: Record<string, string>; start: string; mode?
         }}
         mode={mode}
         onModeChange={setMode}
+        turnMode="code"
+        onTurnModeChange={() => {}}
         sending={false}
         canSend={p.canSend ?? true}
         queueLine=""
@@ -805,6 +807,8 @@ describe('composer: a stored mode that is not "raw" reads as visual (getOnInit p
               onSubmit={() => {}}
               mode={mode}
               onModeChange={setMode}
+              turnMode="code"
+              onTurnModeChange={() => {}}
               sending={false}
               canSend
               queueLine=""

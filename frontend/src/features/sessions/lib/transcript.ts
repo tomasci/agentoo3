@@ -1,4 +1,4 @@
-import type { SessionMessage } from '../hooks/use-sessions'
+import type { SessionMessage, TurnMode } from '../hooks/use-sessions'
 
 /**
  * The transcript, as a tree.
@@ -30,6 +30,9 @@ export type TranscriptNode =
       id: string
       seq: number
       text: string
+      /** `'qa'` only when the stored payload says so; every other prompt —
+       * including every one written before the field existed — is `'code'`. */
+      mode: TurnMode
       files: MessageFile[]
       createdAt: string
     }
@@ -272,6 +275,11 @@ export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
         id: message.id,
         seq: message.seq,
         text: str(payload, 'text') ?? '',
+        // `payload` is `unknown` on the wire, so this reads `mode` the way
+        // `text` is read above rather than trusting its shape: anything but
+        // the literal `'qa'` is a Code row, which renders exactly as it did
+        // before the field existed.
+        mode: payload.mode === 'qa' ? 'qa' : 'code',
         // `?? []`: the REST page this hook's own history load reads always
         // carries this (see the schema), but a prompt appended live over the
         // stream is published from the raw `messages` row the moment it is

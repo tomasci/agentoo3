@@ -28,8 +28,10 @@ import {
 } from '@/shared/ui/input-group'
 import { Spinner } from '@/shared/ui/spinner'
 import { Toggle } from '@/shared/ui/toggle'
+import { ToggleGroup, ToggleGroupItem } from '@/shared/ui/toggle-group'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
 import type { AttachmentUpload, SessionFilesUsage } from '../hooks/use-session-files'
+import type { TurnMode } from '../hooks/use-sessions'
 import { attachmentDescription, isInlineImage, sessionFileUrl } from '../lib/attachments'
 import { AttachmentLightbox } from './attachment-lightbox'
 
@@ -153,6 +155,18 @@ function AttachmentTile({
   )
 }
 
+// The switch's two items, in display order. `satisfies Record<TurnMode, …>`
+// is what makes a mode the backend adds later fail typecheck here, rather
+// than silently having no item to pick it with. The keys are spelled out as
+// literals, not assembled from the mode, so the i18n parity test (and a grep)
+// can still find every one of them in this file.
+const TURN_MODE_ITEMS = {
+  code: { label: 'sessions.turnMode.code', tooltip: 'sessions.turnMode.codeTooltip' },
+  qa: { label: 'sessions.turnMode.qa', tooltip: 'sessions.turnMode.qaTooltip' },
+} as const satisfies Record<TurnMode, { label: string; tooltip: string }>
+
+const isTurnMode = (value: string): value is TurnMode => Object.hasOwn(TURN_MODE_ITEMS, value)
+
 /** What the surface being left behind had — its selection and whether it was
  * actually focused — captured so the surface taking over can put the caret
  * back in the same place instead of always landing at the end. Neither
@@ -207,10 +221,10 @@ export function hasWrapped(
  * earn a file the way `transcript.tsx` already has one.
  *
  * Built on shadcn's `input-group`: one bordered box that reflows between a
- * single compact row (attach, text, send) and an expanded shape (text on its
- * own row, attach/send on a row below it) as the message grows past one
- * line — see the `expanded` state below for how that switch is detected and
- * why it is one-way once tripped.
+ * single compact row (attach, Code / Q&A switch, text, send) and an expanded
+ * shape (text on its own row, attach/switch/send on a row below it) as the
+ * message grows past one line — see the `expanded` state below for how that
+ * reflow is detected and why it is one-way once tripped.
  *
  * Two text surfaces share the same box: `mode === 'visual'` renders
  * `MarkdownEditor` (CodeMirror plus `shared/lib/markdown-live-preview.ts`),
@@ -236,6 +250,8 @@ export function Composer({
   onSubmit,
   mode,
   onModeChange,
+  turnMode,
+  onTurnModeChange,
   sending,
   canSend,
   canStop,
@@ -257,6 +273,12 @@ export function Composer({
    * feature stored value. */
   mode: 'visual' | 'raw'
   onModeChange: (mode: 'visual' | 'raw') => void
+  /** Whether the next message asks the agent to work (`'code'`) or only to
+   * answer (`'qa'`) — named apart from `mode` above, which is only which text
+   * surface is showing. The composer never reads this for anything but the
+   * switch below: `SessionPage` is what sends it along with the text. */
+  turnMode: TurnMode
+  onTurnModeChange: (mode: TurnMode) => void
   sending: boolean
   canSend: boolean
   /** Whether the session can currently be stopped — renders the stop button
@@ -509,6 +531,56 @@ export function Composer({
     </Tooltip>
   )
 
+  // Code / Q&A, text only. Never disabled, for the same reason attach and the
+  // source toggle above stay live through a run: the mode is read when the
+  // message is sent, so a reader can queue a question behind a running turn,
+  // and the switch has to still be there to ask it with.
+  //
+  // `onValueChange` ignores an empty array, which is what Base UI reports
+  // when the already-selected item is pressed again — single selection still
+  // lets a pressed item be toggled off. Taken at face value that would leave
+  // the group with nothing selected, and a send with no mode to read. The
+  // group is controlled, so ignoring it is all it takes for the item to stay
+  // pressed.
+  //
+  // `onMouseDown`'s `preventDefault` and the restated `data-slot` are the
+  // same two fixes the source toggle above carries, for the same reasons —
+  // clicking must not pull the caret out of the text surface, and
+  // `TooltipTrigger` would otherwise rename the slot. `h-6 text-xs` match the
+  // `icon-xs` buttons beside it (shadcn's `sm` toggle is h-7), so the compact
+  // row does not grow; `aria-pressed:text-foreground` is there because the
+  // addon's own `text-muted-foreground` is inherited, and a pressed item
+  // that only gains a faint `bg-muted` fill barely reads as selected in the
+  // light theme.
+  const turnModeSwitch = (
+    <ToggleGroup
+      aria-label={t('sessions.turnMode.label')}
+      variant="outline"
+      size="sm"
+      spacing={0}
+      value={[turnMode]}
+      onValueChange={(next) => {
+        const picked = next[0]
+        if (picked !== undefined && isTurnMode(picked)) onTurnModeChange(picked)
+      }}
+    >
+      {Object.entries(TURN_MODE_ITEMS).map(([value, item]) => (
+        <Tooltip key={value}>
+          <TooltipTrigger
+            data-slot="toggle-group-item"
+            onMouseDown={(e) => e.preventDefault()}
+            render={
+              <ToggleGroupItem value={value} className="h-6 text-xs aria-pressed:text-foreground" />
+            }
+          >
+            {t(item.label)}
+          </TooltipTrigger>
+          <TooltipContent>{t(item.tooltip)}</TooltipContent>
+        </Tooltip>
+      ))}
+    </ToggleGroup>
+  )
+
   const textSurface = isRaw ? (
     <InputGroupTextarea
       ref={textareaRef}
@@ -520,7 +592,17 @@ export function Composer({
       // content-sizing does apply, it overrides this and the box still
       // grows with the text as usual.
       rows={expanded ? 3 : 1}
-      className="min-h-0 max-h-48"
+      // `placeholder:truncate` keeps the placeholder on one line, ellipsised:
+      // with the Code / Q&A switch beside it the text surface is too narrow
+      // on a phone for the whole sentence, and `field-sizing: content` sizes
+      // an empty textarea to its placeholder — left to wrap, the one-line box
+      // turns two lines tall, and that is the height `singleLineHeight` above
+      // would capture as its one-line baseline. `placeholder-shown:min-w-0`
+      // because a nowrap placeholder becomes the textarea's min-content, and
+      // a flex item (`flex-1`) never shrinks below that, which would push the
+      // addons out of the group. Scoped to the empty state on purpose: typed
+      // text is sized and wrapped exactly as before.
+      className="min-h-0 max-h-48 placeholder-shown:min-w-0 placeholder:truncate"
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={(e) => sendOnEnter(e.nativeEvent)}
       onPaste={(e) => {
@@ -561,7 +643,14 @@ export function Composer({
       // from the group's inner edge; CodeMirror's `.cm-line` already
       // contributes 6px of that on its own, so 4px (`pl-1`) here makes up
       // the rest.
-      className="w-full min-w-0 flex-1 py-2 pl-1 [&_.cm-editor]:max-h-48 [&_.cm-scroller]:overflow-y-auto"
+      // `[&_.cm-placeholder]:…`: the same one-line, ellipsised placeholder the
+      // raw textarea gets (see its comment). `truncate` alone is not enough:
+      // `.cm-content` only shrinks because wrapped text has a tiny min-content,
+      // so a nowrap placeholder would make the whole sentence its minimum width
+      // and scroll the editor sideways; `w-0 min-w-full` gives it no intrinsic
+      // width, then the line's full width once laid out. Only the placeholder's
+      // own box is touched, so typed text wraps as before.
+      className="w-full min-w-0 flex-1 py-2 pl-1 [&_.cm-editor]:max-h-48 [&_.cm-placeholder]:w-0 [&_.cm-placeholder]:min-w-full [&_.cm-placeholder]:truncate [&_.cm-scroller]:overflow-y-auto"
     />
   )
 
@@ -626,7 +715,12 @@ export function Composer({
       />
 
       <InputGroup className="h-auto">
-        {!expanded && <InputGroupAddon align="inline-start">{attachButton}</InputGroupAddon>}
+        {!expanded && (
+          <InputGroupAddon align="inline-start" className="gap-1">
+            {attachButton}
+            {turnModeSwitch}
+          </InputGroupAddon>
+        )}
         {textSurface}
         {!expanded && (
           <InputGroupAddon align="inline-end">
@@ -637,7 +731,10 @@ export function Composer({
         )}
         {expanded && (
           <InputGroupAddon align="block-end" className="justify-between">
-            {attachButton}
+            <span className="flex items-center gap-1">
+              {attachButton}
+              {turnModeSwitch}
+            </span>
             <span className="flex items-center gap-1">
               {toggleButton}
               {stopButton}

@@ -316,6 +316,45 @@ first, so the stranded message still runs before whatever the operator types
 next — but the worker writes a transcript notice on the way out
 (`noticeStrandedPrompt`) instead of leaving that to be discovered later.
 
+### Q&A mode: a message that may only be answered
+
+`POST /sessions/{id}/messages` takes an optional `mode`, `code` (the default) or
+`qa`. It belongs to the one message, not the session: the Q&A message goes into
+the same conversation, resumed through the same SDK session id, so the agent
+answers with everything it already knows — and the next Code message runs
+normally, because `optionsFor` rebuilds the options from scratch every turn and
+nothing carries over.
+
+A Q&A prompt is stored as `{ text, mode: 'qa' }`; a Code one stays exactly
+`{ text }`, which is also what every row written before this looks like. The
+worker reads the mode off the prompt it is answering (`turnModeOf`) and, for Q&A,
+puts `QA_MODE_INSTRUCTION` in front of the text it hands the SDK
+(`composeTurnPrompt`, features/sessions/turn-mode.ts). The instruction is never
+stored, so the transcript shows only what the operator typed.
+
+Telling the agent is not what makes the turn read-only. `optionsFor` switches the
+turn to `permissionMode: 'dontAsk'` — whatever is not pre-approved is denied
+without a prompt — with an `allowedTools` list of read-only research and
+delegation tools, and adds `qaReadOnlyHook`, a `PreToolUse` deny for
+`Edit|Write|MultiEdit|NotebookEdit`. The hook is the backstop for what `dontAsk`
+alone does not cover: the project's own `.claude/settings.json` is loaded
+(`settingSources: ['project']`), and an allow rule there could pre-approve an
+edit, in the main thread or inside a subagent.
+
+What it deliberately does not touch is `tools`, `disallowedTools`, the system
+prompt or `resume`. Changing any of them alters the tool list or the prompt the
+model is given, which invalidates the prompt cache for a long session's entire
+context on every switch between Code and Q&A. A Q&A turn can therefore still run
+`ls` or `git log` (Claude Code's own read-only checks pass them under `dontAsk`),
+and a Bash command that is not read-only is denied. The hook covers the
+file-writing tools, not Bash, so a Bash allow rule in the project's own settings
+is the one thing that can still pre-approve a state-changing command.
+
+An auto-continuation inherits the mode of the turn that spawned it
+(`recover` → `enqueueContinuation`): a Q&A turn that is killed and picked back
+up is stored as `{ text, auto: true, mode: 'qa' }`. Otherwise the continuation
+would run with full permissions for a message the operator meant as a question.
+
 ### A turn that was killed is not a turn that failed
 
 "Never retried" has one exception, and it is not a retry. If the CLI process was
@@ -369,7 +408,8 @@ that backgrounding itself is disallowed.
 A tool call the harness cancelled on its own, rather than the operator declining
 it, is read off the next `user` message's `tool_result_meta`
 (`cancelledWithoutInterrupt`). This session runs with
-`permissionMode: 'bypassPermissions'` and no `canUseTool` registered anywhere in
+`permissionMode: 'bypassPermissions'` (`'dontAsk'` for a Q&A turn — neither
+prompts) and no `canUseTool` registered anywhere in
 `src`, so there was never a prompt for an operator to have answered — and a
 cancellation seen while the turn's own `interrupted` flag is still false was not
 agentoo either, since `abortController.abort()` is agentoo's only cancel source.

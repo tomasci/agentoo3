@@ -6,6 +6,7 @@ export {
   type OverviewWindow,
   type Session,
   type SessionMessage,
+  type TurnMode,
   useMarkSessionSeen,
   useSession,
   useSessions,

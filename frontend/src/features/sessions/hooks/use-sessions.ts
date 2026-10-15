@@ -32,6 +32,7 @@ import type {
   GetApiSessionsIdMessagesStatus200,
 } from '@/shared/api/generated/types/GetApiSessionsIdMessages'
 import type { GetApiSessionsOverviewWindowKey } from '@/shared/api/generated/types/GetApiSessionsOverview'
+import type { PostApiSessionsIdMessagesBody } from '@/shared/api/generated/types/PostApiSessionsIdMessages'
 import { getApiSessionsIdMessagesStatus200Schema } from '@/shared/api/generated/zod/getApiSessionsIdMessagesSchema'
 import { sessionMessagesKey } from '../lib/message-cache'
 
@@ -46,6 +47,11 @@ export type { OverviewSession } from '@/shared/api/generated/types/OverviewSessi
 
 /** `1d` | `3d` | `7d` — how far back the dashboard's Recent list looks. */
 export type OverviewWindow = GetApiSessionsOverviewWindowKey
+
+/** `code` | `qa` — how the agent treats one message. Derived from the send
+ * request's own optional `mode`, so a value the backend stops accepting stops
+ * type-checking here instead of failing at the server. */
+export type TurnMode = NonNullable<PostApiSessionsIdMessagesBody['mode']>
 
 export function useSessions(projectId: string) {
   return useQuery(getApiProjectsIdSessionsQueryOptions({ path: { id: projectId } }))

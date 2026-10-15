@@ -44,6 +44,7 @@ import type {
   SessionMessagePageDto,
   SessionsOverviewDto,
   SessionsOverviewWindow,
+  TurnMode,
   UpdateSessionInput,
 } from './schema'
 
@@ -843,8 +844,16 @@ export async function deleteSession(id: string): Promise<void> {
  * on the session: a conditional update moves an idle session to 'queued', and a
  * busy one simply leaves the row pending for the running turn to pick up when it
  * finishes. That is why this never rejects a message for being too early.
+ *
+ * `mode` belongs to this one message: a Q&A message runs read-only and a Code
+ * one right after it runs normally, in the same session. Other callers (idea
+ * handoff, automations) omit it and stay Code.
  */
-export async function sendMessage(sessionId: string, text: string): Promise<SessionMessageDto> {
+export async function sendMessage(
+  sessionId: string,
+  text: string,
+  mode: TurnMode = 'code',
+): Promise<SessionMessageDto> {
   const [session] = await db.select().from(sessions).where(eq(sessions.id, sessionId)).limit(1)
   if (!session) throw notFound('Session')
 
@@ -871,7 +880,11 @@ export async function sendMessage(sessionId: string, text: string): Promise<Sess
       type: 'prompt',
       pending: true,
       title: null,
-      payload: sanitizeForDb({ text }),
+      // No `mode` key at all for Code, not `mode: 'code'`: that is what every
+      // row written before modes existed looks like, and what turnModeOf
+      // reads as Code. The UI renders `text` alone, so Q&A's instruction is
+      // added to the prompt by the worker and never appears in the transcript.
+      payload: sanitizeForDb(mode === 'qa' ? { text, mode } : { text }),
     })
     .returning()
   if (!row) throw new Error('Insert returned no row')
