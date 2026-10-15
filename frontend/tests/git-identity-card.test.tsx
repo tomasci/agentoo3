@@ -36,6 +36,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { I18nextProvider } from 'react-i18next'
 import en from '../src/shared/i18n/locales/en.json'
 import { mockModule } from './mock-module'
+import { seedDiskUsage } from './disk-usage-api'
 
 const GET_CLIENT = '@/shared/api/generated/clients/getProjectGitIdentity'
 const PUT_CLIENT = '@/shared/api/generated/clients/putProjectGitIdentity'
@@ -180,6 +181,10 @@ async function mount() {
     { items: [], hasUnread: false, truncated: false },
   )
   client.setQueryData([{ url: '/api/docker/detection' }], { enabled: true, projects: [] })
+  // Sizes: the picker's Size column and Settings' "Size on disk" fact read
+  // these (tests/project-disk-usage-*.test.tsx cover them); seeded for the same
+  // reason as every other query here.
+  seedDiskUsage(client, [ALPHA.id])
   client.setQueryData(
     [{ url: '/api/sessions/overview' }, { window: '1d' }],
     { running: [], unchecked: [], recent: [], window: '1d' },

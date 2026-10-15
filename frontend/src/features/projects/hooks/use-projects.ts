@@ -9,6 +9,7 @@ import {
   getProjectGitIdentityQueryKey,
   getProjectGitIdentityQueryOptions,
 } from '@/shared/api/generated/hooks/useGetProjectGitIdentity'
+import { getProjectsDiskUsageQueryKey } from '@/shared/api/generated/hooks/useGetProjectsDiskUsage'
 import { patchApiProjectsIdMutationOptions } from '@/shared/api/generated/hooks/usePatchApiProjectsId'
 import { postApiProjectsMutationOptions } from '@/shared/api/generated/hooks/usePostApiProjects'
 import { postApiProjectsIdRetryMutationOptions } from '@/shared/api/generated/hooks/usePostApiProjectsIdRetry'
@@ -35,7 +36,14 @@ export function useProjects() {
 
 function useInvalidateProjects() {
   const queryClient = useQueryClient()
-  return () => queryClient.invalidateQueries({ queryKey: getApiProjectsQueryKey() })
+  return () => {
+    // Creating, retrying or deleting a project changes which folders exist to
+    // be measured, so the sizes list goes stale with the project list. Not
+    // awaited: a mutation's own pending state should end with the list it
+    // actually changed, not wait on a second request.
+    void queryClient.invalidateQueries({ queryKey: getProjectsDiskUsageQueryKey() })
+    return queryClient.invalidateQueries({ queryKey: getApiProjectsQueryKey() })
+  }
 }
 
 export function useCreateProject() {

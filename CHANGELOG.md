@@ -2,6 +2,11 @@
 
 The What's new screen inside agentoo shows this same list after each update — reopen it any time via the version number in the status bar. Newest release first. Also available in [Russian](CHANGELOG.ru.md).
 
+## 1.4.177 — 2026-10-15
+
+### New
+- The project list in a new tab and a project's Settings now show how much disk space the project's folder takes; Settings also splits out the repository and the session worktrees and has a Recalculate button.
+
 ## 1.4.176 — 2026-10-15
 
 ### Improved

@@ -7,6 +7,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { routeTree } from '../src/app/router'
 import { projectTab, systemTab } from '../src/shared/store/tabs'
+import { seedDiskUsage } from './disk-usage-api'
 
 const project = (id: string, name: string, status = 'ready') => ({
   id, name, slug: name.toLowerCase(), source: 'clone', remoteUrl: null, sourceName: null,
@@ -83,6 +84,10 @@ async function mount(path: string, projects = PROJECTS) {
   // detected" indicator (projects-table.tsx, project-overview.tsx) to find
   // something in the cache rather than reach for a backend that isn't there.
   client.setQueryData([{ url: '/api/docker/detection' }], { enabled: true, projects: [] })
+  // Sizes: the picker's Size column and Settings' "Size on disk" fact read
+  // these (tests/project-disk-usage-*.test.tsx cover them); seeded for the same
+  // reason as every other query here.
+  seedDiskUsage(client, projects.map((p) => p.id))
   for (const p of projects) {
     client.setQueryData([{ url: '/api/projects/:id/sessions', params: { id: p.id } }], [])
   }

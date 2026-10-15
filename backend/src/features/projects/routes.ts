@@ -1,10 +1,12 @@
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import { AppError, errorBody } from '@/lib/errors'
+import { projectDiskUsage } from './disk-usage'
 import {
   createProjectSchema,
   errorSchema,
   gitIdentityInputSchema,
   gitIdentityStateSchema,
+  projectDiskUsageSchema,
   projectSchema,
   updateProjectSchema,
 } from './schema'
@@ -62,6 +64,82 @@ projectsRouter.openapi(
     },
   }),
   async (c) => c.json(await createProject(c.req.valid('json')), 201),
+)
+
+// `/projects/disk-usage` must be registered before `/projects/{id}` below. Both
+// match `GET /projects/disk-usage`, Hono runs matching routes in registration
+// order and the first to answer wins, and `{id}` validates as a uuid — so
+// registered after it, this route is unreachable and every call is a 400.
+projectsRouter.openapi(
+  createRoute({
+    method: 'get',
+    path: '/projects/disk-usage',
+    operationId: 'getProjectsDiskUsage',
+    tags: ['projects'],
+    summary: "Disk usage of every project's folder",
+    description:
+      'One entry per project, in the same order as the project list. Never waits for a ' +
+      'measurement: answers from a cache and starts a background `du` for every project whose ' +
+      'numbers are missing, older than a few minutes, or taken under a different project status. ' +
+      'While one runs, `measuring` is true and the previous numbers (null the first time) are ' +
+      'still returned — poll again until it is false. A project still being set up (status ' +
+      '`pending` or `cloning`) is not measured: its entry stays as it is, with null numbers if it ' +
+      'never was, until its status changes.',
+    responses: { 200: json(z.array(projectDiskUsageSchema), 'Disk usage of every project') },
+  }),
+  async (c) =>
+    c.json(
+      (await listProjects()).map((project) => projectDiskUsage(project)),
+      200,
+    ),
+)
+
+projectsRouter.openapi(
+  createRoute({
+    method: 'get',
+    path: '/projects/{id}/disk-usage',
+    operationId: 'getProjectDiskUsage',
+    tags: ['projects'],
+    summary: "Disk usage of one project's folder",
+    description:
+      'Same shape and behaviour as the list, for one project: answers immediately from a cache ' +
+      'and, when the numbers are missing, stale or taken under a different project status, starts ' +
+      'a background measurement. Poll while `measuring` is true. A project still being set up ' +
+      '(status `pending` or `cloning`) is not measured.',
+    request: { params: idParam },
+    responses: {
+      200: json(projectDiskUsageSchema, 'Disk usage'),
+      404: json(errorSchema, 'Not found'),
+    },
+  }),
+  async (c) => c.json(projectDiskUsage(await getProject(c.req.valid('param').id)), 200),
+)
+
+projectsRouter.openapi(
+  createRoute({
+    method: 'post',
+    path: '/projects/{id}/disk-usage/refresh',
+    operationId: 'refreshProjectDiskUsage',
+    tags: ['projects'],
+    summary: "Re-measure a project's disk usage now",
+    description:
+      'Starts a new measurement even if the cached one is still fresh, and returns immediately ' +
+      'with `measuring: true` and the previous numbers. A measurement already running for this ' +
+      'project is joined, not doubled. Poll `GET /projects/{id}/disk-usage` for the result. A ' +
+      'project still being set up (status `pending` or `cloning`) is not measured, even on ' +
+      'request: still a 200, with the current state and `measuring` true only if a measurement ' +
+      'was already running.',
+    request: { params: idParam },
+    responses: {
+      200: json(
+        projectDiskUsageSchema,
+        'Current state; a measurement was started unless the project is still being set up',
+      ),
+      404: json(errorSchema, 'Not found'),
+    },
+  }),
+  async (c) =>
+    c.json(projectDiskUsage(await getProject(c.req.valid('param').id), { force: true }), 200),
 )
 
 projectsRouter.openapi(
