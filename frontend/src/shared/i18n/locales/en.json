@@ -111,6 +111,7 @@
       "name": "Name",
       "status": "Status",
       "docker": "Docker",
+      "size": "Size",
       "path": "Path",
       "actionsFor": "Actions for {{name}}"
     },
@@ -133,6 +134,16 @@
         "notDetected": "Not detected",
         "openDocker": "Open Docker"
       }
+    },
+    "diskUsage": {
+      "term": "Size on disk",
+      "measuring": "Measuring…",
+      "loadFailed": "Could not load the size",
+      "recalculate": "Recalculate",
+      "breakdown": "Repository {{repo}} · Session worktrees {{worktrees}}",
+      "measuredAt": "Measured {{when}}",
+      "measureFailed": "The last measurement failed: {{reason}}",
+      "refreshFailed": "Could not start a new measurement"
     },
     "gitIdentity": {
       "heading": "Git identity",

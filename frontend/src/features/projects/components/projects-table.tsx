@@ -3,7 +3,9 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { DockerDetectedBadge, useDockerDetection } from '@/features/docker'
 import { ActionsMenu, Code, ConfirmDialog, DataTable, type MenuAction } from '@/shared/components'
+import { useProjectsDiskUsage, useRefetchDiskUsageOnStatusChange } from '../hooks/use-disk-usage'
 import { type Project, useDeleteProject } from '../hooks/use-projects'
+import { ProjectSizeCell } from './project-size-cell'
 import { ProjectStatusBadge } from './project-status'
 
 const columnHelper = createColumnHelper<Project>()
@@ -32,6 +34,17 @@ export function ProjectsTable({
     () => new Map((detection.data?.projects ?? []).map((p) => [p.projectId, p])),
     [detection.data],
   )
+  // Same shape: one list for every project rather than a request per row, and
+  // the hook polls it only while the backend reports a measurement running.
+  const diskUsage = useProjectsDiskUsage()
+  const diskUsageByProject = useMemo(
+    () => new Map((diskUsage.data ?? []).map((u) => [u.projectId, u])),
+    [diskUsage.data],
+  )
+  // Only a failure with nothing to show: a poll that fails while earlier
+  // figures are still cached leaves those figures up.
+  const diskUsageFailed = diskUsage.isError && !diskUsage.data
+  useRefetchDiskUsageOnStatusChange(projects)
   const [pendingDelete, setPendingDelete] = useState<Project | null>(null)
 
   const columns = useMemo(
@@ -74,6 +87,18 @@ export function ProjectsTable({
           )
         },
       }),
+      columnHelper.display({
+        id: 'size',
+        header: () => t('projects.table.size'),
+        meta: { role: 'meta', label: t('projects.table.size') },
+        cell: (info) => (
+          <ProjectSizeCell
+            project={info.row.original}
+            usage={diskUsageByProject.get(info.row.original.id)}
+            loadFailed={diskUsageFailed}
+          />
+        ),
+      }),
       columnHelper.accessor('path', {
         header: () => t('projects.table.path'),
         // Not `role: 'secondary'` — that role now also means "truncate to an
@@ -112,7 +137,7 @@ export function ProjectsTable({
         },
       }),
     ],
-    [t, onOpen, dockerByProject],
+    [t, onOpen, dockerByProject, diskUsageByProject, diskUsageFailed],
   )
 
   const table = useReactTable({ data: projects, columns, getCoreRowModel: getCoreRowModel() })

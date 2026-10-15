@@ -27,6 +27,7 @@ import {
 import { apiErrorMessage } from '../lib/api-error'
 import { isSshRemote } from '../lib/remote-url'
 import { GitIdentityCard } from './git-identity-card'
+import { ProjectDiskUsageFact } from './project-disk-usage-fact'
 import { ProjectStatusBadge } from './project-status'
 import { RecoveryPanel } from './recovery-panel'
 
@@ -111,6 +112,11 @@ export function ProjectOverview({
 
   const facts: DefinitionItem[] = [
     { id: 'path', term: t('projects.meta.path'), description: <Code wrap>{project.path}</Code> },
+    {
+      id: 'diskUsage',
+      term: t('projects.diskUsage.term'),
+      description: <ProjectDiskUsageFact project={project} />,
+    },
     {
       id: 'source',
       term: t('projects.overview.source'),
