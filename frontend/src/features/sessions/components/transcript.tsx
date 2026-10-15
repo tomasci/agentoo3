@@ -27,6 +27,7 @@ import {
   AttachmentTitle,
   AttachmentTrigger,
 } from '@/shared/ui/attachment'
+import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/shared/ui/collapsible'
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/shared/ui/empty'
@@ -452,8 +453,14 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
     return (
       <div className="ml-auto max-w-[min(46rem,100%)] rounded-lg border bg-primary/5 px-3 py-2 wrap-anywhere">
         <span className="mb-1 flex items-baseline justify-between gap-2">
-          <span className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide">
-            {t('sessions.transcript.you')}
+          <span className="flex items-center gap-1.5">
+            <span className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide">
+              {t('sessions.transcript.you')}
+            </span>
+            {/* Only a Q&A row says so: a Code prompt is the ordinary case and
+                stays unlabelled, so the transcript does not grow a "Code" tag
+                on every message of every session. */}
+            {node.mode === 'qa' && <Badge variant="secondary">{t('sessions.turnMode.qa')}</Badge>}
           </span>
           {(promptTime || node.text) && (
             <span className="flex items-center gap-1.5">

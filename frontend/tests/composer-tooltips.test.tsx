@@ -1,5 +1,6 @@
-// The composer's icon-only controls — attach, stop, send — each wrapped in a
-// Base UI Tooltip (components/composer.tsx):
+// The composer's icon-only controls — attach, stop, send, the source toggle —
+// and the Code / Q&A switch's text items, each wrapped in a Base UI Tooltip
+// (components/composer.tsx):
 //
 //   T1  focusing or hovering a control opens a tooltip with its own key;
 //   T2  the wrapped control still does its job (attach clicks the hidden file
@@ -7,7 +8,9 @@
 //       still does nothing;
 //   T3  the wrapped control keeps `data-slot="button"`, which
 //       `TooltipTrigger`'s own `data-slot="tooltip-trigger"` would otherwise
-//       overwrite.
+//       overwrite;
+//   T4  the Code / Q&A switch's text-only items get the same tooltip
+//       treatment, and keep working while a run is in progress.
 //
 // How Base UI tooltips open under happy-dom, found by probing before this was
 // written: focus opens one immediately, with no provider; hover opens one
@@ -47,6 +50,8 @@ const props = (o: Partial<ComposerProps> = {}): ComposerProps => ({
   },
   mode: 'raw',
   onModeChange: (m) => calls.onModeChange.push(m),
+  turnMode: 'code',
+  onTurnModeChange: () => {},
   sending: false,
   canSend: true,
   queueLine: '',
@@ -271,4 +276,69 @@ test('attach, send and stop each keep data-slot="button", not the tooltip trigge
 test('the toggle keeps data-slot="toggle", not the tooltip trigger\'s slot', () => {
   mount(props({ value: 'hello', canStop: true }))
   expect(byLabel(TOGGLE).getAttribute('data-slot')).toBe('toggle')
+})
+
+// --- T4: the Code / Q&A switch -----------------------------------------------
+//
+// Its two items are text, not icons, so there is no aria-label to find them
+// by, and each still gets a Base UI tooltip rather than a `title=` — the same
+// reason as every control above. The group is never disabled, so a tooltip
+// and a click work during a run exactly as they do while idle.
+
+const SWITCH_ITEMS = [
+  { what: 'Code', label: 'sessions.turnMode.code', tip: 'sessions.turnMode.codeTooltip', mode: 'code' },
+  { what: 'Q&A', label: 'sessions.turnMode.qa', tip: 'sessions.turnMode.qaTooltip', mode: 'qa' },
+] as const
+
+const switchItem = (label: string) => {
+  const found = [...container.querySelectorAll<HTMLButtonElement>('[data-slot="toggle-group"] button')].filter(
+    (b) => b.textContent === label,
+  )
+  if (found.length !== 1) throw new Error(`expected one "${label}" switch item, got ${found.length}`)
+  return found[0] as HTMLButtonElement
+}
+
+for (const { what, label, tip } of SWITCH_ITEMS) {
+  test(`focusing the ${what} item opens exactly its tooltip, ${tip}; blurring closes it`, async () => {
+    mount(props())
+    const item = switchItem(label)
+    await focus(item)
+    expect(openTooltips()).toEqual([tip])
+    await blur(item)
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 300))
+    })
+    expect(document.querySelectorAll('[data-slot="tooltip-content"][data-open]').length).toBe(0)
+  })
+
+  test(`hovering the ${what} item under the app's TooltipProvider opens ${tip}`, async () => {
+    mount(props(), withProvider)
+    await hover(switchItem(label))
+    expect(openTooltips()).toEqual([tip])
+  })
+
+  test(`the ${what} item keeps its own slot, and its tooltip is not its accessible name`, () => {
+    mount(props())
+    const item = switchItem(label)
+    expect(item.getAttribute('data-slot')).toBe('toggle-group-item')
+    expect(item.hasAttribute('aria-label')).toBe(false)
+    expect(item.textContent).toBe(label)
+  })
+}
+
+test('the switch items open their tooltips while the session is running', async () => {
+  mount(props({ canStop: true }))
+  await focus(switchItem('sessions.turnMode.qa'))
+  expect(openTooltips()).toEqual(['sessions.turnMode.qaTooltip'])
+})
+
+test('clicking a switch item still reports its mode, never submits or stops', async () => {
+  const picked: string[] = []
+  mount(props({ value: 'hello', canStop: true, onTurnModeChange: (m) => picked.push(m) }))
+  await act(async () => {
+    switchItem('sessions.turnMode.qa').click()
+  })
+  expect(picked).toEqual(['qa'])
+  expect(calls.onSubmit).toBe(0)
+  expect(calls.onStop).toBe(0)
 })

@@ -25,8 +25,10 @@ import { env, hasClaudeCredential } from '@/env'
 import { announcementFor } from '@/features/attachments/manifest'
 import { toManifestFile } from '@/features/attachments/service'
 import { optionsFor } from '@/features/sessions/runner-options'
+import type { TurnMode } from '@/features/sessions/schema'
 import { messageDto, toMessageDto } from '@/features/sessions/service'
 import { type TranscriptMessage, titleFor } from '@/features/sessions/titles'
+import { composeTurnPrompt, turnModeOf } from '@/features/sessions/turn-mode'
 import { publishSessionEvent, subscribeControl } from '@/lib/events'
 import { logger } from '@/lib/logger'
 import { sessionUploadsDir } from '@/lib/paths'
@@ -616,11 +618,17 @@ async function autoContinuationsSincePrompt(sessionId: string): Promise<number> 
  *
  * `auto: true` is what makes the bound above countable, and marks the row as
  * ours so the UI can tell it apart from something the operator typed.
+ *
+ * `mode` is inherited from the turn that spawned this one, not defaulted at
+ * the point of use: a continuation of a Q&A turn that were stored as Code
+ * would run with full write permissions, on a message the operator only ever
+ * meant as a question.
  */
 async function enqueueContinuation(
   sessionId: string,
   text: string,
   parentPromptId?: string,
+  mode: TurnMode = 'code',
 ): Promise<void> {
   const [seqRow] = await db
     .update(sessions)
@@ -636,7 +644,9 @@ async function enqueueContinuation(
       seq: seqRow.seq - 1,
       type: 'prompt',
       pending: true,
-      payload: sanitizeForDb({ text, auto: true }),
+      // `mode` is only written for Q&A, same as in sendMessage: a Code
+      // continuation stays exactly `{ text, auto: true }`.
+      payload: sanitizeForDb({ text, auto: true, ...(mode === 'qa' && { mode }) }),
       // Links the continuation back to the prompt whose turn spawned it, so a
       // chain is reconstructible from the transcript alone with no live
       // observer. Omitted (not set to `null`) when the caller has none to
@@ -696,7 +706,9 @@ interface Recovery {
  * too, and optional for the same reason — it links a continuation back to the
  * prompt whose turn spawned it (see `enqueueContinuation`), and a caller with
  * none to give (only a test invoking `recover` directly, today) simply omits
- * it rather than being forced to pass one.
+ * it rather than being forced to pass one. So is `mode`, for the same reason:
+ * it is the spawning turn's, handed on so the continuation keeps its
+ * permissions, and a caller that omits it gets Code, as before.
  */
 export interface RecoveryOutcome {
   outcome: 'continued' | 'gave_up' | 'recovery_failed'
@@ -708,6 +720,7 @@ export async function recover(
   who: string,
   recovery: Recovery,
   parentPromptId?: string,
+  mode: TurnMode = 'code',
 ): Promise<RecoveryOutcome> {
   // What the session is told happened, if everything below this line fails. It
   // becomes the notice once we know we are nudging rather than stopping.
@@ -717,7 +730,7 @@ export async function recover(
     if (sent < MAX_AUTO_CONTINUATIONS) {
       why = recovery.notice(sent + 1, MAX_AUTO_CONTINUATIONS)
       await appendMessage(sessionId, { type: 'notice', message: why }, who)
-      await enqueueContinuation(sessionId, recovery.instruction, parentPromptId)
+      await enqueueContinuation(sessionId, recovery.instruction, parentPromptId, mode)
       await setStatus(sessionId, 'queued', null)
       await enqueueSessionRun({ sessionId })
       return { outcome: 'continued', detail: why }
@@ -1164,7 +1177,11 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
   }
 
   const userText = String((userRow.payload as { text?: unknown }).text ?? '')
-  const prompt = announcement ? `${announcement}\n${userText}` : userText
+  // Per prompt, not per session: read off the row this turn is answering, so a
+  // Q&A message queued behind a Code turn (or the reverse) gets its own mode
+  // when its turn comes.
+  const mode = turnModeOf(userRow.payload)
+  const prompt = composeTurnPrompt({ announcement, text: userText, mode })
 
   const abortController = new AbortController()
   let interrupted = false
@@ -1221,8 +1238,9 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
   let cancelledOutsideInterrupt = false
 
   try {
-    const options = await optionsFor(claimed, project.slug, abortController, project.sshKeyId)
+    const options = await optionsFor(claimed, project.slug, abortController, project.sshKeyId, mode)
     logger.info(`Session ${sessionId} running in ${options.cwd}`)
+    if (mode === 'qa') logger.info(`Session ${sessionId} running a Q&A (read-only) turn`)
 
     for await (const message of query({ prompt, options })) {
       if (message.type === 'system' && 'subtype' in message) {
@@ -1342,6 +1360,7 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
           giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: a tool call keeps coming back cancelled by the harness, not refused by the operator.`,
         },
         userRow.id,
+        mode,
       )
       verdict = await endTurn(
         userRow.id,
@@ -1382,6 +1401,7 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
           giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: every turn ended with a command still running in the background. Check whether it actually finished.`,
         },
         userRow.id,
+        mode,
       )
       verdict = await endTurn(
         userRow.id,
@@ -1409,6 +1429,7 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
           giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: every turn ended with delegated work still running in the background. Check the worktree for partial work.`,
         },
         userRow.id,
+        mode,
       )
       verdict = await endTurn(
         userRow.id,
@@ -1457,6 +1478,7 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
           giveUp: `Gave up after ${MAX_AUTO_CONTINUATIONS} continuations: the Claude Code process keeps being killed (${detail}). ${kill.cause}`,
         },
         userRow.id,
+        mode,
       )
       verdict = await endTurn(
         userRow.id,

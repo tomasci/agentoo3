@@ -194,3 +194,37 @@ test("appendMessage's published message satisfies the same contract, same key se
   // published straight off `.returning()` had no `files` key at all.
   expect(appended.files).toEqual([])
 })
+
+// --- the mode a message was sent in -------------------------------------------
+//
+// The stored payload is the whole contract between the API and the worker's
+// `turnModeOf`: Code has to stay byte-identical to what every row written before
+// modes existed looks like, and Q&A adds exactly one key. `toStrictEqual`
+// because `toEqual` treats a `mode: undefined` as absent, which is the
+// distinction being pinned.
+
+test('a Code message is stored as exactly { text }, whether mode is omitted or explicit', async () => {
+  await sendMessage(SESSION_ID, 'refactor the loader')
+  expect(messageRows[0]?.payload).toStrictEqual({ text: 'refactor the loader' })
+
+  messageRows.length = 0
+  await sendMessage(SESSION_ID, 'refactor the loader', 'code')
+  expect(messageRows[0]?.payload).toStrictEqual({ text: 'refactor the loader' })
+  expect(Object.keys(messageRows[0]?.payload as Row)).toEqual(['text'])
+})
+
+test("a Q&A message is stored as { text, mode: 'qa' } and published the same way", async () => {
+  const sent = await sendMessage(SESSION_ID, 'why does the loader retry?', 'qa')
+
+  expect(messageRows[0]?.payload).toStrictEqual({ text: 'why does the loader retry?', mode: 'qa' })
+  expect(messageRows[0]?.type).toBe('prompt')
+  expect(messageRows[0]?.pending).toBe(true)
+  expect(sent.payload).toStrictEqual({ text: 'why does the loader retry?', mode: 'qa' })
+
+  const published = publishedEvents.find((e) => e.kind === 'message')?.message as Row
+  expect(published.payload).toStrictEqual({ text: 'why does the loader retry?', mode: 'qa' })
+  // Still a valid transcript message: the extra key lives inside `payload`, and
+  // the instruction itself is never stored — the UI renders `payload.text`.
+  expect(sessionMessageSchema.safeParse(published).success).toBe(true)
+  expect(JSON.stringify(messageRows[0]?.payload)).not.toContain('[Q&A mode]')
+})

@@ -330,6 +330,13 @@
       "showSource": "Edit the markdown source",
       "showFormatted": "Back to formatted view"
     },
+    "turnMode": {
+      "label": "Agent mode",
+      "code": "Code",
+      "qa": "Q&A",
+      "codeTooltip": "The agent works on the task and can change files",
+      "qaTooltip": "The agent only answers, in this same session, and won't change anything"
+    },
     "sendFailed": "Could not send the message",
     "stopFailed": "Could not stop the session",
     "pendingPrompts_one": "{{count}} message waiting",

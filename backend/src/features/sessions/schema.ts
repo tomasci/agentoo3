@@ -288,8 +288,24 @@ export const messagePageSchema = z.object({
 })
 export type SessionMessagePageDto = z.infer<typeof messagePageSchema>
 
+/**
+ * How the agent treats one message. Per message, not per session: the same
+ * session (same SDK resume, same context) can take a Code turn, then a Q&A
+ * one, then a Code one again. Its own schema so the request body, the stored
+ * prompt payload and the worker all share one definition of the legal values.
+ */
+export const turnModeSchema = z.enum(['code', 'qa']).openapi({
+  description:
+    "'code' (default): the agent works normally. 'qa': answer-only — the turn runs read-only " +
+    'and the agent is told to just answer the message, not act on it.',
+})
+export type TurnMode = z.infer<typeof turnModeSchema>
+
 export const sendMessageSchema = z.object({
   text: z.string().min(1).max(100_000),
+  // Optional with a default, so a body that is just { text } — every client
+  // written before this field existed — keeps parsing, and as Code.
+  mode: turnModeSchema.default('code'),
 })
 export type SendMessageInput = z.infer<typeof sendMessageSchema>
 

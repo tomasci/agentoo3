@@ -126,6 +126,8 @@ const props = (o: Partial<ComposerProps> = {}): ComposerProps => ({
   // mode gets its own tests, below.
   mode: 'raw',
   onModeChange: () => {},
+  turnMode: 'code',
+  onTurnModeChange: () => {},
   sending: false,
   canSend: true,
   queueLine: '',
@@ -218,6 +220,11 @@ const SENDING = 'sessions.sending'
 // canStop/value, unlike attach/stop/send, so it shows up in every addon
 // assertion below that pins an exact list of labels.
 const TOGGLE = 'sessions.composerMode.source'
+// The Code / Q&A switch's two items. Text-only, so they have no aria-label to
+// find them by — `labelsIn` below names a button by its text when it has no
+// label, which is what lets the order assertions pin where the switch sits.
+const CODE = 'sessions.turnMode.code'
+const QA = 'sessions.turnMode.qa'
 
 // --- 1. footer layout -------------------------------------------------------
 
@@ -453,14 +460,13 @@ test('typing calls onChange with the new value', async () => {
 
 // --- 5/6/7. expanded mode ---------------------------------------------------
 
-test('a newline moves attach, the toggle and send into one block-end addon, attach first, send last', () => {
+test('a newline moves attach, the switch, the toggle and send into one block-end addon, attach first, send last', () => {
   mount(props({ value: 'line one\nline two' }))
   const block = addon('block-end')
   expect(block).not.toBeNull()
   expect(addon('inline-start')).toBeNull()
   expect(addon('inline-end')).toBeNull()
-  const buttons = qa<HTMLButtonElement>('button', block ?? container)
-  expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual([ATTACH, TOGGLE, SEND])
+  expect(labelsIn(block)).toEqual([ATTACH, CODE, QA, TOGGLE, SEND])
 })
 
 test('expanded is sticky until the value is emptied; rows follow it; the textarea node never remounts', () => {
@@ -515,8 +521,7 @@ test('expanded with empty value but sending shows attach and the sending button 
   mount(props({ value: 'a\nb' }))
   render(props({ value: 'a\nb', sending: true }))
   const block = addon('block-end')
-  const labels = qa('button', block ?? container).map((b) => b.getAttribute('aria-label'))
-  expect(labels).toEqual([ATTACH, TOGGLE, SENDING])
+  expect(labelsIn(block)).toEqual([ATTACH, CODE, QA, TOGGLE, SENDING])
 })
 
 // --- 8. paste / drop --------------------------------------------------------
@@ -883,8 +888,8 @@ beforeEach(() => {
 })
 
 const labelsIn = (scope: Element | null) =>
-  qa<HTMLButtonElement>('button', scope ?? document.createElement('div')).map((b) =>
-    b.getAttribute('aria-label'),
+  qa<HTMLButtonElement>('button', scope ?? document.createElement('div')).map(
+    (b) => b.getAttribute('aria-label') ?? b.textContent,
   )
 
 test('canStop renders an icon-only stop button with an svg; absent or false renders none anywhere', () => {
@@ -913,7 +918,7 @@ test('compact with text: inline-end holds the toggle, then stop, then send, in t
   expect(end).not.toBeNull()
   expect(labelsIn(end)).toEqual([TOGGLE, STOP, SEND])
   // Attach is untouched, still on its own at the start.
-  expect(labelsIn(addon('inline-start'))).toEqual([ATTACH])
+  expect(labelsIn(addon('inline-start'))).toEqual([ATTACH, CODE, QA])
   expect(addon('block-end')).toBeNull()
 })
 
@@ -943,7 +948,7 @@ test('expanded: one block-end addon, attach first, then the toggle, stop and sen
   const block = blocks[0] ?? null
   expect(addon('inline-start')).toBeNull()
   expect(addon('inline-end')).toBeNull()
-  expect(labelsIn(block)).toEqual([ATTACH, TOGGLE, STOP, SEND])
+  expect(labelsIn(block)).toEqual([ATTACH, CODE, QA, TOGGLE, STOP, SEND])
 
   const toggle = byLabel(TOGGLE, block ?? container)
   const stop = byLabel(STOP, block ?? container)
@@ -960,7 +965,7 @@ test('expanded: one block-end addon, attach first, then the toggle, stop and sen
 test('expanded with an emptied-but-whitespace value: attach then the toggle then stop, no send', () => {
   mount(stopProps({ value: 'a\nb', canStop: true }))
   render(stopProps({ value: ' ', canStop: true }))
-  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, TOGGLE, STOP])
+  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, CODE, QA, TOGGLE, STOP])
 })
 
 test('stopping disables stop, and a click on it then calls nothing', () => {
@@ -1039,7 +1044,7 @@ test('toggling canStop never changes compact/expanded mode and never remounts th
   render(stopProps({ value: 'a\nb', canStop: false }))
   expect(textarea()).toBe(ta)
   expect(addon('block-end')).not.toBeNull()
-  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, TOGGLE, SEND])
+  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, CODE, QA, TOGGLE, SEND])
 })
 
 test('focus survives canStop toggling on and off', () => {
@@ -1149,7 +1154,7 @@ test('expanded: no block-start addon exists; the toggle sits in block-end, immed
   expect(addon('block-start')).toBeNull()
   const block = addon('block-end')
   expect(block).not.toBeNull()
-  expect(labelsIn(block)).toEqual([ATTACH, MODE_TOGGLE, SEND])
+  expect(labelsIn(block)).toEqual([ATTACH, CODE, QA, MODE_TOGGLE, SEND])
   const toggle = byLabel(MODE_TOGGLE, block ?? container)
   const send = byLabel(SEND, block ?? container)
   // Grouped with send, the same right-hand cluster stop shares when present
@@ -1265,4 +1270,361 @@ test('visual: a genuine two-line wrap (roughly double the baseline) does expand'
 
 test('visual: scrollHeight alone never trips it — the visual surface never internally overflows itself', () => {
   expect(hasWrapped('visual', { clientHeight: 20, scrollHeight: 100, baseline: 20 })).toBe(false)
+})
+
+// --- 16. the Code / Q&A switch ----------------------------------------------
+//
+// Text-only items in a shadcn ToggleGroup, straight after attach in both
+// layouts. `turnMode` is controlled from outside (`SessionPage` owns it, see
+// hooks/use-turn-mode.ts), so the stay-selected and never-empty cases need a
+// stateful parent the way section 14's `StatefulComposer` does for `mode`.
+
+const TURN_MODE_GROUP = 'sessions.turnMode.label'
+
+const turnGroup = () => {
+  const g = q(`[data-slot="toggle-group"][aria-label="${TURN_MODE_GROUP}"]`)
+  if (!g) throw new Error('no Code / Q&A switch')
+  return g
+}
+const turnItem = (label: string) => {
+  const found = qa<HTMLButtonElement>('button', turnGroup()).filter((b) => b.textContent === label)
+  if (found.length !== 1) throw new Error(`expected one "${label}" item, got ${found.length}`)
+  return found[0] as HTMLButtonElement
+}
+const pressedItems = () =>
+  qa<HTMLButtonElement>('button', turnGroup())
+    .filter((b) => b.getAttribute('aria-pressed') === 'true')
+    .map((b) => b.textContent)
+
+function StatefulTurnComposer(
+  p: Omit<ComposerProps, 'turnMode' | 'onTurnModeChange'> & {
+    initial: 'code' | 'qa'
+    changes: ('code' | 'qa')[]
+  },
+) {
+  const [turnMode, setTurnMode] = useState<'code' | 'qa'>(p.initial)
+  return (
+    <Composer
+      {...p}
+      turnMode={turnMode}
+      onTurnModeChange={(m) => {
+        p.changes.push(m)
+        setTurnMode(m)
+      }}
+    />
+  )
+}
+
+function mountStatefulTurn(initial: 'code' | 'qa', changes: ('code' | 'qa')[], o: Partial<ComposerProps> = {}) {
+  container = document.createElement('div')
+  document.body.append(container)
+  root = createRoot(container)
+  mounted = true
+  const { turnMode: _t, onTurnModeChange: _c, ...rest } = props(o)
+  act(() => {
+    root?.render(
+      <I18nextProvider i18n={cimode}>
+        <StatefulTurnComposer {...rest} initial={initial} changes={changes} />
+      </I18nextProvider>,
+    )
+  })
+}
+
+test('the switch is one labelled group whose only items are Code then Q&A, text only, no icon', () => {
+  mount(props())
+  const group = turnGroup()
+  expect(group.getAttribute('role')).toBe('group')
+  const items = qa<HTMLButtonElement>('button', group)
+  expect(items.map((b) => b.textContent)).toEqual([CODE, QA])
+  expect(qa('svg', group).length).toBe(0)
+  for (const item of items) {
+    expect(item.getAttribute('type')).toBe('button')
+    expect(item.getAttribute('data-slot')).toBe('toggle-group-item')
+  }
+})
+
+test('compact: the switch is the next sibling of attach, inside the inline-start addon', () => {
+  mount(props({ value: 'hello' }))
+  const attach = byLabel(ATTACH)
+  expect(addon('inline-start')?.contains(attach)).toBe(true)
+  expect(attach?.nextElementSibling).toBe(turnGroup())
+  expect(addon('inline-start')?.contains(turnGroup())).toBe(true)
+  // Nothing of it leaks into the right-hand addon.
+  expect(addon('inline-end')?.contains(turnGroup())).toBe(false)
+})
+
+test('expanded: attach and the switch share the left cluster, and the right cluster stays last', () => {
+  mount(props({ value: 'line one\nline two', canStop: true }))
+  const block = addon('block-end')
+  const attach = byLabel(ATTACH)
+  const group = turnGroup()
+  expect(block?.contains(group)).toBe(true)
+  expect(attach?.nextElementSibling).toBe(group)
+  expect(attach?.parentElement).toBe(group.parentElement)
+  // `justify-between` only pushes toggle/stop/send right if the left side is
+  // one child and the right side another.
+  expect(block?.children.length).toBe(2)
+  expect(block?.firstElementChild).toBe(group.parentElement)
+  const right = block?.lastElementChild
+  expect(right?.contains(byLabel(SEND))).toBe(true)
+  expect(right?.contains(group)).toBe(false)
+})
+
+test('the switch is rendered in both layouts without ever being mounted twice', () => {
+  mount(props({ value: '' }))
+  expect(qa('[data-slot="toggle-group"]').length).toBe(1)
+  render(props({ value: 'a\nb' }))
+  expect(qa('[data-slot="toggle-group"]').length).toBe(1)
+})
+
+test('Code is pressed by default; turnMode "qa" presses Q&A instead, and only it', () => {
+  mount(props())
+  expect(pressedItems()).toEqual([CODE])
+  expect(turnItem(CODE).getAttribute('aria-pressed')).toBe('true')
+  expect(turnItem(QA).getAttribute('aria-pressed')).toBe('false')
+  render(props({ turnMode: 'qa' }))
+  expect(pressedItems()).toEqual([QA])
+})
+
+test('clicking Q&A calls onTurnModeChange("qa") once, and never onSubmit', () => {
+  const picked: string[] = []
+  mount(props({ onTurnModeChange: (m) => picked.push(m) }))
+  act(() => {
+    turnItem(QA).click()
+  })
+  expect(picked).toEqual(['qa'])
+  expect(calls.onSubmit).toBe(0)
+})
+
+test('clicking the already-selected item calls nothing', () => {
+  const picked: string[] = []
+  mount(props({ turnMode: 'qa', onTurnModeChange: (m) => picked.push(m) }))
+  act(() => {
+    turnItem(QA).click()
+  })
+  expect(picked).toEqual([])
+  expect(pressedItems()).toEqual([QA])
+})
+
+test('the selection can never be emptied: re-clicking the selected item leaves it selected', () => {
+  const changes: ('code' | 'qa')[] = []
+  mountStatefulTurn('code', changes)
+  act(() => {
+    turnItem(QA).click()
+  })
+  expect(pressedItems()).toEqual([QA])
+  act(() => {
+    turnItem(QA).click()
+  })
+  act(() => {
+    turnItem(QA).click()
+  })
+  expect(pressedItems()).toEqual([QA])
+  act(() => {
+    turnItem(CODE).click()
+  })
+  expect(pressedItems()).toEqual([CODE])
+  act(() => {
+    turnItem(CODE).click()
+  })
+  expect(pressedItems()).toEqual([CODE])
+  expect(changes).toEqual(['qa', 'code'])
+})
+
+test('the switch is operable while the session is running or a send is in flight', () => {
+  for (const o of [{ canStop: true }, { sending: true, value: 'hello' }, { canSend: false }]) {
+    const picked: string[] = []
+    mount(props({ ...o, onTurnModeChange: (m) => picked.push(m) }))
+    const items = qa<HTMLButtonElement>('button', turnGroup())
+    for (const item of items) {
+      expect(item.disabled).toBe(false)
+      expect(item.hasAttribute('disabled')).toBe(false)
+    }
+    expect(turnGroup().hasAttribute('data-disabled')).toBe(false)
+    act(() => {
+      turnItem(QA).click()
+    })
+    expect(picked).toEqual(['qa'])
+    unmount()
+    document.body.replaceChildren()
+  }
+})
+
+test('the items are keyboard reachable: one is in the tab order and ArrowRight moves focus to the next', async () => {
+  mount(props())
+  const items = qa<HTMLButtonElement>('button', turnGroup())
+  expect(items.some((b) => b.tabIndex === 0)).toBe(true)
+  const [first, second] = items
+  if (!first || !second) throw new Error('expected two items')
+  await act(async () => {
+    first.focus()
+  })
+  expect(document.activeElement).toBe(first)
+  await act(async () => {
+    first.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+  })
+  expect(document.activeElement).toBe(second)
+})
+
+test('mousedown on an item is default-prevented, so the caret stays in the text surface', () => {
+  mount(props({ mode: 'raw' }))
+  const ta = textarea()
+  ta.focus()
+  for (const label of [CODE, QA]) {
+    const ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true })
+    act(() => {
+      turnItem(label).dispatchEvent(ev)
+    })
+    expect(ev.defaultPrevented).toBe(true)
+  }
+  expect(document.activeElement).toBe(ta)
+})
+
+test('the items match the icon-xs buttons beside them: h-6 and text-xs, not shadcn sm\'s h-7', () => {
+  mount(props())
+  for (const label of [CODE, QA]) {
+    const item = turnItem(label)
+    expect(item.classList.contains('h-6')).toBe(true)
+    expect(item.classList.contains('h-7')).toBe(false)
+    expect(item.classList.contains('text-xs')).toBe(true)
+  }
+})
+
+test('the switch has no tooltip trigger slot of its own left on its items', () => {
+  mount(props())
+  expect(qa('[data-slot="tooltip-trigger"]', turnGroup()).length).toBe(0)
+})
+
+// --- 16b. the switch: keyboard selection and the expanded layout while running --
+//
+// Enter is not covered here: a native <button> turns Enter into a click in a
+// real browser, but happy-dom does not emulate that, so a test of it here would
+// pin the DOM shim rather than the composer.
+
+const key = async (el: HTMLElement, k: string) => {
+  await act(async () => {
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }))
+    el.dispatchEvent(new KeyboardEvent('keyup', { key: k, bubbles: true, cancelable: true }))
+  })
+}
+
+test('keyboard: ArrowRight to Q&A then Space selects it; ArrowLeft back to Code then Space selects Code', async () => {
+  const changes: ('code' | 'qa')[] = []
+  mountStatefulTurn('code', changes)
+  const code = turnItem(CODE)
+  await act(async () => {
+    code.focus()
+  })
+  await key(code, 'ArrowRight')
+  expect(document.activeElement).toBe(turnItem(QA))
+  // Moving focus alone selects nothing.
+  expect(changes).toEqual([])
+  expect(pressedItems()).toEqual([CODE])
+
+  await key(turnItem(QA), ' ')
+  expect(changes).toEqual(['qa'])
+  expect(pressedItems()).toEqual([QA])
+
+  await key(turnItem(QA), 'ArrowLeft')
+  expect(document.activeElement).toBe(turnItem(CODE))
+  await key(turnItem(CODE), ' ')
+  expect(changes).toEqual(['qa', 'code'])
+  expect(pressedItems()).toEqual([CODE])
+})
+
+test('keyboard: Space on the already-selected item keeps it selected and reports nothing', async () => {
+  const changes: ('code' | 'qa')[] = []
+  mountStatefulTurn('qa', changes)
+  const item = turnItem(QA)
+  await act(async () => {
+    item.focus()
+  })
+  await key(item, ' ')
+  expect(changes).toEqual([])
+  expect(pressedItems()).toEqual([QA])
+})
+
+test('keyboard: Space on an item never submits, even with a sendable draft', async () => {
+  const changes: ('code' | 'qa')[] = []
+  mountStatefulTurn('code', changes, { value: 'a draft', canSend: true })
+  const item = turnItem(QA)
+  await act(async () => {
+    item.focus()
+  })
+  await key(item, ' ')
+  expect(changes).toEqual(['qa'])
+  expect(calls.onSubmit).toBe(0)
+})
+
+test('expanded and running: the switch is still enabled, text only, and clicking it works', () => {
+  const picked: string[] = []
+  mount(props({ value: 'line one\nline two', canStop: true, onTurnModeChange: (m) => picked.push(m) }))
+  // Really the expanded layout, not the compact one.
+  expect(addon('block-end')?.contains(turnGroup())).toBe(true)
+  expect(addon('inline-start')).toBeFalsy()
+  expect(qa('svg', turnGroup()).length).toBe(0)
+  for (const item of qa<HTMLButtonElement>('button', turnGroup())) {
+    expect(item.disabled).toBe(false)
+    expect(item.textContent?.length).toBeGreaterThan(0)
+  }
+  act(() => {
+    turnItem(QA).click()
+  })
+  expect(picked).toEqual(['qa'])
+  expect(calls.onSubmit).toBe(0)
+})
+
+test('a selected Q&A survives the compact -> expanded reflow (same pressed item after the newline)', () => {
+  const changes: ('code' | 'qa')[] = []
+  mountStatefulTurn('code', changes, { value: 'one line' })
+  act(() => {
+    turnItem(QA).click()
+  })
+  expect(pressedItems()).toEqual([QA])
+  expect(addon('inline-start')?.contains(turnGroup())).toBe(true)
+  // The stateful parent owns turnMode; re-rendering with a multi-line value
+  // flips the layout, which must not reset what was picked.
+  const { turnMode: _t, onTurnModeChange: _c, ...rest } = props({ value: 'one line\nand another' })
+  act(() => {
+    root?.render(
+      <I18nextProvider i18n={cimode}>
+        <StatefulTurnComposer {...rest} initial="code" changes={changes} />
+      </I18nextProvider>,
+    )
+  })
+  expect(addon('block-end')?.contains(turnGroup())).toBe(true)
+  expect(pressedItems()).toEqual([QA])
+  expect(changes).toEqual(['qa'])
+})
+
+// --- 17. the empty placeholder stays on one line ----------------------------
+//
+// Pinned as classes, not geometry: happy-dom has no layout, so nothing here can
+// see a placeholder wrap. What these guard is the *scope* of the fix — it must
+// reach the placeholder only. A bare `truncate` / `whitespace-nowrap` /
+// `min-w-0` on the surface itself would also stop typed text from wrapping,
+// which is what the expanded-layout check (`hasWrapped`) keys off.
+
+test('raw mode, empty: the placeholder is truncated, and only the placeholder', () => {
+  mount(props({ mode: 'raw', value: '' }))
+  const ta = textarea()
+  expect(ta.classList.contains('placeholder:truncate')).toBe(true)
+  expect(ta.classList.contains('placeholder-shown:min-w-0')).toBe(true)
+  // Unscoped, these would change how typed text wraps.
+  expect(ta.classList.contains('truncate')).toBe(false)
+  expect(ta.classList.contains('whitespace-nowrap')).toBe(false)
+  expect(ta.classList.contains('min-w-0')).toBe(false)
+})
+
+test('visual mode, empty: the editor host truncates only the placeholder', () => {
+  mount(props({ mode: 'visual', value: '' }))
+  // The host is the element `MarkdownEditor` hands its `className` to — the
+  // parent of the `.cm-editor` it mounts.
+  const host = cmEditorEl()?.parentElement
+  if (!host) throw new Error('no editor host')
+  expect(host.classList.contains('[&_.cm-placeholder]:w-0')).toBe(true)
+  expect(host.classList.contains('[&_.cm-placeholder]:min-w-full')).toBe(true)
+  expect(host.classList.contains('[&_.cm-placeholder]:truncate')).toBe(true)
+  // Unscoped, it would also stop typed text from wrapping.
+  expect(host.classList.contains('truncate')).toBe(false)
 })

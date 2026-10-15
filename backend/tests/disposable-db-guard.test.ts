@@ -41,6 +41,8 @@ const NOT_DB_CHILDREN: Record<string, string> = {
   'runner-options-env-child.ts':
     'fakes every service optionsFor reads through, as runner-options-mcp-child.ts does',
   'runner-options-mcp-child.ts': 'fakes every service optionsFor reads through; no @/db/client',
+  'runner-options-turn-mode-child.ts':
+    'fakes every service optionsFor reads through, as runner-options-mcp-child.ts does',
   'system-ports-verify-child.ts':
     'imports setup-env.ts first, which overwrites DATABASE_URL with an unreachable dummy',
 }

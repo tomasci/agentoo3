@@ -46,6 +46,7 @@ import {
   useSession,
   useSessionMessages,
 } from '../hooks/use-sessions'
+import { useTurnMode } from '../hooks/use-turn-mode'
 import { sessionMessagesKey } from '../lib/message-cache'
 import { STATUS_TONE } from '../lib/status'
 import { Composer } from './composer'
@@ -210,6 +211,9 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // markdown expects every session's composer to open that way, not just
   // the one they were last on.
   const [composerMode, setComposerMode] = useAtom(composerModeAtom)
+  // Code or Q&A for the next message — per session and in memory only, see
+  // use-turn-mode.ts.
+  const [turnMode, setTurnMode] = useTurnMode(sessionId)
 
   const [error, setError] = useState<string | null>(null)
   const scroller = useRef<HTMLDivElement>(null)
@@ -680,8 +684,17 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
       .filter((u) => u.status === 'done' && u.serverFile)
       .map((u) => u.serverFile?.id)
       .filter((id): id is string => id !== undefined)
+    // The mode is read here, at send time, so a message queued behind a
+    // running turn carries the mode it was sent with, not whatever the switch
+    // says by the time that turn finishes. Code sends no `mode` at all — the
+    // body stays exactly the `{ text }` it always was, and the backend's own
+    // default is what makes that Code. The text itself is never touched: what
+    // the agent is told about a Q&A turn is the backend's to add.
     send.mutate(
-      { path: { id: sessionId }, body: { text: value } },
+      {
+        path: { id: sessionId },
+        body: turnMode === 'qa' ? { text: value, mode: turnMode } : { text: value },
+      },
       {
         onSuccess: () => {
           if (attachedFileIds.length > 0) uploads.clearSent(attachedFileIds)
@@ -1112,6 +1125,8 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
         onSubmit={submit}
         mode={composerMode}
         onModeChange={setComposerMode}
+        turnMode={turnMode}
+        onTurnModeChange={setTurnMode}
         sending={send.isPending}
         canSend={!send.isPending && draft.text.trim().length > 0 && uploads.pendingCount === 0}
         canStop={busy}

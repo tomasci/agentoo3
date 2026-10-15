@@ -30,6 +30,9 @@ let written: Row[] = []
 let statuses: { status: string; lastError?: unknown }[] = []
 /** Turns queued to run. */
 let queued: string[] = []
+/** What each turn handed the SDK's `query`, and what it asked `optionsFor` for. */
+let queryCalls: { prompt: string }[] = []
+let optionsCalls: unknown[][] = []
 
 /**
  * Failure switches, each standing for a database or queue dying mid-recovery.
@@ -245,7 +248,10 @@ mock.module(`${B}/queue/index.ts`, () => ({
 // imports, so the stub has to export it too or importing that module (below)
 // fails to resolve the name against this mock rather than the real package.
 mock.module('@anthropic-ai/claude-agent-sdk', () => ({
-  query: () => turnBehaviour(),
+  query: (args: { prompt: string }) => {
+    queryCalls.push(args)
+    return turnBehaviour()
+  },
   SYSTEM_PROMPT_DYNAMIC_BOUNDARY: '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__',
 }))
 
@@ -258,11 +264,15 @@ const realRunnerOptions = await import(`${B}/features/sessions/runner-options.ts
 const realOptionsFor = realRunnerOptions.optionsFor
 mock.module(`${B}/features/sessions/runner-options.ts`, () => ({
   ...realRunnerOptions,
-  optionsFor: async (...args: Parameters<typeof realOptionsFor>) =>
-    quiet ? { cwd: '/tmp' } : realOptionsFor(...args),
+  optionsFor: async (...args: Parameters<typeof realOptionsFor>) => {
+    if (!quiet) return realOptionsFor(...args)
+    optionsCalls.push(args)
+    return { cwd: '/tmp' }
+  },
 }))
 
 const { recover, runTurn } = await import(`${B}/queue/session-run.worker.ts`)
+const { QA_MODE_INSTRUCTION } = await import(`${B}/features/sessions/turn-mode.ts`)
 
 const auto = (n: number) => Array.from({ length: n }, () => ({ payload: { auto: true } }))
 const spoken = { payload: { text: 'do the thing' } }
@@ -281,6 +291,8 @@ afterEach(() => {
   written = []
   statuses = []
   queued = []
+  queryCalls = []
+  optionsCalls = []
   insertFails = false
   messageReadFails = false
   statusWriteFails = false
@@ -1084,3 +1096,266 @@ test('giving up on a repeatedly lost background command says so in the transcrip
   expect(queued).toEqual([])
 })
 
+
+// --- Q&A mode ------------------------------------------------------------------
+//
+// The mode is per prompt, and a continuation is not the operator's prompt: it is
+// spawned by a turn, so unless it inherits that turn's mode it would run with
+// full write permissions for a message that was only ever a question.
+
+const QA_PROMPT = { id: 'msg-1', seq: 4, payload: { text: 'why is the loader slow?', mode: 'qa' } }
+
+test('a Q&A turn asks optionsFor for Q&A and hands the SDK the instruction before the text', async () => {
+  pending = [QA_PROMPT]
+  turnBehaviour = () =>
+    (async function* () {
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(optionsCalls).toHaveLength(1)
+  expect(optionsCalls[0]?.[4]).toBe('qa')
+  expect(queryCalls[0]?.prompt).toBe(`${QA_MODE_INSTRUCTION}\n\nwhy is the loader slow?`)
+  expect(statuses.at(-1)?.status).toBe('completed')
+})
+
+test('a Code turn, with or without the key, runs as Code with the text untouched', async () => {
+  turnBehaviour = () =>
+    (async function* () {
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+    })()
+
+  for (const payload of [{ text: 'do the thing' }, { text: 'do the thing', mode: 'code' }]) {
+    pending = [{ id: 'msg-1', seq: 4, payload }]
+    await runTurn({ sessionId: 'sess-1' })
+  }
+
+  expect(optionsCalls.map((args) => args[4])).toEqual(['code', 'code'])
+  expect(queryCalls.map((q) => q.prompt)).toEqual(['do the thing', 'do the thing'])
+})
+
+test('a prompt whose mode is garbage runs as Code rather than failing the turn', async () => {
+  pending = [{ id: 'msg-1', seq: 4, payload: { text: 'do the thing', mode: { qa: true } } }]
+  turnBehaviour = () =>
+    (async function* () {
+      yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+    })()
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(optionsCalls[0]?.[4]).toBe('code')
+  expect(queryCalls[0]?.prompt).toBe('do the thing')
+})
+
+test('a continuation of a Q&A turn is stored as Q&A', async () => {
+  transcript = [spoken]
+  await recover('sess-1', 'orchestrator', RECOVERY, 'msg-1', 'qa')
+
+  const prompt = rowsOfType('prompt')[0]
+  expect(prompt?.payload).toStrictEqual({ text: RECOVERY.instruction, auto: true, mode: 'qa' })
+  expect(prompt?.continuesMessageId).toBe('msg-1')
+  expect(queued).toEqual(['sess-1'])
+})
+
+test('a continuation of a Code turn is stored exactly as it always was', async () => {
+  // Not `mode: 'code'` and not `mode: undefined` — the key is absent, so every
+  // existing reader of these rows sees the shape it always saw.
+  transcript = [spoken]
+  await recover('sess-1', 'orchestrator', RECOVERY, 'msg-1', 'code')
+  await recover('sess-1', 'orchestrator', RECOVERY, 'msg-1')
+  await recover('sess-1', 'orchestrator', RECOVERY)
+
+  const prompts = rowsOfType('prompt')
+  expect(prompts).toHaveLength(3)
+  for (const prompt of prompts) {
+    expect(prompt.payload).toStrictEqual({ text: RECOVERY.instruction, auto: true })
+  }
+})
+
+test('every recovery path out of a Q&A turn carries the mode into its continuation', async () => {
+  pending = [QA_PROMPT]
+  transcript = [spoken]
+
+  const scenarios: [string, () => AsyncIterable<unknown>][] = [
+    ['a killed process', () => throwing(KILLED)],
+    [
+      'delegated work lost at the end of the turn',
+      () =>
+        (async function* () {
+          yield {
+            type: 'result',
+            subtype: 'success',
+            total_cost_usd: 0,
+            subagent_stats: { spawned: 1, completed: 0, killed: { system: 1 }, started_in_background: 1 },
+          }
+        })(),
+    ],
+    [
+      'a background command lost at the end of the turn',
+      () =>
+        (async function* () {
+          yield {
+            type: 'system',
+            subtype: 'task_started',
+            task_id: 't1',
+            task_type: 'local_bash',
+            is_backgrounded: true,
+          }
+          yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+          yield {
+            type: 'system',
+            subtype: 'task_updated',
+            task_id: 't1',
+            patch: { status: 'killed' },
+          }
+        })(),
+    ],
+    [
+      'a tool call the harness cancelled',
+      () =>
+        (async function* () {
+          yield {
+            type: 'user',
+            message: { role: 'user', content: [] },
+            parent_tool_use_id: null,
+            tool_result_meta: [{ id: 'toolu_01', non_execution_kind: 'cancelled' }],
+          }
+          yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+        })(),
+    ],
+  ]
+
+  for (const [label, behaviour] of scenarios) {
+    written = []
+    turnBehaviour = behaviour
+    await runTurn({ sessionId: 'sess-1' })
+
+    const continuation = rowsOfType('prompt')[0]
+    expect(continuation?.payload, label).toMatchObject({ auto: true, mode: 'qa' })
+    expect(continuation?.continuesMessageId, label).toBe('msg-1')
+  }
+})
+
+test('the same recovery out of a Code turn leaves the continuation as plain { text, auto }', async () => {
+  transcript = [spoken]
+  turnBehaviour = () => throwing(KILLED)
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(rowsOfType('prompt')[0]?.payload).toStrictEqual({
+    text: expect.stringContaining('cut short'),
+    auto: true,
+  })
+})
+
+// --- consecutive turns in one session switching mode ---------------------------
+//
+// The worker holds no mode between turns: each one is read off the prompt row it
+// claims. These run two (or three) real `runTurn`s back to back on the same
+// session and pin that the mode handed to `optionsFor` and the prompt handed to
+// `query` follow each row, so nothing from a Q&A turn survives into the Code
+// turn after it, and the reverse.
+
+const succeeds = () =>
+  (async function* () {
+    yield { type: 'result', subtype: 'success', total_cost_usd: 0 }
+  })()
+
+const CODE_ROW = { id: 'msg-2', seq: 6, payload: { text: 'now fix it' } }
+
+test('Q&A then Code in one session: the Code turn gets Code options and the bare text', async () => {
+  turnBehaviour = succeeds
+
+  pending = [QA_PROMPT]
+  await runTurn({ sessionId: 'sess-1' })
+  pending = [CODE_ROW]
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(optionsCalls.map((args) => args[4])).toEqual(['qa', 'code'])
+  expect(queryCalls.map((q) => q.prompt)).toEqual([
+    `${QA_MODE_INSTRUCTION}\n\nwhy is the loader slow?`,
+    'now fix it',
+  ])
+  // Same session both times: Q&A is not a side conversation.
+  expect(optionsCalls.map((args) => (args[0] as Row).id)).toEqual(['sess-1', 'sess-1'])
+  expect(statuses.filter((s) => s.status === 'completed')).toHaveLength(2)
+})
+
+test('Code then Q&A then Code: the mode flips on every turn and back again', async () => {
+  turnBehaviour = succeeds
+
+  for (const row of [CODE_ROW, QA_PROMPT, CODE_ROW]) {
+    pending = [row]
+    await runTurn({ sessionId: 'sess-1' })
+  }
+
+  expect(optionsCalls.map((args) => args[4])).toEqual(['code', 'qa', 'code'])
+  expect(queryCalls[0]?.prompt).toBe('now fix it')
+  expect(queryCalls[1]?.prompt).toBe(`${QA_MODE_INSTRUCTION}\n\nwhy is the loader slow?`)
+  expect(queryCalls[2]?.prompt).toBe('now fix it')
+  for (const i of [0, 2]) expect(queryCalls[i]?.prompt).not.toContain('[Q&A mode]')
+})
+
+test('a Q&A message queued behind a running Code turn drains as Q&A, and the Code turn stayed Code', async () => {
+  // The first turn is Code. While it runs, a Q&A message lands (the turn's drain
+  // check sees it), so the session is re-queued rather than going idle. The next
+  // turn claims that row and must run it as Q&A.
+  turnBehaviour = succeeds
+  pending = [CODE_ROW]
+  arrivedDuringTurn = [{ id: 'msg-3' }]
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(statuses.at(-1)?.status).toBe('queued')
+  expect(queued).toEqual(['sess-1'])
+
+  pending = [{ id: 'msg-3', seq: 8, payload: { text: 'what did you just change?', mode: 'qa' } }]
+  arrivedDuringTurn = []
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(optionsCalls.map((args) => args[4])).toEqual(['code', 'qa'])
+  expect(queryCalls.map((q) => q.prompt)).toEqual([
+    'now fix it',
+    `${QA_MODE_INSTRUCTION}\n\nwhat did you just change?`,
+  ])
+  expect(statuses.at(-1)?.status).toBe('completed')
+})
+
+test('a continuation written by a killed Q&A turn runs as Q&A when the next turn claims it', async () => {
+  // End to end through the stored row: the killed Q&A turn writes the
+  // continuation, and that exact payload is what the next turn claims.
+  transcript = [spoken]
+  pending = [QA_PROMPT]
+  turnBehaviour = () => throwing(KILLED)
+  await runTurn({ sessionId: 'sess-1' })
+
+  const continuation = rowsOfType('prompt')[0]
+  if (!continuation) throw new Error('the killed Q&A turn wrote no continuation')
+
+  pending = [{ id: 'msg-cont', seq: 9, payload: continuation.payload }]
+  turnBehaviour = succeeds
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(optionsCalls.map((args) => args[4])).toEqual(['qa', 'qa'])
+  expect(queryCalls[1]?.prompt).toBe(
+    `${QA_MODE_INSTRUCTION}\n\n${String((continuation.payload as Row).text)}`,
+  )
+})
+
+test('a continuation written by a killed Code turn runs as Code when the next turn claims it', async () => {
+  transcript = [spoken]
+  pending = [CODE_ROW]
+  turnBehaviour = () => throwing(KILLED)
+  await runTurn({ sessionId: 'sess-1' })
+
+  const continuation = rowsOfType('prompt')[0]
+  if (!continuation) throw new Error('the killed Code turn wrote no continuation')
+
+  pending = [{ id: 'msg-cont', seq: 9, payload: continuation.payload }]
+  turnBehaviour = succeeds
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(optionsCalls.map((args) => args[4])).toEqual(['code', 'code'])
+  expect(queryCalls[1]?.prompt).toBe(String((continuation.payload as Row).text))
+})
