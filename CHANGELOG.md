@@ -2,6 +2,11 @@
 
 The What's new screen inside agentoo shows this same list after each update — reopen it any time via the version number in the status bar. Newest release first. Also available in [Russian](CHANGELOG.ru.md).
 
+## 1.4.176 — 2026-10-15
+
+### Improved
+- Database backups now keep the newest 5 by default (was 14), since each one is a full copy of the database; set BACKUP_RETENTION_COUNT to change it.
+
 ## 1.4.175 — 2026-10-15
 
 ### New
