@@ -72,6 +72,12 @@ SOURCES_DIR="${SOURCES_DIR:-$REPO_ROOT/sources}"
 # 68-setup-backend.sh for why.
 ATTACHMENTS_DIR="${ATTACHMENTS_DIR:-$REPO_ROOT/attachments}"
 
+# Scheduled Postgres backups (pg_dump --format=custom), written by the worker
+# once a day; see the "Backups" section of README.md. 0700 like
+# ATTACHMENTS_DIR, and for a stronger reason: every file in it is a full copy
+# of the database.
+BACKUPS_DIR="${BACKUPS_DIR:-$REPO_ROOT/backups}"
+
 # Generated ssh keys. Beside the other data directories rather than under a
 # home directory: the backend's fallback is ~/.ssh/agentoo, and ~ depends on who
 # is running — keys written while the services ran as root landed in

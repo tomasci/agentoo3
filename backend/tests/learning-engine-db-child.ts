@@ -18,6 +18,11 @@ import { mock, spyOn } from 'bun:test'
 // because it imports the whole app (createApp) instead, which pulls it in
 // for free.
 import '@hono/zod-openapi'
+import { assertDisposableTestDb } from './disposable-db-guard'
+
+// Before anything below can reach DATABASE_URL: refuse to run unless it is a
+// throwaway cluster from pg-cluster.ts (see disposable-db-guard.ts).
+await assertDisposableTestDb()
 
 const SRC = new URL('../src', import.meta.url).pathname
 

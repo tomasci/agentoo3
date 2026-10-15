@@ -20,6 +20,11 @@ import { randomUUID } from 'node:crypto'
 import { closeDb, db } from '@/db/client'
 import { projects } from '@/db/schema'
 import { listStoredPaths, putEnvFile } from '@/features/env-files/service'
+import { assertDisposableTestDb } from './disposable-db-guard'
+
+// Before anything below can reach DATABASE_URL: refuse to run unless it is a
+// throwaway cluster from pg-cluster.ts (see disposable-db-guard.ts).
+await assertDisposableTestDb()
 
 const facts: Record<string, unknown> = {}
 

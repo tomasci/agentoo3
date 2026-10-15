@@ -145,6 +145,13 @@ services:
       ATTACHMENTS_DIR: /app/attachments
       SOURCES_DIR: /app/sources
       SSH_KEYS_DIR: /app/keys
+      # Scheduled database backups are off in this stack: the image has no
+      # pg_dump, and the throwaway dev database is not worth backing up. Should
+      # you turn them on, BACKUPS_DIR keeps them under the bind-mounted repo
+      # (gitignored) instead of env.ts's /opt/agentoo/backups default, which
+      # is the host install's own path, not anything in this container.
+      BACKUPS_ENABLED: "false"
+      BACKUPS_DIR: /app/backups
       # z.coerce.number() on env.ts's LOG_LEVEL: the .env.example's own
       # LOG_LEVEL=info would coerce to NaN and the process would exit(1) — a
       # number, not that placeholder, has to land here. 3 is env.ts's default.

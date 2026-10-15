@@ -16,6 +16,11 @@ import { mock } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { assertDisposableTestDb } from './disposable-db-guard'
+
+// Before anything below can reach DATABASE_URL: refuse to run unless it is a
+// throwaway cluster from pg-cluster.ts (see disposable-db-guard.ts).
+await assertDisposableTestDb()
 
 mock.module('@anthropic-ai/claude-agent-sdk', () => ({
   query: () => (async function* () {})(),

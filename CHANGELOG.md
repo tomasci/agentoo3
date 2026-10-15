@@ -2,6 +2,18 @@
 
 The What's new screen inside agentoo shows this same list after each update — reopen it any time via the version number in the status bar. Newest release first. Also available in [Russian](CHANGELOG.ru.md).
 
+## 1.4.175 — 2026-10-15
+
+### New
+- agentoo now backs up its database every day and keeps the 14 newest backups, so lost data can be restored; the Backups section of the README shows how to restore one or take one by hand.
+
+### Fixed
+- The database now refuses a single command that would delete more than one project, the sessions, ideas or automations of more than one project, or the messages or attachments of more than one session, or empty any of those tables, so a stray script can no longer wipe agentoo's data.
+- Sessions, and the git hooks and docker compose commands agentoo runs, no longer get agentoo's own database and Redis passwords, so a script an agent runs cannot use them to reach agentoo's live data.
+- Tools like psql started in a session can no longer log in to agentoo's database through PostgreSQL's local socket without a password: the installer now sets PostgreSQL to ask for it there too, and logging in as the postgres administrator works as before.
+- Deleting a project with a long history now takes moments instead of hours.
+- agentoo's own database tests now refuse to run against anything but a throwaway test database.
+
 ## 1.4.174 — 2026-10-13
 
 ### Improved

@@ -12,6 +12,8 @@ export const QUEUE_IDEA_HANDOFF_SWEEP = 'idea-handoff-sweep'
 export const QUEUE_AUTOMATION_SWEEP = 'automation-sweep'
 export const QUEUE_DOCKER_OP = 'docker-op'
 export const QUEUE_EDITOR_OP = 'editor-op'
+// Scheduled Postgres backups — see features/backups/service.ts.
+export const QUEUE_DB_BACKUP = 'db-backup'
 // The learning-schedule queue: the daily tick that decides *whether* a
 // learning run is due and calls createLearningRun (features/learning/runs.ts)
 // if so. See queue/learning-schedule.worker.ts for the reconcile loop that
@@ -533,5 +535,73 @@ export async function ensureEditorReapSchedule() {
     'editor-reap-sweep',
     { every: EDITOR_REAP_INTERVAL_MS },
     { name: 'reap', data: { kind: 'reap', reason: 'scheduled' } },
+  )
+}
+
+/**
+ * A job on the database-backup queue: `'scheduled'` from the daily job
+ * scheduler below, `'boot'` from the worker's start-up catch-up (src/
+ * worker.ts). The reason is what decides whether a run may skip itself — see
+ * SKIP_IF_NEWER_THAN_MS in features/backups/service.ts.
+ */
+export interface DbBackupJob {
+  reason: 'scheduled' | 'boot'
+}
+
+/** The one job scheduler id the backup queue ever registers. */
+export const DB_BACKUP_SCHEDULER_ID = 'db-backup-daily'
+
+/**
+ * 02:30 UTC, every day: a fixed UTC time, not an admin setting. Picked to be
+ * quiet: night in Europe and the Americas, and an hour and a half clear of
+ * the session-learning run on either side (01:00 on the production box, 04:00
+ * by default — features/learning/schedule.ts). A dump would not block that
+ * run anyway; it is a read-only snapshot, but there is no reason to have the
+ * two compete for the disk.
+ */
+export const DB_BACKUP_CRON = '30 2 * * *'
+
+/**
+ * Its own queue, for the reason every queue here has one: a dump has nothing
+ * to do with any other queue's work or cadence. `concurrency: 1` on its
+ * worker (queue/db-backup.worker.ts) only covers one process; what actually
+ * keeps two dumps from overlapping is the advisory lock runDbBackup holds.
+ *
+ * Unlike most queues here, a failed backup is retried: a dump has no side
+ * effects beyond its own file, and without a retry one blip (Postgres
+ * restarting at 02:30) costs a whole day of backups. The processor throws
+ * BullMQ's UnrecoverableError for the failures a retry cannot fix (pg_dump
+ * missing or older than the server, or too little free disk space for the
+ * dump), so those are logged once, not thrice.
+ */
+export const dbBackupQueue = new Queue<DbBackupJob>(QUEUE_DB_BACKUP, {
+  connection: redisConnection(),
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 5 * 60_000 },
+    removeOnComplete: { count: 50 },
+    removeOnFail: { count: 50 },
+  },
+})
+
+export async function enqueueDbBackup(job: DbBackupJob) {
+  return dbBackupQueue.add('backup', job)
+}
+
+/**
+ * Registers the daily backup, or removes it when BACKUPS_ENABLED is off (so
+ * a schedule left over from before the switch was flipped stops producing
+ * jobs). Idempotent by construction, like `ensureAttachmentsGcSchedule`
+ * above: safe, and correct, to call on every worker boot.
+ */
+export async function ensureDbBackupSchedule(enabled: boolean = env.BACKUPS_ENABLED) {
+  if (!enabled) {
+    await dbBackupQueue.removeJobScheduler(DB_BACKUP_SCHEDULER_ID)
+    return
+  }
+  await dbBackupQueue.upsertJobScheduler(
+    DB_BACKUP_SCHEDULER_ID,
+    { pattern: DB_BACKUP_CRON, tz: 'UTC' },
+    { name: 'backup', data: { reason: 'scheduled' } },
   )
 }

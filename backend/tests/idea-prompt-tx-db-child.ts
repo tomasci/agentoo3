@@ -24,6 +24,11 @@
 
 import { randomUUID } from 'node:crypto'
 import { mock } from 'bun:test'
+import { assertDisposableTestDb } from './disposable-db-guard'
+
+// Before anything below can reach DATABASE_URL: refuse to run unless it is a
+// throwaway cluster from pg-cluster.ts (see disposable-db-guard.ts).
+await assertDisposableTestDb()
 
 /** Every job handed to BullMQ's `Queue.add`, in order. */
 const enqueued: { name: string; data: unknown }[] = []

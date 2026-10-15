@@ -1030,6 +1030,7 @@ bun run lint
 bun run db:generate  # after editing src/db/schema.ts
 bun run db:migrate
 bun run db:studio
+bun run backup       # one database backup now, as the daily job takes it (README.md "Backups")
 ```
 
 OpenAPI is served at `/api/openapi.json`; the frontend generates its client from

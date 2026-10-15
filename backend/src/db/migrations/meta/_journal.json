@@ -99,6 +99,20 @@
       "when": 1791191357443,
       "tag": "0013_breezy_chameleon",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1792059146899,
+      "tag": "0014_fk_cascade_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1792059152734,
+      "tag": "0015_bulk_delete_guard",
+      "breakpoints": true
     }
   ]
 }

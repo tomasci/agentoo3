@@ -6,6 +6,7 @@
 // end on a host with no docker daemon at all — this one, notably — without a
 // single test that depends on a real container starting.
 
+import { withoutAppCredentials } from '@/lib/child-env'
 import { readBounded } from '@/lib/spawn'
 
 export interface DockerResult {
@@ -75,7 +76,13 @@ export const realDockerCli: DockerCli = {
         // at all. Every caller today passes nothing extra; the compose env
         // vars this feature injects (see compose-env.ts) are the first ones
         // that do.
-        env: { ...process.env, ...options.env },
+        //
+        // Minus this app's own database and Redis credentials: `docker
+        // compose` interpolates a project's compose file from this env, so
+        // `${DATABASE_URL}` there — or a bare `- DATABASE_URL` under
+        // `environment:` — would hand the live database to the project's
+        // containers. docker itself needs none of them. See lib/child-env.ts.
+        env: { ...withoutAppCredentials(process.env), ...options.env },
         stdout: 'pipe',
         stderr: 'pipe',
         // Bun only applies a timeout when one is given; every caller in this
@@ -129,8 +136,8 @@ export const realDockerCli: DockerCli = {
     const spawn = () =>
       Bun.spawn(['docker', ...args], {
         cwd: options.cwd,
-        // Same merge-not-replace reasoning as `run()` above.
-        env: { ...process.env, ...options.env },
+        // Same merge-not-replace, and same credential scrub, as `run()` above.
+        env: { ...withoutAppCredentials(process.env), ...options.env },
         stdout: 'pipe',
         stderr: 'pipe',
       })

@@ -55,6 +55,7 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   log_info "[dry-run] would create $PROJECTS_DIR, $SOURCES_DIR and $LIBRARY_DIR"
   log_info "[dry-run] would create $SSH_KEYS_DIR (0700) and adopt any keys from ~/.ssh/$APP_NAME"
   log_info "[dry-run] would create $ATTACHMENTS_DIR (0700) for session-scoped file attachments"
+  log_info "[dry-run] would create $BACKUPS_DIR (0700) for the daily database backups"
   log_info "[dry-run] would install ${APP_NAME}-api and ${APP_NAME}-worker services"
   exit 0
 fi
@@ -66,7 +67,7 @@ run_as_app() { as_user "$APP_USER" env HOME="$app_home" PATH="/usr/local/bin:/us
 # a root-owned checkout and node_modules behind, and bun cannot relink into
 # those as another user.
 reconcile_ownership "$APP_USER" "$REPO_ROOT" "$PROJECTS_DIR" "$SOURCES_DIR" "$LIBRARY_DIR" \
-  "$SSH_KEYS_DIR" "$ATTACHMENTS_DIR"
+  "$SSH_KEYS_DIR" "$ATTACHMENTS_DIR" "$BACKUPS_DIR"
 
 # --- dependencies -------------------------------------------------------------
 log_info "Installing dependencies (bun install)"
@@ -138,6 +139,17 @@ if [[ ! -d "$ATTACHMENTS_DIR" ]]; then
   log_ok "Created $ATTACHMENTS_DIR"
 else
   as_root chmod 0700 "$ATTACHMENTS_DIR"
+fi
+
+# 0700 as well: every file in here is a full pg_dump of the database, every
+# session transcript and setting included. The worker writes them
+# (backend/src/features/backups/) and creates this itself if it has to; made
+# here too so ownership and mode are the installer's to set, like the rest.
+if [[ ! -d "$BACKUPS_DIR" ]]; then
+  as_root install -d -o "$APP_USER" -g "$APP_USER" -m 0700 "$BACKUPS_DIR"
+  log_ok "Created $BACKUPS_DIR"
+else
+  as_root chmod 0700 "$BACKUPS_DIR"
 fi
 
 # Advisory only: there is no separate volume and no quota tooling on this
@@ -253,6 +265,7 @@ env_set "$ENV_FILE" LIBRARY_DIR  "$LIBRARY_DIR"
 env_set "$ENV_FILE" SOURCES_DIR  "$SOURCES_DIR"
 env_set "$ENV_FILE" SSH_KEYS_DIR "$SSH_KEYS_DIR"
 env_set "$ENV_FILE" ATTACHMENTS_DIR "$ATTACHMENTS_DIR"
+env_set "$ENV_FILE" BACKUPS_DIR "$BACKUPS_DIR"
 
 # WORKER_CONCURRENCY is empty by default now (config.sh) — derive it from RAM
 # rather than write nothing. Nothing is not a fallback: an empty value here

@@ -42,6 +42,7 @@ import { desc, eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@/db/client'
 import { messages } from '@/db/schema'
+import { withoutAppCredentials } from '@/lib/child-env'
 import { logger } from '@/lib/logger'
 import type {
   UsageAccountDto,
@@ -278,7 +279,12 @@ async function probeUsage(): Promise<ProbeResult> {
     try {
       q = query({
         prompt: noMessages(),
-        options: { permissionMode: 'bypassPermissions', abortController },
+        // Credential-free env, for the reason models.ts's probeModels() gives.
+        options: {
+          permissionMode: 'bypassPermissions',
+          abortController,
+          env: withoutAppCredentials(process.env),
+        },
       })
     } catch (error) {
       result.errors.push(`Could not start Claude Code: ${String(error)}`)

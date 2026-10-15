@@ -15,6 +15,11 @@
 // in Postgres to the numbers BullMQ would have been given.
 
 import { mock } from 'bun:test'
+import { assertDisposableTestDb } from './disposable-db-guard'
+
+// Before anything below can reach DATABASE_URL: refuse to run unless it is a
+// throwaway cluster from pg-cluster.ts (see disposable-db-guard.ts).
+await assertDisposableTestDb()
 
 mock.module('bullmq', () => ({
   Queue: class {

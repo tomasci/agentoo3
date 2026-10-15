@@ -12,6 +12,11 @@ import { env } from '@/env'
 import { totalUsage, uploadFile } from '@/features/attachments/service'
 import { attachIdeaAssetsToSession, uploadIdeaFile } from '@/features/ideas/files'
 import { ideaUploadsDir, sessionUploadsDir } from '@/lib/paths'
+import { assertDisposableTestDb } from './disposable-db-guard'
+
+// Before anything below can reach DATABASE_URL: refuse to run unless it is a
+// throwaway cluster from pg-cluster.ts (see disposable-db-guard.ts).
+await assertDisposableTestDb()
 
 const facts: Record<string, unknown> = {}
 const PROJECT_ID = randomUUID()

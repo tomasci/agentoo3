@@ -13,6 +13,7 @@ import { sessionAttachmentsSummary } from '@/features/attachments/service'
 import { composeEnvFor } from '@/features/docker/compose-env'
 import { syncProjectPlugin } from '@/features/library/service'
 import { keyPathFor } from '@/features/ssh-keys/service'
+import { withoutAppCredentials } from '@/lib/child-env'
 import { configureRepoSsh, isGitRepo } from '@/lib/git'
 import { logger } from '@/lib/logger'
 import { projectPlugin, projectRepo } from '@/lib/paths'
@@ -226,10 +227,9 @@ function everyRootUseIsOwn(command: string, root: string, ownUploadsDir: string)
  * NOTE on what this does not cover, honestly: an agent can still reach
  * another session's files through a subprocess that opens them itself
  * (`python3 -c "open(...)"`) or through variable indirection in Bash — this
- * is a harness-level guard, not a kernel one. Separately, and out of scope
- * for this feature: `env: { ...process.env }` in `optionsFor` hands every
- * agent DATABASE_URL and REDIS_URL, which is a larger hole than the
- * filesystem one this hook narrows.
+ * is a harness-level guard, not a kernel one. (The env side of the same
+ * problem — every agent inheriting DATABASE_URL and REDIS_URL from the
+ * worker — is closed in `optionsFor` by `withoutAppCredentials`.)
  */
 export function attachmentsHook(ownUploadsDir: string | null): HookCallbackMatcher {
   const root = resolve(env.ATTACHMENTS_DIR)
@@ -544,9 +544,16 @@ export async function optionsFor(
       // themselves `AGENTOO_*` keys `agentooEnv` never emits, so stripping
       // after they were added would delete the ones this function just set,
       // not just the ones `process.env` supplied.
+      //
+      // `withoutAppCredentials` drops this app's own database and Redis
+      // credentials from what is inherited: the agent's Bash commands run with
+      // this env, and a script it writes "for a scratch DB" that forgets to
+      // set DATABASE_URL must fail, not fall back to the worker's — the live
+      // database. See lib/child-env.ts. Only the inherited part is scrubbed;
+      // nothing this function adds below is a credential.
       ...withoutInheritedAgentooKeys(
         {
-          ...process.env,
+          ...withoutAppCredentials(process.env),
           ...delegationEnv(MAX_SPAWN_DEPTH, MAX_CONCURRENT_SUBAGENTS),
           CLAUDE_AGENT_SDK_CLIENT_APP: 'agentoo/1.0.0',
           // Belt and braces alongside core.sshCommand: this also covers a
@@ -576,8 +583,8 @@ export async function optionsFor(
       // truthy one (see above) breaks it worse.
       //
       // None of this is a new capability: the agent already runs
-      // `bypassPermissions` with `Bash` and the full `process.env` above, so
-      // it could always shell out to curl this API or run docker compose by
+      // `bypassPermissions` with `Bash` and the inherited env above, so it
+      // could always shell out to curl this API or run docker compose by
       // hand. This only saves it the trouble of re-deriving the identity
       // itself.
       ...agentooEnv,
