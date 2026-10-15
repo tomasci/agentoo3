@@ -111,6 +111,7 @@
       "name": "Название",
       "status": "Статус",
       "docker": "Docker",
+      "size": "Размер",
       "path": "Путь",
       "actionsFor": "Действия для {{name}}"
     },
@@ -133,6 +134,16 @@
         "notDetected": "Не обнаружено",
         "openDocker": "Открыть Docker"
       }
+    },
+    "diskUsage": {
+      "term": "Размер на диске",
+      "measuring": "Считаем…",
+      "loadFailed": "Не удалось получить размер",
+      "recalculate": "Пересчитать",
+      "breakdown": "Репозиторий {{repo}} · Рабочие каталоги сессий {{worktrees}}",
+      "measuredAt": "Измерено {{when}}",
+      "measureFailed": "Последний подсчёт не удался: {{reason}}",
+      "refreshFailed": "Не удалось запустить новый подсчёт"
     },
     "gitIdentity": {
       "heading": "Git-идентификация",

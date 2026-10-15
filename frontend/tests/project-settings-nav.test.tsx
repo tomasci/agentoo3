@@ -31,6 +31,7 @@ import { Provider as JotaiProvider } from 'jotai'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { mockModule } from './mock-module'
+import { seedDiskUsage } from './disk-usage-api'
 
 const project = (id: string, name: string) => ({
   id, name, slug: name.toLowerCase(), source: 'clone', remoteUrl: `git@github.com:acme/${name.toLowerCase()}.git`,
@@ -145,6 +146,10 @@ async function mount(path: string) {
     { items: [], hasUnread: false, truncated: false },
   )
   client.setQueryData([{ url: '/api/docker/detection' }], { enabled: true, projects: [] })
+  // Sizes: the picker's Size column and Settings' "Size on disk" fact read
+  // these (tests/project-disk-usage-*.test.tsx cover them); seeded for the same
+  // reason as every other query here.
+  seedDiskUsage(client, serverProjects.map((p) => p.id))
   for (const p of serverProjects) {
     client.setQueryData([{ url: '/api/projects/:id/sessions', params: { id: p.id } }], [])
     // Settings' own new Git identity card (git-identity-card.test.tsx covers

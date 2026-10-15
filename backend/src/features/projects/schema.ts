@@ -174,3 +174,72 @@ export const gitIdentityInputSchema = z
   })
   .openapi('GitIdentityInput')
 export type GitIdentityInput = z.infer<typeof gitIdentityInputSchema>
+
+// --- disk usage ------------------------------------------------------------
+//
+// Like git identity above, deliberately not a field on `projectSchema`:
+// `listProjects` is polled every 1.5s while a clone runs, and a `du` per row
+// per poll is exactly the cost that field-per-row design would put on it.
+// Measured by `du` in features/projects/disk-usage.ts, answered from a cache,
+// and fetched through the three endpoints that return this shape.
+
+export const projectDiskUsageSchema = z
+  .object({
+    projectId: z.string().uuid().openapi({ description: 'The project these numbers belong to.' }),
+    totalBytes: z
+      .number()
+      .int()
+      .nullable()
+      .openapi({
+        description:
+          'Everything the project occupies on disk: its folder under PROJECTS_DIR, which includes ' +
+          'repo/, worktrees/ and plugin/ (copies of the agents and skills assigned to the ' +
+          'project), plus, for an adopted project, the folder its repo/ link points at. Symlinks ' +
+          'are never followed; an adopted repo/ is the one deliberate exception. Allocated ' +
+          'blocks as `du` reports them, not apparent file sizes. Null until the first ' +
+          'measurement succeeds.',
+      }),
+    repoBytes: z
+      .number()
+      .int()
+      .nullable()
+      .openapi({
+        description:
+          "The project's checkout: repo/ itself, or the folder it links to for an adopted " +
+          'project. Null until the first measurement succeeds.',
+      }),
+    worktreesBytes: z
+      .number()
+      .int()
+      .nullable()
+      .openapi({
+        description:
+          'All session worktrees together (worktrees/). 0 when the project has none. Null until ' +
+          'the first measurement succeeds.',
+      }),
+    measuredAt: z.iso
+      .datetime()
+      .nullable()
+      .openapi({
+        description:
+          'When the byte counts above were taken (ISO 8601). Null until the first measurement ' +
+          'succeeds. After a failed re-measurement the counts are still the last good ones, so ' +
+          'this is then older than the failure that `error` describes.',
+      }),
+    measuring: z.boolean().openapi({
+      description:
+        'A measurement is queued or running right now. The byte counts are then the previous ' +
+        '(possibly stale, possibly null) ones; poll again until this is false.',
+    }),
+    error: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'Why the most recent measurement failed; null when it succeeded, when none has finished ' +
+          'yet, and when it was taken under a different project status than the current one (a ' +
+          'new measurement is then under way).',
+      }),
+  })
+  .openapi('ProjectDiskUsage')
+export type ProjectDiskUsageDto = z.infer<typeof projectDiskUsageSchema>

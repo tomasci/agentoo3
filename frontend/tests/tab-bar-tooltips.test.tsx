@@ -30,6 +30,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { routeTree } from '../src/app/router'
 import en from '../src/shared/i18n/locales/en.json'
 import { TooltipProvider } from '../src/shared/ui/tooltip'
+import { seedDiskUsage } from './disk-usage-api'
 
 const project = (id: string, name: string) => ({
   id,
@@ -95,6 +96,10 @@ async function mount(path: string, { provider = false } = {}) {
     { items: [], hasUnread: false, truncated: false },
   )
   client.setQueryData([{ url: '/api/docker/detection' }], { enabled: true, projects: [] })
+  // Sizes: the picker's Size column and Settings' "Size on disk" fact read
+  // these (tests/project-disk-usage-*.test.tsx cover them); seeded for the same
+  // reason as every other query here.
+  seedDiskUsage(client, PROJECTS.map((p) => p.id))
   client.setQueryData([{ url: '/api/system' }], {
     cpu: { usagePercent: 10, cores: 4, load1: 0.5 },
     memory: { usedBytes: 1, totalBytes: 2, usedPercent: 20 },

@@ -7,6 +7,9 @@ The What's new screen inside agentoo shows this same list after each update — 
 ### New
 - The message box has a Code / Q&A switch next to the attach button: in Q&A the agent answers in the same session, with all its context, without changing anything, and the question is marked Q&A in the transcript.
 
+### Improved
+- The project list in a new tab and a project's Settings now show how much disk space the project's folder takes; Settings also splits out the repository and the session worktrees and has a Recalculate button.
+
 ## 1.4.176 — 2026-10-15
 
 ### Improved

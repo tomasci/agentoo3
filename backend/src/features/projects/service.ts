@@ -19,6 +19,7 @@ import { assertInsideProjects, projectRepo, projectRoot, toSlug } from '@/lib/pa
 import { checkRemoteUrl } from '@/lib/remote-url'
 import { gitSshCommand } from '@/lib/ssh'
 import { enqueueProjectSetup } from '@/queue'
+import { forgetProjectDiskUsage } from './disk-usage'
 import type {
   CreateProjectInput,
   GitIdentityInput,
@@ -222,6 +223,7 @@ export async function deleteProject(id: string, removeFiles: boolean): Promise<v
   }
 
   await db.delete(projects).where(eq(projects.id, id))
+  forgetProjectDiskUsage(id)
 }
 
 // --- git identity ----------------------------------------------------------
