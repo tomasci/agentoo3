@@ -26,6 +26,11 @@ import { putIdeaFile } from '@/features/attachments/storage'
 import { uploadIdeaFile } from '@/features/ideas/files'
 import { uploadFile } from '@/features/attachments/service'
 import { ideaAttachmentsDir, ideaUploadsDir, sessionUploadsDir } from '@/lib/paths'
+import { assertDisposableTestDb } from './disposable-db-guard'
+
+// Before anything below can reach DATABASE_URL: refuse to run unless it is a
+// throwaway cluster from pg-cluster.ts (see disposable-db-guard.ts).
+await assertDisposableTestDb()
 
 const app = createApp()
 const facts: Record<string, unknown> = {}

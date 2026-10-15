@@ -16,6 +16,11 @@
 // `ioredis` mocked by other files; only a fresh process gets the real ones.
 
 import { randomUUID } from 'node:crypto'
+import { assertDisposableTestDb } from './disposable-db-guard'
+
+// Before anything below can reach DATABASE_URL: refuse to run unless it is a
+// throwaway cluster from pg-cluster.ts (see disposable-db-guard.ts).
+await assertDisposableTestDb()
 
 const { Queue, Worker } = await import('bullmq')
 const { default: IORedis } = await import('ioredis')

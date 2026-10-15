@@ -15,6 +15,11 @@ import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { mock } from 'bun:test'
 import '@hono/zod-openapi'
+import { assertDisposableTestDb } from './disposable-db-guard'
+
+// Before anything below can reach DATABASE_URL: refuse to run unless it is a
+// throwaway cluster from pg-cluster.ts (see disposable-db-guard.ts).
+await assertDisposableTestDb()
 
 const SRC = new URL('../src', import.meta.url).pathname
 const MODE = process.env.VERIFY_MODE ?? 'main'

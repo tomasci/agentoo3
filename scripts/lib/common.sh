@@ -480,6 +480,159 @@ managed_block() {
   rm -f "$tmp"
 }
 
+# ----------------------------------------------------------- pg_hba.conf -----
+
+# pg_hba_require_socket_password FILE ROLE
+#
+# Makes unix-socket logins as ROLE authenticate with its password
+# (scram-sha-256) instead of whatever rule would match them otherwise, which
+# on Ubuntu is `local all all peer`. Peer trusts the OS account name, and the
+# services, so every agent session and everything it runs, run as an account
+# named like the app's role. Without this, a `psql`, `pg_dump` or driver a
+# session starts with no host reaches the live database as that role over
+# the default socket, with no password and no DATABASE_URL needed. Nothing of
+# ours connects that way: the app, its migrations and its backups all use
+# DATABASE_URL over TCP.
+#
+# The rule sits in its own marked block, directly above the first active rule
+# a socket login as ROLE could match (pg_hba.conf is first match wins). On
+# Ubuntu's default file that is below `local all postgres peer`, which never
+# matches ROLE and has to keep working for `sudo -u postgres psql`, and above
+# `local all all peer`. Every other line is left exactly as it was. An earlier
+# rule that names ROLE itself (an operator's own `local all agentoo trust`,
+# say) stays in the file, never matches socket logins as ROLE again, and is
+# reported. `include` directives and +group, /regex and @file user lists count
+# as matching, so the block can land too early but never too late.
+#
+# The database column is `all`, not just the app's database: a role can
+# change its own password, so a password-less login as ROLE into any
+# database at all (`psql -d postgres`) is as good as one into the app's.
+#
+# Idempotent: the previous block is lifted out first and the new one goes
+# back in the same place, so FILE is rewritten only when something changed.
+# Then it is replaced atomically, keeping the original's owner and mode
+# (postgres:postgres 0640 on Ubuntu; the server cannot read it otherwise),
+# with the previous version kept as FILE.<tag>-bak.
+#
+# Sets PG_HBA_CHANGED (1 if FILE was rewritten, else 0) and PG_HBA_BACKUP.
+# Validating the result and reloading the server are the caller's job (see
+# scripts/60-install-postgres.sh).
+pg_hba_require_socket_password() {
+  local file="$1" role="$2"
+  local tag="${MANAGED_TAG:-$APP_NAME}"
+  local begin="# >>> ${tag} managed: socket auth >>>"
+  local end="# <<< ${tag} managed: socket auth <<<"
+  PG_HBA_CHANGED=0
+  PG_HBA_BACKUP="${file}.${tag}-bak"
+
+  # Written into the file unquoted, so it has to be one plain token, and not
+  # one of the words pg_hba.conf gives a meaning of its own.
+  if [[ ! "$role" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] \
+     || [[ "$role" =~ ^(all|sameuser|samerole|samegroup|replication)$ ]]; then
+    die "Refusing to write a pg_hba.conf rule for role '$role': not a plain role name."
+  fi
+
+  if [[ "${DRY_RUN:-0}" == "1" ]]; then
+    log_info "[dry-run] would require a password for unix-socket logins as '$role' in $file"
+    return 0
+  fi
+
+  local -a SU=()
+  writable_by_me "$file" || SU=(${_SUDO[@]+"${_SUDO[@]}"})
+  ${SU[@]+"${SU[@]}"} test -f "$file" || die "No pg_hba.conf at $file"
+
+  local rule block
+  rule="$(printf '%-7s %-15s %-39s %s' local all "$role" scram-sha-256)"
+  block="$(printf '%s\n' \
+    "$begin" \
+    "# Written by ${tag}'s installer (scripts/60-install-postgres.sh): role" \
+    "# $role gives its password over the unix socket as well. Under peer auth" \
+    "# any process running as OS user $role, every agent session included," \
+    "# could log in as it with no password. Keep this above every rule that" \
+    "# could match $role; the installer moves it back there on each run." \
+    "$rule" \
+    "$end")"
+
+  local tmp notes
+  tmp="$(mktemp)"
+  notes="$(mktemp)"
+  # shellcheck disable=SC2016  # awk program, not shell
+  if ! ${SU[@]+"${SU[@]}"} cat "$file" \
+      | HBA_ROLE="$role" HBA_BEGIN="$begin" HBA_END="$end" HBA_BLOCK="$block" \
+        HBA_NOTES="$notes" awk '
+          # 2: the rule names role itself; 1: it could match role (all,
+          # +group, /regex, @file, include*); 0: it cannot.
+          function matches(s,   f, nf, u, nu, i, t, could) {
+            sub(/#.*/, "", s)
+            nf = split(s, f)
+            if (nf == 0) return 0
+            if (f[1] ~ /^include(_if_exists|_dir)?$/) return 1
+            if (f[1] != "local" || nf < 3 || f[2] == "replication") return 0
+            nu = split(f[3], u, ",")
+            could = 0
+            for (i = 1; i <= nu; i++) {
+              t = u[i]
+              if (t ~ /^".*"$/) {             # quoted: a literal role name
+                if (substr(t, 2, length(t) - 2) == role) return 2
+                continue
+              }
+              if (t == role) return 2
+              if (t == "all" || t ~ /^[+\/@]/) could = 1
+            }
+            return could
+          }
+          BEGIN {
+            role = ENVIRON["HBA_ROLE"]; b = ENVIRON["HBA_BEGIN"]; e = ENVIRON["HBA_END"]
+            notes = ENVIRON["HBA_NOTES"]; inblock = 0; n = 0; at = 0
+          }
+          $0 == b { inblock = 1; next }
+          $0 == e { inblock = 0; next }
+          inblock { next }
+          {
+            line[++n] = $0
+            m = matches($0)
+            if (m && !at) at = n
+            if (m == 2) print $0 > notes
+          }
+          END {
+            # A begin marker with no end: everything after it was skipped.
+            # Refuse rather than write a file missing those lines.
+            if (inblock) exit 3
+            if (!at) at = n + 1
+            for (i = 1; i < at; i++) print line[i]
+            print ENVIRON["HBA_BLOCK"]
+            for (i = at; i <= n; i++) print line[i]
+          }
+        ' >"$tmp"; then
+    rm -f "$tmp" "$notes"
+    die "Could not update $file: it has a '$begin' line with no '$end' after it. Fix that by hand."
+  fi
+
+  if ${SU[@]+"${SU[@]}"} cmp -s "$tmp" "$file"; then
+    log_ok "pg_hba.conf already requires a password for unix-socket logins as '$role'"
+  else
+    local mode uid gid staged
+    read -r mode uid gid < <(${SU[@]+"${SU[@]}"} stat -c '%a %u %g' "$file")
+    [[ -n "$gid" ]] || die "Could not read the owner and mode of $file"
+    local -a own=()
+    if (( ${#SU[@]} > 0 )) || [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+      own=(-o "$uid" -g "$gid")
+    fi
+    staged="$(dirname -- "$file")/.$(basename -- "$file").${tag}-new"
+    run ${SU[@]+"${SU[@]}"} install -m "$mode" ${own[@]+"${own[@]}"} "$tmp" "$staged"
+    run ${SU[@]+"${SU[@]}"} cp -p "$file" "$PG_HBA_BACKUP"
+    run ${SU[@]+"${SU[@]}"} mv -f "$staged" "$file"
+    PG_HBA_CHANGED=1
+    log_ok "pg_hba.conf now requires a password for unix-socket logins as '$role' (previous version: $PG_HBA_BACKUP)"
+  fi
+
+  local note
+  while IFS= read -r note; do
+    log_warn "$file also has \`$note\`, below the managed rule: socket logins as '$role' no longer reach it."
+  done <"$notes"
+  rm -f "$tmp" "$notes"
+}
+
 # ------------------------------------------------------------------ https ---
 #
 # Backs the optional custom-domain HTTPS in scripts/85-configure-https.sh, and
@@ -735,7 +888,7 @@ reconcile_ownership() {
     local -a prune_expr=()
     local sibling first=1
     for sibling in "${PROJECTS_DIR:-}" "${SOURCES_DIR:-}" "${LIBRARY_DIR:-}" \
-                   "${ATTACHMENTS_DIR:-}" "${SSH_KEYS_DIR:-}"; do
+                   "${ATTACHMENTS_DIR:-}" "${SSH_KEYS_DIR:-}" "${BACKUPS_DIR:-}"; do
       [[ -n "$sibling" ]] || continue
       if (( first )); then
         prune_expr+=( "(" -path "$sibling" ); first=0

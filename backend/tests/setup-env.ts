@@ -61,3 +61,11 @@ process.env.CLAUDE_CODE_OAUTH_TOKEN = 'test-not-a-real-token'
 // the whole run, so the first file to reach `@/env` decides it for everyone.
 export const TEST_ATTACHMENTS_DIR = `/tmp/agentoo-test-attachments-${process.pid}`
 process.env.ATTACHMENTS_DIR = TEST_ATTACHMENTS_DIR
+
+// A scratch backups directory, per process, for the same reason as
+// ATTACHMENTS_DIR above: `@/env` defaults BACKUPS_DIR to
+// /opt/agentoo/backups, the live install's database backups, and a backup
+// run deletes old files out of it (retention). Nothing in the shared process
+// should ever reach that default, so this makes sure it cannot.
+export const TEST_BACKUPS_DIR = `/tmp/agentoo-test-backups-${process.pid}`
+process.env.BACKUPS_DIR = TEST_BACKUPS_DIR

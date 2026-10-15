@@ -22,6 +22,21 @@ const schema = z.object({
   // PROJECTS_DIR, which holds our own managed project roots — mixing the two
   // would mean listing our own scaffolding as adoptable.
   SOURCES_DIR: z.string().default('/opt/agentoo/sources'),
+  // Scheduled Postgres backups (features/backups/, and the top-level README's
+  // "Backups" section). Defaults beside the other data directories, and the
+  // installer pins it in .env the same way it does them; created 0700 by
+  // whichever of the installer or the first backup gets there first.
+  BACKUPS_DIR: z.string().default('/opt/agentoo/backups'),
+  // Keep the newest N dumps. Older ones are deleted only after a new one has
+  // been written, so a run of failed backups never eats into the ones
+  // already on disk.
+  BACKUP_RETENTION_COUNT: z.coerce.number().int().positive().default(14),
+  // The daily backup job and the worker's start-up catch-up. `bun run backup`
+  // by hand works either way. Parsed like DOCKER_ENABLED below.
+  BACKUPS_ENABLED: z
+    .string()
+    .default('true')
+    .transform((v) => v.toLowerCase() !== 'false' && v !== '0'),
 
   // One of these is needed to run agents. Neither is required to boot, so the
   // API still starts and can tell you what is missing.

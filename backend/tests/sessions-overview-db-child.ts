@@ -15,6 +15,11 @@ import { mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { mock } from 'bun:test'
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk'
+import { assertDisposableTestDb } from './disposable-db-guard'
+
+// Before anything below can reach DATABASE_URL: refuse to run unless it is a
+// throwaway cluster from pg-cluster.ts (see disposable-db-guard.ts).
+await assertDisposableTestDb()
 
 // --- fakes, registered before anything imports the modules that use them -----
 

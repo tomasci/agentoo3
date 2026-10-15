@@ -30,6 +30,7 @@
 // before finding out.
 
 import { query } from '@anthropic-ai/claude-agent-sdk'
+import { withoutAppCredentials } from '@/lib/child-env'
 import { logger } from '@/lib/logger'
 import { FALLBACK_MODELS, type ModelOption } from '@/library/models'
 import { modelOptionSchema } from './schema'
@@ -132,7 +133,16 @@ async function probeModels(): Promise<ModelOption[]> {
   try {
     const q = query({
       prompt: noMessages(),
-      options: { permissionMode: 'bypassPermissions', abortController },
+      // `env` given, unlike `query()`'s default of the whole `process.env`:
+      // with no `settingSources` this CLI process loads ~/.claude settings and
+      // MCP servers, which any session running as this same OS user can
+      // write, so it gets the same credential-free env a session does. See
+      // lib/child-env.ts.
+      options: {
+        permissionMode: 'bypassPermissions',
+        abortController,
+        env: withoutAppCredentials(process.env),
+      },
     })
     try {
       const raw = await q.supportedModels()

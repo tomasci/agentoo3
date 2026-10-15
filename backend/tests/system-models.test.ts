@@ -18,6 +18,12 @@ import './setup-env'
 // this file never imports routes.ts, so without this line `z.enum(...).openapi`
 // is undefined and schema.ts throws on load.
 import '@hono/zod-openapi'
+import {
+  CLAUDE_CREDENTIALS,
+  leakedCanaries,
+  REQUIRED_SCRUBBED,
+  withCanaryEnv,
+} from './app-credentials'
 
 const B = new URL('../src', import.meta.url).pathname
 
@@ -115,6 +121,24 @@ test('no credential env var and a failed probe still falls back cleanly', async 
   expect(queryCalls).toHaveLength(1)
   expect(result.source).toBe('fallback')
   expect(result.models).toEqual(FALLBACK_MODELS)
+})
+
+// --- the probe's env: no database or Redis credential -------------------------
+
+test('the probe CLI process gets no database or Redis credential, but keeps the Claude ones', async () => {
+  // With no settingSources it loads ~/.claude settings and MCP servers, which
+  // any session running as this OS user can write — see lib/child-env.ts.
+  probeBehaviour = () => Promise.resolve(LIVE_MODELS)
+  await withCanaryEnv(() => getModels())
+
+  expect(queryCalls).toHaveLength(1)
+  const env = queryCalls[0]?.options.env as Record<string, string> | undefined
+  // Present, not omitted: an absent `env` means "inherit all of process.env".
+  expect(env).toBeDefined()
+  for (const key of REQUIRED_SCRUBBED) expect(Object.keys(env ?? {})).not.toContain(key)
+  expect(leakedCanaries(env ?? {})).toEqual([])
+  for (const [key, value] of Object.entries(CLAUDE_CREDENTIALS)) expect(env?.[key]).toBe(value)
+  expect(env?.PATH).toBe(process.env.PATH as string)
 })
 
 // --- the TTL cache -----------------------------------------------------------

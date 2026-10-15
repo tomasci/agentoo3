@@ -308,12 +308,11 @@ export async function runIdeaPrompt(promptId: string): Promise<void> {
       outputFormat: { type: 'json_schema', schema: IDEA_PROMPT_ANSWER_JSON_SCHEMA },
       // Options.env REPLACES the subprocess environment entirely rather than
       // merging with it (the SDK's own doc on this field says so) — unlike
-      // runner-options.ts's `{ ...process.env, ... }`, which the comment
-      // there already flags as handing every agent subprocess DATABASE_URL
-      // and REDIS_URL for no reason a tool-less run has. This call spawns no
-      // tool that could ever need those, so closing that hole here costs
-      // nothing: only PATH, HOME, and whichever credential variable is
-      // actually set.
+      // runner-options.ts, which passes the whole inherited env on, minus
+      // the database and Redis credentials (lib/child-env.ts). This call
+      // spawns no tool that could need any of the rest, so an allowlist is
+      // tighter still and costs nothing: only PATH, HOME, and whichever
+      // credential variable is actually set.
       env: {
         ...(process.env.PATH !== undefined && { PATH: process.env.PATH }),
         ...(process.env.HOME !== undefined && { HOME: process.env.HOME }),

@@ -110,7 +110,7 @@ install.sh              orchestrator — parses flags, runs the steps in order
 CHANGELOG.md            changelog shown in the app's What's new screen, newest release first (English)
 CHANGELOG.ru.md         the same, in Russian
 scripts/
-  lib/common.sh         logging, dry-run, sudo, apt, env-file, service helpers
+  lib/common.sh         logging, dry-run, sudo, apt, env-file, pg_hba.conf, service helpers
   lib/config.sh         every version, package list and path (all overridable)
   00-preflight.sh       OS / arch / privileges / network / disk / RAM checks
   10-system-upgrade.sh  apt update && full-upgrade && autoremove
@@ -260,6 +260,123 @@ this host — so `ATTACHMENT_MAX_BYTES`, `ATTACHMENTS_SESSION_MAX_BYTES` and
 write. The backend setup step warns when `ATTACHMENTS_DIR` ends up sharing a
 filesystem with Postgres's data directory; if that risk matters to you, mount
 it on its own filesystem or set an XFS/ext4 project quota.
+
+## Backups
+
+The worker backs the database up on its own: a `pg_dump --format=custom` once
+a day at **02:30 UTC**, and once more whenever it starts and finds the newest
+backup over 24 hours old (a box that was down at 02:30, or was just
+installed). The 02:30 run skips itself if the newest backup is under an hour
+old. Ages come from the file names, and one named over 5 minutes in the
+future (the clock was ahead when it was written) never counts as recent;
+every run logs a warning naming it. Either run is retried twice if it fails,
+5 and then 10 minutes later, unless pg_dump is missing or older than the
+server, or the disk is too full (below). Each dump lands in `BACKUPS_DIR`
+(default `backups/` in the repo root, `/opt/agentoo/backups`) as
+`agentoo-<UTC start time>.dump`, e.g. `agentoo-20261015T023000Z.dump`. The
+directory is **0700** and each file **0600**, owned by the service account,
+since every file is a full copy of the database. A dump is written as
+`<name>.partial` and renamed only once pg_dump succeeds, so a file with a
+backup's name is always complete. A `.partial` left by a dump that died with
+its process (a crash, a reboot) is deleted at the start of the next run.
+
+Before dumping, a run checks the filesystem `BACKUPS_DIR` is on. If the dump
+would leave less than 10% of it or 2 GiB free, whichever is larger, the run
+refuses (`DATABASE BACKUP FAILED ... not enough free space`) and is not
+retried. The dump's size is estimated from the newest backup, or from the
+database itself when there is none. On a stock install that disk also holds
+Postgres's data and WAL, and Postgres stops when it fills.
+
+The newest `BACKUP_RETENTION_COUNT` (default 14) are kept. Older ones are
+deleted only after a new backup has succeeded, so a run of failures never
+eats into the ones you already have. A backup named in the future is neither
+counted nor deleted; remove it by hand once you no longer want it.
+`BACKUPS_ENABLED=false` turns the schedule off. A failure never stops the
+worker; it is logged as `DATABASE BACKUP FAILED`, together with how old the
+newest surviving backup is:
+
+```
+journalctl -u agentoo-worker | grep -i 'database backup'
+```
+
+pg_dump refuses to dump a server newer than itself, so the `pg_dump` on the
+worker's `PATH` has to be at least the server's major version. The installer's
+Postgres packages bring a matching one; if they ever drift apart, the log says
+which `postgresql-client-N` to install.
+
+These are database backups only. Project checkouts (`projects/`),
+attachments, the library, ssh keys and `.env` are not in them, and the dumps
+sit on the same disk as the database they protect, so copy `BACKUPS_DIR` off
+the box if that disk is what you are worried about.
+
+**By hand**, e.g. before something risky. It is the same code the schedule
+runs, with the same directory, naming, lock and retention, and it prints the
+file it wrote. It needs the install's `.env`, which only root can read, so
+systemd starts it the way it starts the services, as the service account:
+
+```
+sudo systemd-run --uid=agentoo --gid=agentoo --working-directory=/opt/agentoo/backend \
+  -p EnvironmentFile=/opt/agentoo/.env --wait --pipe --quiet bun run backup
+```
+
+**Restoring** replaces the whole database with the dump, so anything written
+since it was taken is gone. Take a backup by hand first if the current state
+might still be wanted. From a root shell, since the dumps are readable only
+by the service account and root:
+
+```
+sudo -i
+# 1. Stop both services: either would keep writing while the database is
+#    replaced, and their open connections hold locks the restore waits on.
+systemctl stop agentoo-worker agentoo-api
+ls -l /opt/agentoo/backups/           # pick one: names are the UTC time each dump started
+# 2. Restore, as postgres.
+sudo -u postgres pg_restore --clean --if-exists --single-transaction -d agentoo \
+  < /opt/agentoo/backups/agentoo-20261015T023000Z.dump
+# 3. Run the migrations, as the app does. After every restore, even a dump of
+#    the same version: see below.
+systemd-run --uid=agentoo --gid=agentoo --working-directory=/opt/agentoo/backend \
+  -p EnvironmentFile=/opt/agentoo/.env --wait --pipe --quiet bun run db:migrate
+# 4. Start them again.
+systemctl start agentoo-api agentoo-worker
+```
+
+Run pg_restore as `postgres`, not as the app's own role: the dump re-creates
+the `vector` extension, which belongs to the superuser, and as the app role
+pg_restore stops at exactly that. `--single-transaction` makes it all or
+nothing: a restore that fails partway leaves the database as it was. The same
+command restores onto a fresh install, once the installer has created the
+role and the database.
+
+Step 3 is not optional. `--clean` drops and re-creates only what the dump
+contains. A dump taken before migration 0015 (the bulk-delete guard) brings
+its tables back without the guard's triggers, but the guard's functions,
+which the dump knows nothing about, stay; the migrations table comes back
+from the dump too, so `db:migrate` runs 0014 and 0015 again and puts the
+triggers back. Both migrations are written to be re-run over that state. A
+dump from the current version has nothing left to apply, and migrate is a
+no-op. The guard itself never gets in the restore's way: `--clean` drops each
+table outright, a `DROP TABLE` fires no DELETE or TRUNCATE trigger, and the
+triggers come back after the rows are loaded.
+
+If a dump from an older agentoo version will not restore over a newer
+database (say a later version added a table that references one in the dump,
+so `--clean` cannot drop it; with `--single-transaction` nothing has changed),
+restore it into an empty database instead, then run step 3 to bring it up to
+date:
+
+```
+sudo -u postgres dropdb agentoo
+sudo -u postgres createdb -O agentoo agentoo
+sudo -u postgres pg_restore --single-transaction -d agentoo < /opt/agentoo/backups/<file>.dump
+```
+
+Restoring is tested against throwaway clusters:
+`backend/tests/db-backup-db.test.ts` restores one of the job's own dumps with
+this exact command into a brand-new server, and over the populated database it
+came from followed by step 3, with the guard live throughout, and
+`backend/tests/migrate-after-restore.test.ts` covers step 3 after a dump from
+before 0014 and 0015.
 
 ## Frontend
 
@@ -611,6 +728,21 @@ Nothing is published on the public interface except a way in.
 PostgreSQL and Redis bind to `127.0.0.1`. Redis also gets a generated password —
 that stops a local process, or an SSRF bug in the app, from talking to it
 unauthenticated.
+
+PostgreSQL's unix socket asks the app's role for its password too. Ubuntu's
+default `pg_hba.conf` lets an OS account log in over the socket as the
+database role of the same name with no password at all (`peer`), and the
+services, so every agent session and everything it runs, are the `agentoo`
+account. `scripts/60-install-postgres.sh` puts a marked rule
+(`# >>> agentoo managed: socket auth >>>`) right after
+`local all postgres peer`, so a `psql`, `pg_dump` or database driver started
+with no host gets "no password supplied" instead of the live database. The app
+never connects that way (it uses `DATABASE_URL`, over TCP), and the
+superuser's own peer login is untouched: `sudo -u postgres psql agentoo` is
+how to get a shell on the database. An existing install picks the rule up on
+its next `sudo /opt/agentoo/install.sh` (or `--only postgres`), which also
+re-hashes the role's password as SCRAM-SHA-256 should it still be stored as
+md5.
 
 ### SSH and the VPN
 

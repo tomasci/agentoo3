@@ -1,5 +1,6 @@
 import { mkdir, readdir, realpath, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { withoutAppCredentials } from './child-env'
 import { logger } from './logger'
 import { readBounded, sleep } from './spawn'
 
@@ -66,7 +67,11 @@ export async function git(
   cwd?: string,
   options: { sshCommand?: string; timeoutMs?: number } = {},
 ): Promise<GitResult> {
-  const inherited = { ...process.env }
+  // Minus this app's own database and Redis credentials too: git runs
+  // project-controlled code — the repository's hooks (`worktree add` fires
+  // post-checkout, a fetch fires reference-transaction) and whatever its
+  // config names, which an agent working in it can edit. See lib/child-env.ts.
+  const inherited = withoutAppCredentials(process.env)
   for (const key of REPO_LOCATION_VARS) delete inherited[key]
 
   const proc = Bun.spawn(['git', ...args], {

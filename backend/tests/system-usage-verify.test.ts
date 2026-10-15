@@ -16,6 +16,12 @@ import './setup-env'
 // Registers zod's `.openapi()` extension before schema.ts loads. See
 // system-models.test.ts for why.
 import '@hono/zod-openapi'
+import {
+  CLAUDE_CREDENTIALS,
+  leakedCanaries,
+  REQUIRED_SCRUBBED,
+  withCanaryEnv,
+} from './app-credentials'
 
 const B = new URL('../src', import.meta.url).pathname
 
@@ -168,6 +174,18 @@ test('the probe runs with bypassPermissions and an AbortController', async () =>
   await getUsage(NO_ROW)
   expect(queryCalls[0]?.options.permissionMode).toBe('bypassPermissions')
   expect(queryCalls[0]?.options.abortController).toBeInstanceOf(AbortController)
+})
+
+test('the probe CLI process gets no database or Redis credential, but keeps the Claude ones', async () => {
+  // Same reason as models.ts's probe — see lib/child-env.ts.
+  await withCanaryEnv(() => getUsage(NO_ROW))
+  const env = queryCalls[0]?.options.env as Record<string, string> | undefined
+  // Present, not omitted: an absent `env` means "inherit all of process.env".
+  expect(env).toBeDefined()
+  for (const key of REQUIRED_SCRUBBED) expect(Object.keys(env ?? {})).not.toContain(key)
+  expect(leakedCanaries(env ?? {})).toEqual([])
+  for (const [key, value] of Object.entries(CLAUDE_CREDENTIALS)) expect(env?.[key]).toBe(value)
+  expect(env?.PATH).toBe(process.env.PATH as string)
 })
 
 // --- the 30s timeout ------------------------------------------------------------

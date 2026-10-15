@@ -284,6 +284,14 @@ export const messages = pgTable(
     // this, that lookup would seq-scan the whole table — ~160k rows and
     // growing, with no other index on `type` — on every request.
     index('messages_rate_limit_idx').on(t.createdAt).where(sql`${t.type} = 'rate_limit_event'`),
+    // Backs the ON DELETE SET NULL above. Without it, every deleted message
+    // made Postgres scan the whole table for rows continuing it, so deleting
+    // a project with ~170k messages took hours. Partial: only auto-continuation
+    // prompts set this column, and the set-null lookup (`= <id>`) never
+    // matches a null, so the index can skip the null majority entirely.
+    index('messages_continues_message_idx')
+      .on(t.continuesMessageId)
+      .where(sql`${t.continuesMessageId} is not null`),
   ],
 )
 
@@ -394,6 +402,10 @@ export const messageFiles = pgTable(
     uniqueIndex('message_files_message_file_key')
       .on(t.messageId, t.fileId)
       .where(sql`${t.fileId} is not null`),
+    // Backs fileId's ON DELETE SET NULL: the key above leads with messageId,
+    // so it cannot answer "which links point at this file" for a deleted
+    // session_files row (one per attachment of every deleted session).
+    index('message_files_file_idx').on(t.fileId),
   ],
 )
 
@@ -531,6 +543,8 @@ export const ideas = pgTable(
     // The board's only read shape: every idea for a project, grouped by
     // column and ordered within it.
     index('ideas_project_status_idx').on(t.projectId, t.status, t.boardPosition),
+    // Backs sessionId's ON DELETE SET NULL, which runs once per deleted session.
+    index('ideas_session_idx').on(t.sessionId),
   ],
 )
 
@@ -588,6 +602,8 @@ export const ideaBlocks = pgTable(
     // Mirrors messages_session_seq_key above: one reading-order slot per idea.
     uniqueIndex('idea_blocks_idea_seq_key').on(t.ideaId, t.seq),
     index('idea_blocks_idea_idx').on(t.ideaId),
+    // Backs groupId's ON DELETE SET NULL, which runs once per deleted group.
+    index('idea_blocks_group_idx').on(t.groupId),
   ],
 )
 
@@ -684,6 +700,11 @@ export const ideaRuns = pgTable(
   (t) => [
     index('idea_runs_idea_idx').on(t.ideaId),
     index('idea_runs_session_idx').on(t.sessionId),
+    // These two back the ON DELETE SET NULL on promptId and promptMessageId.
+    // promptMessageId's runs once per deleted message, so without an index
+    // every message deleted alongside a session scanned this whole table.
+    index('idea_runs_prompt_idx').on(t.promptId),
+    index('idea_runs_prompt_message_idx').on(t.promptMessageId),
     // Makes two concurrent handoffs of one idea impossible in the database,
     // rather than in a check-then-insert race: at most one row per idea may
     // have a null endedAt at a time. The same pattern as
@@ -841,6 +862,9 @@ export const automationRuns = pgTable(
   (t) => [
     index('automation_runs_automation_idx').on(t.automationId),
     index('automation_runs_session_idx').on(t.sessionId),
+    // Backs promptMessageId's ON DELETE SET NULL, which runs once per deleted
+    // message — the same reason as idea_runs_prompt_message_idx.
+    index('automation_runs_prompt_message_idx').on(t.promptMessageId),
     // The database-level guard against firing one occurrence twice — two
     // sweeps landing on the same due automation at once (or a redelivered
     // tick) always converge on exactly one INSERT succeeding and the other

@@ -2,7 +2,7 @@
   "name": "agentoo-backend",
   "private": true,
   "type": "module",
-  "version": "1.4.174",
+  "version": "1.4.175",
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "dev:worker": "bun --watch src/worker.ts",
@@ -17,6 +17,7 @@
     "db:studio": "drizzle-kit studio",
     "openapi": "bun src/openapi.ts",
     "mark-install": "bun src/mark-install.ts",
+    "backup": "bun src/backup.ts",
     "test": "bun test tests/"
   },
   "dependencies": {
