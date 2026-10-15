@@ -287,7 +287,7 @@ retried. The dump's size is estimated from the newest backup, or from the
 database itself when there is none. On a stock install that disk also holds
 Postgres's data and WAL, and Postgres stops when it fills.
 
-The newest `BACKUP_RETENTION_COUNT` (default 14) are kept. Older ones are
+The newest `BACKUP_RETENTION_COUNT` (default 5) are kept. Older ones are
 deleted only after a new backup has succeeded, so a run of failures never
 eats into the ones you already have. A backup named in the future is neither
 counted nor deleted; remove it by hand once you no longer want it.

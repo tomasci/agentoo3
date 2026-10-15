@@ -30,7 +30,7 @@ const schema = z.object({
   // Keep the newest N dumps. Older ones are deleted only after a new one has
   // been written, so a run of failed backups never eats into the ones
   // already on disk.
-  BACKUP_RETENTION_COUNT: z.coerce.number().int().positive().default(14),
+  BACKUP_RETENTION_COUNT: z.coerce.number().int().positive().default(5),
   // The daily backup job and the worker's start-up catch-up. `bun run backup`
   // by hand works either way. Parsed like DOCKER_ENABLED below.
   BACKUPS_ENABLED: z
