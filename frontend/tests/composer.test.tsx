@@ -927,13 +927,34 @@ test('compact while sending with an empty value: stop precedes the sending butto
   expect(labelsIn(addon('inline-end'))).toEqual([TOGGLE, STOP, SENDING])
 })
 
-test('empty value with canStop: an inline-end addon exists holding the toggle then stop', () => {
-  mount(stopProps({ value: '', canStop: true }))
+test('empty value with canStop: inline-end holds the toggle, stop, then a disabled send', () => {
+  mount(stopProps({ value: '', canSend: false, canStop: true }))
   const end = addon('inline-end')
   expect(end).not.toBeNull()
-  expect(labelsIn(end)).toEqual([TOGGLE, STOP])
-  expect(byLabel(SEND)).toBeNull()
+  expect(labelsIn(end)).toEqual([TOGGLE, STOP, SEND])
+  expect(byLabel(SEND)?.disabled).toBe(true)
   expect(addon('block-end')).toBeNull()
+})
+
+// The misclick this guards against: send clears the text and the session goes
+// to `queued`, so canStop flips on. If send vanished then, stop would become
+// the last button — the very spot the operator just clicked — and a second
+// click there interrupted the turn that had just started.
+test('send clearing the text while canStop turns on leaves send, not stop, as the last button', () => {
+  mount(stopProps({ value: 'continue', canSend: true, canStop: false }))
+  const lastBefore = labelsIn(addon('inline-end')).at(-1)
+  expect(lastBefore).toBe(SEND)
+
+  render(stopProps({ value: '', canSend: false, canStop: true }))
+  const labels = labelsIn(addon('inline-end'))
+  expect(labels.at(-1)).toBe(SEND)
+  const send = byLabel(SEND)
+  expect(send?.disabled).toBe(true)
+  act(() => {
+    send?.click()
+  })
+  expect(stops).toBe(0)
+  expect(calls.onSubmit).toBe(0)
 })
 
 test('empty value, no canStop, not sending: inline-end still exists, holding only the toggle', () => {
@@ -962,10 +983,11 @@ test('expanded: one block-end addon, attach first, then the toggle, stop and sen
   expect(stop.parentElement?.contains(byLabel(ATTACH))).toBe(false)
 })
 
-test('expanded with an emptied-but-whitespace value: attach then the toggle then stop, no send', () => {
+test('expanded with an emptied-but-whitespace value: attach, the toggle, stop, then a disabled send', () => {
   mount(stopProps({ value: 'a\nb', canStop: true }))
-  render(stopProps({ value: ' ', canStop: true }))
-  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, CODE, QA, TOGGLE, STOP])
+  render(stopProps({ value: ' ', canSend: false, canStop: true }))
+  expect(labelsIn(addon('block-end'))).toEqual([ATTACH, CODE, QA, TOGGLE, STOP, SEND])
+  expect(byLabel(SEND)?.disabled).toBe(true)
 })
 
 test('stopping disables stop, and a click on it then calls nothing', () => {
@@ -1022,13 +1044,14 @@ test('toggling canStop never changes compact/expanded mode and never remounts th
   expect(addon('block-end')).toBeNull()
 
   // Empty value: the inline-end addon is always there now (it holds the
-  // toggle regardless), but stop still comes and goes with canStop — the
-  // textarea it sits beside must not be rebuilt either way.
+  // toggle regardless), but stop — and the disabled send that comes with it,
+  // so stop never takes send's place — still come and go with canStop. The
+  // textarea they sit beside must not be rebuilt either way.
   render(stopProps({ value: '', canStop: false }))
   expect(labelsIn(addon('inline-end'))).toEqual([TOGGLE])
   render(stopProps({ value: '', canStop: true }))
   expect(textarea()).toBe(ta)
-  expect(labelsIn(addon('inline-end'))).toEqual([TOGGLE, STOP])
+  expect(labelsIn(addon('inline-end'))).toEqual([TOGGLE, STOP, SEND])
   render(stopProps({ value: '', canStop: false }))
   expect(textarea()).toBe(ta)
   expect(labelsIn(addon('inline-end'))).toEqual([TOGGLE])
