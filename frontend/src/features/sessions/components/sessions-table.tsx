@@ -26,6 +26,7 @@ import {
   sortSessions,
 } from '../lib/session-groups'
 import { STATUS_TONE } from '../lib/status'
+import { RenameSessionDialog } from './rename-session-dialog'
 
 const columnHelper = createColumnHelper<Session>()
 
@@ -43,6 +44,7 @@ export function SessionsTable({ sessions, projectId }: { sessions: Session[]; pr
   const navigate = useNavigate()
   const remove = useDeleteSession(projectId)
   const [pendingDelete, setPendingDelete] = useState<Session | null>(null)
+  const [pendingRename, setPendingRename] = useState<Session | null>(null)
 
   const columns = useMemo(
     () => [
@@ -122,6 +124,11 @@ export function SessionsTable({ sessions, projectId }: { sessions: Session[]; pr
                 }),
             },
             {
+              id: 'rename',
+              label: t('sessions.rename'),
+              onSelect: () => setPendingRename(session),
+            },
+            {
               id: 'delete',
               label: t('common.delete'),
               destructive: true,
@@ -195,6 +202,12 @@ export function SessionsTable({ sessions, projectId }: { sessions: Session[]; pr
           const heading = sessionGroupOf(session, now)
           return { key: heading.key, label: groupLabel(heading) }
         }}
+      />
+
+      <RenameSessionDialog
+        session={pendingRename}
+        open={pendingRename !== null}
+        onOpenChange={(open) => !open && setPendingRename(null)}
       />
 
       <ConfirmDialog

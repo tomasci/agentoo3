@@ -316,6 +316,10 @@
     "deleteTitle": "Delete session?",
     "actionsFor": "Actions for {{name}}",
     "open": "Open",
+    "rename": "Rename",
+    "renameTitle": "Rename session",
+    "renameFailed": "Could not rename the session",
+    "renameHint": "Click to rename",
     "table": {
       "title": "Title",
       "updated": "Last updated",

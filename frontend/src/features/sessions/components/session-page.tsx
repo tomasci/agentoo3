@@ -54,6 +54,7 @@ import { STATUS_TONE } from '../lib/status'
 import { CompactSessionButton } from './compact-session-button'
 import { CompactSuggestion } from './compact-suggestion'
 import { Composer } from './composer'
+import { SessionTitle } from './session-title'
 import { Transcript } from './transcript'
 
 const BUSY = ['queued', 'running']
@@ -891,7 +892,10 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
         <StatusBadge tone={STATUS_TONE[data.status]}>
           {t(`sessions.status.${data.status}`)}
         </StatusBadge>
-        <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
+        {/* Keyed on the session: this page is not remounted between sessions
+            (see the session-switch reset above), so an edit left open on one
+            would otherwise carry its typed value onto the next. */}
+        <SessionTitle key={data.id} session={data} />
         {/* `max-w-full flex-wrap`: with Compact session beside Docker and Editor
             an isolated session's actions no longer fit a phone's width on one
             line, and a `shrink-0` group that cannot wrap just overflows. */}

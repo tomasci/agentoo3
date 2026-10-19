@@ -81,9 +81,39 @@ export function useCreateSession(projectId: string) {
   })
 }
 
-export function useUpdateSession(projectId: string) {
-  const invalidate = useInvalidate(projectId)
-  return useMutation({ ...patchApiSessionsIdMutationOptions(), onSuccess: () => invalidate() })
+/**
+ * Renames a session (`PATCH /sessions/{id}`). Takes no project id: the project
+ * the lists below belong to is read off the response, so a caller that only
+ * has a session — the page's own title, which lives outside any project's
+ * list — needs nothing else.
+ *
+ * Everything that renders a session's title is brought up to date here rather
+ * than at each call site, the same split `useMarkSessionSeen` makes: the
+ * detail cache is written from the response, the three lists that also show
+ * the title are invalidated.
+ */
+export function useUpdateSession() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    ...patchApiSessionsIdMutationOptions(),
+    onSuccess: async (data) => {
+      // Cancelled before the write, for the reason `useMarkSessionSeen` gives
+      // below: a GET for this session already in flight was dispatched before
+      // the rename landed, so left alone it can resolve after this write and
+      // put the old title back. This response is a full DTO read after the
+      // write, so it is at least as fresh as anything that GET would return.
+      const sessionKey = getApiSessionsIdQueryKey({ path: { id: data.id } })
+      await queryClient.cancelQueries({ queryKey: sessionKey })
+      queryClient.setQueryData(sessionKey, data)
+      void queryClient.invalidateQueries({
+        queryKey: getApiProjectsIdSessionsQueryKey({ path: { id: data.projectId } }),
+      })
+      // The dashboard's three lists and the bell's feed both print session
+      // titles of their own, from responses this one knows nothing about.
+      void queryClient.invalidateQueries({ queryKey: getApiSessionsOverviewQueryKey() })
+      void queryClient.invalidateQueries({ queryKey: getApiNotificationsQueryKey() })
+    },
+  })
 }
 
 export function useDeleteSession(projectId: string) {
