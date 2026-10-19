@@ -321,6 +321,23 @@ export async function removeWorktree(repoPath: string, worktreePath: string): Pr
 }
 
 /**
+ * Delete a local branch, even one with commits no other branch has (`-D`).
+ *
+ * Deliberately not part of removing a session's worktree: deleting a session
+ * keeps its branch, because the branch holds whatever the agent did. The one
+ * caller is the cleanup of a session that never ran, whose branch was cut from
+ * another and holds nothing that one does not — so there is nothing to lose, and
+ * leaving it would litter the repository with a branch for every failed attempt.
+ *
+ * Fails, rather than detaching anything, while a worktree still has the branch
+ * checked out, so the worktree has to be removed first. `--` keeps a branch name
+ * from ever being read as an option.
+ */
+export async function deleteBranch(repoPath: string, branch: string): Promise<GitResult> {
+  return git(['branch', '-D', '--', branch], repoPath)
+}
+
+/**
  * Record the project's ssh key in the repository's own config.
  *
  * Injecting GIT_SSH_COMMAND per call (above) only covers git commands *we*

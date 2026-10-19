@@ -231,8 +231,10 @@ export const messages = pgTable(
     // reconnecting client can ask for everything after a known point.
     seq: integer('seq').notNull(),
     // SDK message type: 'assistant' | 'user' | 'system' | 'result' | ... plus
-    // 'prompt', ours, for a message the human typed. The SDK never emits that
-    // type, so the two cannot be confused.
+    // two of ours: 'prompt' for a message the human typed, and
+    // 'compact_context' for the summary a compacted session starts from (seq 0,
+    // never pending; see features/sessions/compaction.ts). The SDK never emits
+    // either, so they cannot be confused.
     type: text('type').notNull(),
     // True on a 'prompt' row that no turn has answered yet. This is the queue of
     // messages sent while a turn was already running.
@@ -1067,6 +1069,75 @@ export const libraryItemVersions = pgTable(
   (t) => [
     uniqueIndex('library_item_versions_key').on(t.kind, t.name, t.version),
     index('library_item_versions_name_idx').on(t.kind, t.name),
+  ],
+)
+
+// --- session compactions ------------------------------------------------------
+//
+// "Compact session": one source session's whole conversation is condensed into
+// a summary, and a NEW session starts from it (features/sessions/compaction.ts).
+// This row is the operation, not the result: it exists so the request can
+// return at once while a worker spends minutes and money, and so a polling UI
+// has something to read when it fails. The result is the new session, linked
+// by resultSessionId once it exists.
+//
+// Nothing here is guarded by the bulk-delete triggers (migration 0015): these
+// rows are derived and cheap to lose, the only way one is deleted is a session
+// going away (cascade, or result_session_id's set null), and the guard exists
+// for data that cannot be recreated.
+
+export const sessionCompactionStatusEnum = pgEnum('session_compaction_status', [
+  'pending',
+  'running',
+  'succeeded',
+  'failed',
+])
+
+export const sessionCompactions = pgTable(
+  'session_compactions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // The session being compacted. It is only ever read: see compaction.ts for
+    // why nothing in this feature may write to it.
+    sourceSessionId: uuid('source_session_id')
+      .notNull()
+      .references(() => sessions.id, { onDelete: 'cascade' }),
+    status: sessionCompactionStatusEnum('status').notNull().default('pending'),
+    // How the summary was made: 'sdk_compact' (Claude Code's own /compact on a
+    // fork of the source's conversation) or 'transcript_summary' (a one-shot
+    // call over the stored transcript). Null until a summary exists. Text
+    // rather than an enum: the set is the summarizer's to extend, and a
+    // migration per method would buy nothing — the API schema is what pins it.
+    method: text('method'),
+    // SET NULL, not CASCADE: deleting the session this produced must not take
+    // the record that the compaction happened (and what it cost) with it.
+    resultSessionId: uuid('result_session_id').references(() => sessions.id, {
+      onDelete: 'set null',
+    }),
+    error: text('error'),
+    // What the summarizing calls cost, success or not. A failed attempt has
+    // still spent money, and no session exists to carry it, so this column is
+    // where it is recorded.
+    costUsd: doublePrecision('cost_usd').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  (t) => [
+    // At most one compaction per source may be pending or running, enforced by
+    // Postgres rather than a check-then-insert race — the same reasoning as
+    // learning_runs_single_active_key, but keyed per source session rather
+    // than table-wide. A double-click, or the button and the banner both
+    // firing, converges on one row.
+    uniqueIndex('session_compactions_active_key')
+      .on(t.sourceSessionId)
+      .where(sql`${t.status} in ('pending', 'running')`),
+    // Back the two ON DELETE foreign keys above (see migration 0014 for why a
+    // cascade without an index is a scan per deleted row). The partial unique
+    // index cannot serve a cascade: its predicate is not implied by
+    // `source_session_id = $1`.
+    index('session_compactions_source_idx').on(t.sourceSessionId),
+    index('session_compactions_result_idx').on(t.resultSessionId),
   ],
 )
 

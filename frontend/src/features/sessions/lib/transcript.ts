@@ -1,3 +1,7 @@
+import {
+  type SessionCompaction,
+  sessionCompactionMethodEnum,
+} from '@/shared/api/generated/types/SessionCompaction'
 import type { SessionMessage, TurnMode } from '../hooks/use-sessions'
 
 /**
@@ -45,6 +49,25 @@ export type TranscriptNode =
        * matching tool_result arrives later in the stream — it carries no title
        * of its own, so without this it would just be dropped. */
       results: Record<string, ToolResult>
+      createdAt: string
+    }
+  /** The summary a compacted session starts from — always the first message,
+   * and the only one the backend titles `null` on purpose (it is context, not
+   * a step), which is why `buildTranscript` handles it ahead of the guard that
+   * drops untitled rows. Every field but `summary` is nullable: `payload` is
+   * `unknown` on the wire, so each one is read defensively and a malformed
+   * payload degrades to an empty card rather than throwing. */
+  | {
+      kind: 'compactContext'
+      id: string
+      seq: number
+      /** Markdown. `''` when the payload carried none. */
+      summary: string
+      sourceSessionId: string | null
+      sourceTitle: string | null
+      sourceTotalCostUsd: number | null
+      sourceBranch: string | null
+      method: CompactMethod | null
       createdAt: string
     }
   /** The reply that closes a turn: shown open, at full size, as markdown.
@@ -102,8 +125,37 @@ type EventNode = Extract<TranscriptNode, { kind: 'event' }>
 type TaskNode = Extract<TranscriptNode, { kind: 'task' }>
 type Payload = Record<string, unknown>
 
+/** How a compaction's summary was made — `method` on the backend's
+ * `SessionCompaction`, repeated on the `compact_context` payload. */
+export type CompactMethod = NonNullable<SessionCompaction['method']>
+
 const str = (payload: Payload, key: string): string | undefined =>
   typeof payload[key] === 'string' ? (payload[key] as string) : undefined
+
+const COMPACT_METHODS: readonly string[] = Object.values(sessionCompactionMethodEnum)
+
+/** A `compact_context` message's own payload, field by field — see the node's
+ * doc comment above for why nothing here trusts its shape. */
+function compactContextNode(
+  message: SessionMessage,
+): Extract<TranscriptNode, { kind: 'compactContext' }> {
+  const payload = (message.payload ?? {}) as Payload
+  const cost = payload.sourceTotalCostUsd
+  const method = str(payload, 'method')
+  return {
+    kind: 'compactContext',
+    id: message.id,
+    seq: message.seq,
+    summary: str(payload, 'summary') ?? '',
+    sourceSessionId: str(payload, 'sourceSessionId') || null,
+    sourceTitle: str(payload, 'sourceTitle')?.trim() || null,
+    sourceTotalCostUsd: typeof cost === 'number' && Number.isFinite(cost) ? cost : null,
+    sourceBranch: str(payload, 'sourceBranch') || null,
+    method:
+      method !== undefined && COMPACT_METHODS.includes(method) ? (method as CompactMethod) : null,
+    createdAt: message.createdAt,
+  }
+}
 
 /** A task_notification's status, honestly: 'stopped' is the SDK's word for a
  * background task that was cut off rather than one that ran to a natural end,
@@ -292,6 +344,14 @@ export function buildTranscript(messages: SessionMessage[]): TranscriptNode[] {
         files: message.files ?? [],
         createdAt: message.createdAt,
       })
+      continue
+    }
+
+    // Ahead of every other branch, and in particular ahead of the
+    // `!message.title` guard below: the backend writes this message with no
+    // title at all, so it would be dropped there like the init handshake.
+    if (message.type === 'compact_context') {
+      roots.push(compactContextNode(message))
       continue
     }
 

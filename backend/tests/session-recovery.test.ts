@@ -59,6 +59,17 @@ let messageReadFails = false
 let statusWriteFails = false
 let enqueueFails = false
 
+/**
+ * The `compact_context` row a compacted session starts from, as the turn's
+ * unordered, unprojected read of `messages` sees it. Empty for every session
+ * that was not made by compaction, which is every test but the seeding ones.
+ */
+let contextRows: Row[] = []
+/** That read failing, as a database going down at the worst moment would. */
+let contextReadFails = false
+/** The `set()` argument of every update, so a test can prove what was never written. */
+let updateSets: Row[] = []
+
 /** What the SDK's `query` does when a turn runs. */
 let turnBehaviour: () => AsyncIterable<unknown> = () => empty()
 
@@ -113,6 +124,12 @@ const db = {
         // through this fake at all; session-claim-db.test.ts covers that
         // against a real Postgres.
         if (table(t) === 'sessions') return [claimedRow]
+        // The one read of `messages` with no projection and no ordering: the
+        // compacted-session seed (a claim's pending prompt is ordered).
+        if (fields === undefined && !ordered && table(t) === 'messages') {
+          if (contextReadFails) throw new Error(DB_DOWN)
+          return contextRows
+        }
         if (fields === undefined) return pending
         if (messageReadFails) throw new Error(DB_DOWN)
         // Ordered means `autoContinuationsSincePrompt` reading prompts back;
@@ -154,6 +171,7 @@ const db = {
     return {
       set: (p: Row) => {
         payload = p
+        updateSets.push(p)
         return { where }
       },
     }
@@ -239,6 +257,17 @@ mock.module(`${B}/queue/index.ts`, () => ({
   enqueueAttachmentsGc: async () => ({}),
   ensureAttachmentsGcSchedule: async () => {},
   enqueueLearningRun: async () => ({}),
+  // endTurn reads this off a namespace import. When this file is the first to
+  // load queue/index.ts the name is simply absent and the call fails fast, but
+  // when an earlier file in the same run has already loaded the real module
+  // (turn-mode.test.ts does, through runner-options), mock.module keeps every
+  // export this object does not list, so the REAL enqueueTurnEnded stayed
+  // bound: a BullMQ add against a Redis nobody started, which waits for a
+  // connection forever. Each turn then hung for the 5s test timeout, and its
+  // heartbeat interval (whose fake `.where()` has no `.catch`) kept throwing
+  // into whichever file ran next. Listed, so the outcome no longer depends on
+  // which file loaded first.
+  enqueueTurnEnded: async () => ({}),
 }))
 
 // Nothing here may reach Anthropic, a git worktree or the plugin directory.
@@ -297,6 +326,10 @@ afterEach(() => {
   messageReadFails = false
   statusWriteFails = false
   enqueueFails = false
+  contextRows = []
+  contextReadFails = false
+  updateSets = []
+  claimedRow.sdkSessionId = null
   turnBehaviour = () => empty()
 })
 
@@ -1358,4 +1391,143 @@ test('a continuation written by a killed Code turn runs as Code when the next tu
 
   expect(optionsCalls.map((args) => args[4])).toEqual(['code', 'code'])
   expect(queryCalls[1]?.prompt).toBe(String((continuation.payload as Row).text))
+})
+
+// --- seeding a compacted session's first turn ------------------------------------
+//
+// A session made by compaction starts from a `compact_context` row, not from a
+// conversation the SDK can resume. Its first turn is handed the summary in front
+// of the operator's message; once that turn's `init` has persisted an SDK session,
+// `resume` carries the summary and later turns must not repeat it. What is stored
+// is never the seeded text — the transcript shows only what the operator typed.
+
+const SEED = {
+  summary: 'SEED-SUMMARY: the toggle lives in Settings; contrast is still open.',
+  sourceSessionId: '11111111-1111-4111-8111-111111111111',
+  sourceTitle: 'Add dark mode',
+  sourceTotalCostUsd: 1.25,
+  sourceBranch: 'agentoo/s-11111111',
+  method: 'sdk_compact',
+}
+
+test('the first turn of a compacted session is handed the summary, then the operator\'s message', async () => {
+  const { withCompactedContext } = await import(`${B}/features/sessions/turn-mode.ts`)
+  contextRows = [{ id: 'ctx-1', seq: 0, type: 'compact_context', payload: SEED }]
+  pending = [CODE_ROW]
+  turnBehaviour = succeeds
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  const prompt = String(queryCalls[0]?.prompt)
+  expect(prompt).toContain('[Compacted context from previous session]')
+  expect(prompt).toContain(SEED.summary)
+  expect(prompt.endsWith('[End of compacted context]\n\nnow fix it')).toBe(true)
+  // Exactly what the pure function says, not a second implementation of it.
+  expect(prompt).toBe(
+    withCompactedContext('now fix it', {
+      summary: SEED.summary,
+      sourceSessionId: SEED.sourceSessionId,
+      sourceTitle: SEED.sourceTitle,
+      sourceBranch: SEED.sourceBranch,
+    }),
+  )
+  expect(statuses.at(-1)?.status).toBe('completed')
+})
+
+test('the stored prompt row is not rewritten: the summary is never written anywhere', async () => {
+  contextRows = [{ id: 'ctx-1', seq: 0, type: 'compact_context', payload: SEED }]
+  pending = [CODE_ROW]
+  turnBehaviour = succeeds
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(CODE_ROW.payload).toEqual({ text: 'now fix it' })
+  // Strings only: an update's `set` can hold Drizzle SQL fragments, which are
+  // cyclic and cannot be serialised.
+  const writtenStrings = updateSets
+    .flatMap((set) => Object.values(set))
+    .filter((v): v is string => typeof v === 'string')
+  expect(writtenStrings.some((v) => v.includes('SEED-SUMMARY'))).toBe(false)
+  expect(JSON.stringify(written)).not.toContain('SEED-SUMMARY')
+  expect(updateSets.some((set) => 'payload' in set)).toBe(false)
+})
+
+test('once the session has an SDK session to resume, the summary is not sent again', async () => {
+  // `resume` already carries it; repeating it would pay for it on every turn.
+  claimedRow.sdkSessionId = 'sdk-sess-1'
+  contextRows = [{ id: 'ctx-1', seq: 0, type: 'compact_context', payload: SEED }]
+  pending = [CODE_ROW]
+  turnBehaviour = succeeds
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(queryCalls.map((q) => q.prompt)).toEqual(['now fix it'])
+})
+
+test('a first turn that died before it had an SDK session seeds the next one again', async () => {
+  contextRows = [{ id: 'ctx-1', seq: 0, type: 'compact_context', payload: SEED }]
+  pending = [CODE_ROW]
+  turnBehaviour = () => throwing('Claude Code returned an error result: something went wrong')
+  await runTurn({ sessionId: 'sess-1' })
+  expect(statuses.at(-1)?.status).toBe('failed')
+
+  turnBehaviour = succeeds
+  await runTurn({ sessionId: 'sess-1' })
+
+  // Nothing persisted an sdkSessionId, so nothing carried the first attempt.
+  expect(queryCalls).toHaveLength(2)
+  for (const call of queryCalls) expect(call.prompt).toContain(SEED.summary)
+})
+
+test('a Q&A first turn gets the summary first, then the Q&A instruction and the question', async () => {
+  contextRows = [{ id: 'ctx-1', seq: 0, type: 'compact_context', payload: SEED }]
+  pending = [QA_PROMPT]
+  turnBehaviour = succeeds
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  const prompt = String(queryCalls[0]?.prompt)
+  expect(prompt.startsWith('[Compacted context from previous session]')).toBe(true)
+  expect(prompt.endsWith(`${QA_MODE_INSTRUCTION}\n\nwhy is the loader slow?`)).toBe(true)
+})
+
+test('a session that was not made by compaction is handed the prompt exactly as before', async () => {
+  contextRows = []
+  pending = [CODE_ROW]
+  turnBehaviour = succeeds
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  expect(queryCalls.map((q) => q.prompt)).toEqual(['now fix it'])
+})
+
+test('a malformed compact_context row degrades to no seed instead of failing the turn', async () => {
+  // It is JSON from the database; the turn has already been claimed by the time
+  // it is read, so throwing here would strand the session at `running`.
+  for (const payload of [{ summary: 5 }, {}, { text: 'not a context' }, 'garbage', null]) {
+    queryCalls = []
+    statuses = []
+    contextRows = [{ id: 'ctx-bad', seq: 0, type: 'compact_context', payload }]
+    pending = [CODE_ROW]
+    turnBehaviour = succeeds
+
+    await runTurn({ sessionId: 'sess-1' })
+
+    expect(queryCalls.map((q) => q.prompt)).toEqual(['now fix it'])
+    expect(statuses.at(-1)?.status).toBe('completed')
+  }
+})
+
+test('a database that fails while the seed is read fails the turn visibly, not stuck running', async () => {
+  contextReadFails = true
+  pending = [CODE_ROW]
+  turnBehaviour = succeeds
+
+  await runTurn({ sessionId: 'sess-1' })
+
+  // Nothing was sent to the model without its context, and the session is not
+  // left at `running` with nobody holding it.
+  expect(queryCalls).toEqual([])
+  expect(statuses.at(-1)?.status).toBe('failed')
+  expect(rowsOfType('error')).toHaveLength(1)
 })

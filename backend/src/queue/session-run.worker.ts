@@ -28,7 +28,13 @@ import { optionsFor } from '@/features/sessions/runner-options'
 import type { TurnMode } from '@/features/sessions/schema'
 import { messageDto, toMessageDto } from '@/features/sessions/service'
 import { type TranscriptMessage, titleFor } from '@/features/sessions/titles'
-import { composeTurnPrompt, turnModeOf } from '@/features/sessions/turn-mode'
+import {
+  COMPACT_CONTEXT_TYPE,
+  compactContextOf,
+  composeTurnPrompt,
+  turnModeOf,
+  withCompactedContext,
+} from '@/features/sessions/turn-mode'
 import { publishSessionEvent, subscribeControl } from '@/lib/events'
 import { logger } from '@/lib/logger'
 import { sessionUploadsDir } from '@/lib/paths'
@@ -996,6 +1002,19 @@ async function claimTurn(sessionId: string): Promise<SessionRow | undefined> {
   }
 }
 
+/**
+ * The summary a compacted session starts from, or null for every other session.
+ * Null too for a row that does not parse — see compactContextOf.
+ */
+async function compactContextFor(sessionId: string) {
+  const [row] = await db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.sessionId, sessionId), eq(messages.type, COMPACT_CONTEXT_TYPE)))
+    .limit(1)
+  return row ? compactContextOf(row.payload) : null
+}
+
 /** Exported for the tests; the worker below is the only real caller. */
 export async function runTurn(job: SessionRunJob): Promise<void> {
   const { sessionId } = job
@@ -1242,7 +1261,19 @@ export async function runTurn(job: SessionRunJob): Promise<void> {
     logger.info(`Session ${sessionId} running in ${options.cwd}`)
     if (mode === 'qa') logger.info(`Session ${sessionId} running a Q&A (read-only) turn`)
 
-    for await (const message of query({ prompt, options })) {
+    // Seeds a compacted session's conversation, once. Only while there is no
+    // SDK session to resume: after the first turn's `init` persists one,
+    // `resume` already carries the summary, and sending it again would pay for
+    // it on every turn. A first turn that died before `init` leaves none, so the
+    // next turn seeds again — which is what that session needs. Read here, inside
+    // the try, so a database failure fails the turn visibly instead of escaping
+    // with the session stuck at `running`; the stored prompt row is never
+    // touched, so the transcript still shows only what the operator typed.
+    const turnPrompt = claimed.sdkSessionId
+      ? prompt
+      : withCompactedContext(prompt, await compactContextFor(sessionId))
+
+    for await (const message of query({ prompt: turnPrompt, options })) {
       if (message.type === 'system' && 'subtype' in message) {
         if (message.subtype === 'init' && message.session_id !== claimed.sdkSessionId) {
           // Persist immediately: without it a crash mid-turn loses the thread

@@ -597,7 +597,28 @@ export async function listSessionsForProjects(projectIds: string[]): Promise<Ses
 }
 
 /** Short, readable, and unique enough for a branch name. */
-const branchFor = (sessionId: string) => `agentoo/s-${sessionId.slice(0, 8)}`
+export const branchFor = (sessionId: string) => `agentoo/s-${sessionId.slice(0, 8)}`
+
+/**
+ * What only an internal caller may ask of createSession — deliberately not on
+ * `CreateSessionInput`, so nothing on the HTTP surface can reach it.
+ */
+export interface CreateSessionOptions {
+  /**
+   * Whether to bring `input.baseBranch` up to date from `origin` before cutting
+   * the worktree. Defaults to true, which is what every caller but compaction
+   * wants; false cuts from the branch's local ref and never touches the network
+   * (see planBaseBranch).
+   */
+  fetchBase?: boolean
+  /**
+   * Called with the new session's id the moment its row exists, before any of
+   * the worktree work that can still throw. A caller that must not leave a
+   * session behind when it fails has no other way to learn the id of one this
+   * function threw out of.
+   */
+  onRowInserted?: (sessionId: string) => void
+}
 
 /**
  * Start a session, on its own git worktree where that is possible.
@@ -619,6 +640,7 @@ const branchFor = (sessionId: string) => `agentoo/s-${sessionId.slice(0, 8)}`
 export async function createSession(
   projectId: string,
   input: CreateSessionInput,
+  options: CreateSessionOptions = {},
 ): Promise<SessionDto> {
   // Checked before requireProject, and before anything else in this function
   // touches the filesystem or the database: createSessionSchema already
@@ -654,7 +676,10 @@ export async function createSession(
     plan = await planBaseBranch(
       repo,
       { override: input.baseBranch, projectDefault: project.defaultBranch },
-      { sshCommand: keyPath ? gitSshCommand(keyPath) : undefined },
+      {
+        sshCommand: keyPath ? gitSshCommand(keyPath) : undefined,
+        ...(options.fetchBase === false && { fetch: false }),
+      },
     )
     if (!plan.ok) throw badRequest(plan.reason)
   }
@@ -670,6 +695,7 @@ export async function createSession(
     })
     .returning()
   if (!row) throw new Error('Insert returned no row')
+  options.onRowInserted?.(row.id)
 
   if (isRepo) {
     const path = projectWorktree(project.slug, row.id)

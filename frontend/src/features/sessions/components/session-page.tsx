@@ -30,6 +30,7 @@ import {
 } from '@/shared/ui/popover'
 import { Spinner } from '@/shared/ui/spinner'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/ui/tooltip'
+import { useCompactSession } from '../hooks/use-compact-session'
 import { useSessionDraft } from '../hooks/use-session-draft'
 import {
   type AttachmentUpload,
@@ -47,8 +48,11 @@ import {
   useSessionMessages,
 } from '../hooks/use-sessions'
 import { useTurnMode } from '../hooks/use-turn-mode'
+import { shouldSuggestCompaction } from '../lib/compaction'
 import { sessionMessagesKey } from '../lib/message-cache'
 import { STATUS_TONE } from '../lib/status'
+import { CompactSessionButton } from './compact-session-button'
+import { CompactSuggestion } from './compact-suggestion'
 import { Composer } from './composer'
 import { Transcript } from './transcript'
 
@@ -133,6 +137,13 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
   // to be called on every render regardless.
   const remove = useDeleteSession(session.data?.projectId ?? '')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // Same fallback reasoning as `stopEditor` above: it navigates to and
+  // refreshes the list of this session's project, which is only known once
+  // `session.data` is in — but the buttons that call `start` only render after
+  // that, and the hook has to be called on every render regardless. Its state
+  // is keyed on `sessionId` inside, since this component is not remounted
+  // between sessions.
+  const compact = useCompactSession(sessionId, session.data?.projectId ?? '')
   // Gated on the messages query's own success, not just mount: opening the
   // stream before that first page has landed leaves nothing in the cache to
   // seed `lastSeq` from, so the backend treats it as a brand new reader and
@@ -881,7 +892,10 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
           {t(`sessions.status.${data.status}`)}
         </StatusBadge>
         <h1 className="min-w-0 flex-1 truncate text-base font-semibold">{title}</h1>
-        <div className="flex shrink-0 items-center gap-2">
+        {/* `max-w-full flex-wrap`: with Compact session beside Docker and Editor
+            an isolated session's actions no longer fit a phone's width on one
+            line, and a `shrink-0` group that cannot wrap just overflows. */}
+        <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">
           {/* Only sessions handed off from an idea have anywhere to link back
               to; a session created directly has no `ideaId` and shows nothing
               here. Placed ahead of the details popover and the menu so
@@ -956,6 +970,16 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
               <TooltipContent>{t('sessions.editorTooltip')}</TooltipContent>
             </Tooltip>
           )}
+          {/* Always offered, not just once the cost banner below shows up: the
+              banner only suggests this sooner than an operator would think to,
+              and drives the same hook state as this button. */}
+          <CompactSessionButton
+            label={t('sessions.compact.action')}
+            hint={t('sessions.compact.actionTooltip')}
+            busy={busy}
+            inFlight={compact.inFlight}
+            onClick={compact.start}
+          />
           {/* Orchestrator/branch/worktree/cost live here now, not in the
               header row itself — set-once configuration nobody needs to see
               at a glance the way the status badge does. */}
@@ -1057,6 +1081,15 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
         </Alert>
       )}
 
+      {shouldSuggestCompaction(data.totalCostUsd) && (
+        <CompactSuggestion
+          totalCostUsd={data.totalCostUsd}
+          busy={busy}
+          inFlight={compact.inFlight}
+          onCompact={compact.start}
+        />
+      )}
+
       <div
         // `overflow-y-auto` forces the x-axis to compute `auto` too, so any
         // residual overflow we haven't caught elsewhere would otherwise let
@@ -1113,7 +1146,11 @@ export function SessionPage({ sessionId }: { projectId: string; sessionId: strin
                 </div>
               </>
             )}
-            <Transcript messages={messages.messages} sessionId={sessionId} />
+            <Transcript
+              messages={messages.messages}
+              sessionId={sessionId}
+              projectId={data.projectId}
+            />
           </div>
         )}
       </div>

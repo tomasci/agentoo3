@@ -44,11 +44,18 @@ export type BaseBranchPlan =
  * for why this function does not resolve one itself), and `timeoutMs` exists
  * mainly so a test can shrink the 20s production default rather than pay it
  * on every case that exercises a degrade.
+ *
+ * `fetch: false` is for a caller whose branch only exists locally, and it is
+ * internal: nothing on the HTTP surface can set it. The branch is used as the
+ * local ref it is, with no remote consulted at all — no fetch to fail or burn up
+ * to 20s, and no "may be behind" note for a branch that was never meant to be on
+ * the remote. Its one caller is compaction, which starts a new session from the
+ * source session's own branch (`agentoo/s-<id>`), and that is usually unpushed.
  */
 export async function planBaseBranch(
   repoPath: string,
   requested: { override?: string; projectDefault: string | null },
-  options: { timeoutMs?: number; sshCommand?: string } = {},
+  options: { timeoutMs?: number; sshCommand?: string; fetch?: boolean } = {},
 ): Promise<BaseBranchPlan> {
   const branch =
     requested.override ?? requested.projectDefault ?? (await checkedOutBranch(repoPath))
@@ -59,6 +66,12 @@ export async function planBaseBranch(
 
   const localRef = `refs/heads/${branch}`
   const remoteRef = `refs/remotes/${REMOTE}/${branch}`
+
+  if (options.fetch === false) {
+    const local = await revParse(repoPath, localRef)
+    if (!local) return { ok: false, reason: `Branch "${branch}" does not exist locally` }
+    return { ok: true, branch, startPoint: localRef }
+  }
 
   const hasRemote = Boolean(await remoteUrl(repoPath))
   let degradeReason: string | undefined

@@ -20,6 +20,9 @@ export const QUEUE_DB_BACKUP = 'db-backup'
 // upserts/removes its one BullMQ job scheduler, and for the trigger job's own
 // processor.
 export const QUEUE_LEARNING_SCHEDULE = 'learning-schedule'
+// One compaction of one session into a new one — see
+// features/sessions/compaction.ts and queue/session-compaction.worker.ts.
+export const QUEUE_SESSION_COMPACTION = 'session-compaction'
 
 /** The one job scheduler id this queue ever registers — see
  * queue/learning-schedule.worker.ts's `reconcileLearningSchedule`. */
@@ -89,6 +92,15 @@ export interface TurnReconcileJob {
  */
 export interface IdeaPromptJob {
   promptId: string
+}
+
+/**
+ * Only the row id: what to compact, and from which session, is read off the
+ * `session_compactions` row when the job runs — never trusted from a queue
+ * payload that could be stale or redelivered.
+ */
+export interface SessionCompactionJob {
+  compactionId: string
 }
 
 export interface IdeaHandoffSweepJob {
@@ -368,6 +380,33 @@ export const ideaPromptQueue = new Queue<IdeaPromptJob>(QUEUE_IDEA_PROMPT, {
 
 export async function enqueueIdeaPrompt(job: IdeaPromptJob) {
   return ideaPromptQueue.add('generate', job)
+}
+
+/**
+ * Its own queue, for the reasons `ideaPromptQueue` gives, and with its own
+ * concurrency (`SESSION_COMPACTION_CONCURRENCY`): a compaction is one long
+ * model call over an entire conversation, so it shares neither a duration nor
+ * a resource with a session turn or an idea prompt.
+ *
+ * `attempts: 1`, for the same reason `sessionRunQueue` and `ideaPromptQueue`
+ * state: by the time a compaction can fail it may already have spent money, and
+ * a retry would spend it again. `runSessionCompaction` records every failure it
+ * can foresee on the row itself and never throws, so this is the backstop for
+ * the process dying mid-call — which the API's staleness check on the row
+ * (features/sessions/compaction.ts) turns into a visible failure instead of a
+ * compaction that reads "running" forever.
+ */
+export const sessionCompactionQueue = new Queue<SessionCompactionJob>(QUEUE_SESSION_COMPACTION, {
+  connection: redisConnection(),
+  defaultJobOptions: {
+    attempts: 1,
+    removeOnComplete: { count: 200 },
+    removeOnFail: { count: 200 },
+  },
+})
+
+export async function enqueueSessionCompaction(job: SessionCompactionJob) {
+  return sessionCompactionQueue.add('compact', job)
 }
 
 /**

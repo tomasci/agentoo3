@@ -64,9 +64,17 @@ export function truncateKeepingEnds(text: string, max: number): string {
   return text.slice(0, head) + marker + (tail > 0 ? text.slice(text.length - tail) : '')
 }
 
-function addLine(lines: string[], text: string): void {
+function addLine(lines: string[], text: string, itemMaxChars: number): void {
   const trimmed = text.trim()
-  if (trimmed) lines.push(truncateKeepingEnds(trimmed, DIGEST_ITEM_MAX_CHARS))
+  if (trimmed) lines.push(truncateKeepingEnds(trimmed, itemMaxChars))
+}
+
+/** The two caps a digest is bounded by. The learning review wants them tight
+ * (see the constants above); compaction hands them a much larger transcript to
+ * carry across, so it passes its own. */
+export interface DigestLimits {
+  itemMaxChars: number
+  sessionMaxChars: number
 }
 
 const str = (obj: Record<string, unknown>, key: string): string | undefined =>
@@ -119,6 +127,10 @@ function toolResultText(content: unknown): string {
 export function digestSession(
   header: DigestSessionHeader,
   rows: DigestMessageRow[],
+  limits: DigestLimits = {
+    itemMaxChars: DIGEST_ITEM_MAX_CHARS,
+    sessionMaxChars: DIGEST_SESSION_MAX_CHARS,
+  },
 ): string | null {
   // tool_use_id -> the subagent task_started named, for attributing a later
   // message's parentToolUseId to a readable label — the same fold
@@ -128,6 +140,7 @@ export function digestSession(
   // error can say which tool it came from without re-reading the call itself.
   const toolNames = new Map<string, string>()
   const lines: string[] = []
+  const add = (text: string) => addLine(lines, text, limits.itemMaxChars)
 
   const labelFor = (parentToolUseId: string | null): string => {
     if (!parentToolUseId) return 'orchestrator'
@@ -141,7 +154,7 @@ export function digestSession(
     if (row.type === 'prompt') {
       const text = str(payload, 'text') ?? ''
       const auto = payload.auto === true
-      addLine(lines, `${auto ? 'System (auto-continuation)' : 'Operator'}: ${text}`)
+      add(`${auto ? 'System (auto-continuation)' : 'Operator'}: ${text}`)
       continue
     }
 
@@ -160,10 +173,7 @@ export function digestSession(
         tasks.set(toolUseId, subagentType)
         const description = str(payload, 'description') ?? ''
         const prompt = str(payload, 'prompt') ?? ''
-        addLine(
-          lines,
-          `Delegated to ${displayAgent(subagentType)}: ${description} — prompt: ${prompt}`,
-        )
+        add(`Delegated to ${displayAgent(subagentType)}: ${description} — prompt: ${prompt}`)
       }
       continue
     }
@@ -175,10 +185,10 @@ export function digestSession(
         for (const block of content as Record<string, unknown>[]) {
           if (!block || typeof block !== 'object') continue
           if (block.type === 'text' && typeof block.text === 'string') {
-            addLine(lines, `${label}: ${block.text}`)
+            add(`${label}: ${block.text}`)
           } else if (block.type === 'tool_use' && typeof block.name === 'string') {
             if (typeof block.id === 'string') toolNames.set(block.id, block.name)
-            addLine(lines, `${label} tool call: ${summarizeToolInput(block.name, block.input)}`)
+            add(`${label} tool call: ${summarizeToolInput(block.name, block.input)}`)
           }
         }
       }
@@ -194,7 +204,7 @@ export function digestSession(
             const toolUseId = typeof block.tool_use_id === 'string' ? block.tool_use_id : undefined
             const name = toolUseId ? toolNames.get(toolUseId) : undefined
             const text = toolResultText(block.content)
-            addLine(lines, `Tool error${name ? ` (${name})` : ''}: ${text}`)
+            add(`Tool error${name ? ` (${name})` : ''}: ${text}`)
           }
         }
       }
@@ -205,7 +215,7 @@ export function digestSession(
       const resultSubtype = subtype ?? 'unknown'
       const isError = payload.is_error === true
       const text = str(payload, 'result') ?? ''
-      addLine(lines, `Result: subtype=${resultSubtype} error=${isError}${text ? ` — ${text}` : ''}`)
+      add(`Result: subtype=${resultSubtype} error=${isError}${text ? ` — ${text}` : ''}`)
     }
 
     // Everything else — stream_event, rate_limit_event, tool_use_summary,
@@ -222,5 +232,5 @@ export function digestSession(
       `Created: ${header.createdAt.toISOString()}  Cost: $${header.totalCostUsd.toFixed(4)}`,
   ]
 
-  return truncateKeepingEnds([...headerLines, ...lines].join('\n'), DIGEST_SESSION_MAX_CHARS)
+  return truncateKeepingEnds([...headerLines, ...lines].join('\n'), limits.sessionMaxChars)
 }
