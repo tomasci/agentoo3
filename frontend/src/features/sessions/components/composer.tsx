@@ -400,7 +400,14 @@ export function Composer({
     if (files.length > 0) onAttach(files, usage)
   }
 
-  const showSend = value.trim().length > 0 || sending
+  // `canStop` keeps send on screen (disabled, via `canSend`) even with nothing
+  // typed. Stop renders immediately before send, so hiding send left stop in
+  // the exact spot send had just been: clicking send clears the text and moves
+  // the session to `queued`, and a second click on the same spot — a double
+  // click, or a "did that send?" click — landed on stop and interrupted the
+  // turn that had just started. A real session lost two turns that way in one
+  // minute, one of them five seconds after it began.
+  const showSend = value.trim().length > 0 || sending || !!canStop
 
   // Enter sends; Shift+Enter is a newline. A prompt is usually one line, and
   // reaching for the mouse for every send is worse. One rule for both
