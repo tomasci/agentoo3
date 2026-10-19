@@ -1,5 +1,6 @@
 // Worker process. Owns anything that outlives an HTTP request: project setup,
-// the session turns that run Claude, and the one-shot idea-to-prompt calls.
+// the session turns that run Claude, the one-shot idea-to-prompt calls, and
+// session compactions.
 
 import { env } from '@/env'
 import { sweepAutomations } from '@/features/automations/scheduler'
@@ -24,6 +25,7 @@ import { startIdeaHandoffSweepWorker, startIdeaTurnEndedWorker } from '@/queue/i
 import { startIdeaPromptWorker } from '@/queue/idea-prompt.worker'
 import { startLearningScheduleWorker } from '@/queue/learning-schedule.worker'
 import { startProjectSetupWorker } from '@/queue/project-setup.worker'
+import { startSessionCompactionWorker } from '@/queue/session-compaction.worker'
 import { startSessionRunWorker } from '@/queue/session-run.worker'
 import { reconcileTurns, startTurnReconcileWorker } from '@/queue/turn-reconcile.worker'
 
@@ -38,6 +40,7 @@ const workers = [
   startAttachmentsGcWorker(),
   startTurnReconcileWorker(),
   startIdeaPromptWorker(),
+  startSessionCompactionWorker(),
   startIdeaHandoffSweepWorker(),
   startIdeaTurnEndedWorker(),
   startDockerOpWorker(),

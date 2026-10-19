@@ -12,6 +12,17 @@
 // "function agentoo_bulk_delete_allowed already exists" and took 0014 down
 // with it.
 //
+// The "upgrade" is 0014 and 0015 only, by a journal that stops at 0015, however
+// many migrations have been added since. That is what makes this the scenario it
+// documents: a later migration that adds a table with a foreign key into
+// `sessions` (0016's session_compactions) cannot be part of it, because a
+// `pg_restore --clean` of a dump that does not know that table cannot drop
+// `sessions` out from under it. Such a restore fails — safely, whole, under
+// --single-transaction — which is why README "Backups" has the dropdb path for
+// restoring over a database newer than the dump. Whatever came after 0015 is
+// applied by the last db:migrate below, over the restored database, which is
+// exactly where it would be applied in production.
+//
 // All of it on a temp server from pg-cluster.ts, with its own role and
 // databases; nothing here reaches the deployment's database.
 
@@ -38,6 +49,9 @@ const journal = JSON.parse(readFileSync(join(MIGRATIONS, 'meta/_journal.json'), 
   entries: JournalEntry[]
 }
 const BEFORE_0014 = journal.entries.filter((e) => e.idx < 14)
+/** Everything up to and including the bulk-delete guard: what "the upgrade" is. */
+const THROUGH_0015 = journal.entries.filter((e) => e.idx <= 15)
+const LAST_MIGRATION = journal.entries.at(-1)?.tag as string
 
 /** What 0014 and 0015 create, read from the files themselves. */
 const sql0014 = readFileSync(join(MIGRATIONS, '0014_fk_cascade_indexes.sql'), 'utf8')
@@ -219,6 +233,26 @@ if (hasPostgres) {
     )
     runs.upTo0013 = await dbMigrate('agentoo', config)
 
+    // The same, for the upgrade: a copy of the folder that stops at 0015.
+    const upTo0015 = join(TEMP, 'migrations-0015')
+    await mkdir(join(upTo0015, 'meta'), { recursive: true })
+    for (const entry of THROUGH_0015) {
+      await copyFile(join(MIGRATIONS, `${entry.tag}.sql`), join(upTo0015, `${entry.tag}.sql`))
+    }
+    await writeFile(
+      join(upTo0015, 'meta/_journal.json'),
+      JSON.stringify({ ...journal, entries: THROUGH_0015 }, null, 2),
+    )
+    const config0015 = join(TEMP, 'drizzle-0015.config.json')
+    await writeFile(
+      config0015,
+      JSON.stringify({
+        dialect: 'postgresql',
+        out: upTo0015,
+        dbCredentials: { url: s.url('agentoo', APP_ROLE) },
+      }),
+    )
+
     const app = postgres(s.url('agentoo', APP_ROLE), { max: 1, onnotice: () => {} })
     try {
       const projects = await app<{ id: string }[]>`
@@ -250,7 +284,7 @@ if (hasPostgres) {
     ])
 
     // 4. The upgrade that applies 0014 and 0015.
-    runs.upgrade = await dbMigrate('agentoo')
+    runs.upgrade = await dbMigrate('agentoo', config0015)
     states.upgraded = await stateOf('agentoo')
 
     // 5. The restore, as README "Backups" has an operator run it: as the
@@ -267,7 +301,8 @@ if (hasPostgres) {
     ])
     states.restored = await stateOf('agentoo')
 
-    // 6. And the db:migrate that used to fail.
+    // 6. And the db:migrate that used to fail: every migration there is, so also
+    // whatever came after 0015.
     runs.after = await dbMigrate('agentoo')
     states.after = await stateOf('agentoo')
 
@@ -365,11 +400,11 @@ dbTest('nor can it switch the guard off for its whole database, or for itself', 
   }
 })
 
-dbTest('a fresh database migrates 0000 to 0015 as its non-superuser owner', () => {
+dbTest('a fresh database migrates every migration as its non-superuser owner', () => {
   ok('fresh')
   expect(state('fresh')).toMatchObject({
     migrations: journal.entries.length,
-    lastMigration: '0015_bulk_delete_guard',
+    lastMigration: LAST_MIGRATION,
     triggers: TRIGGERS_0015,
     functions: FUNCTIONS_0015,
     indexes: INDEXES_0014,
@@ -394,7 +429,8 @@ dbTest('the setup: up to 0013 by drizzle-kit, a dump, then 0014 and 0015', () =>
   ok('dump')
   ok('upgrade')
   expect(state('upgraded')).toMatchObject({
-    migrations: journal.entries.length,
+    migrations: THROUGH_0015.length,
+    lastMigration: '0015_bulk_delete_guard',
     triggers: TRIGGERS_0015,
     functions: FUNCTIONS_0015,
     indexes: INDEXES_0014,
@@ -422,7 +458,7 @@ dbTest('db:migrate after that restore succeeds, and the triggers and indexes are
   ok('after')
   expect(state('after')).toEqual({
     migrations: journal.entries.length,
-    lastMigration: '0015_bulk_delete_guard',
+    lastMigration: LAST_MIGRATION,
     triggers: TRIGGERS_0015,
     functions: FUNCTIONS_0015,
     indexes: INDEXES_0014,

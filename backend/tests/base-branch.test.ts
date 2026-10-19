@@ -5,7 +5,7 @@ import { join } from 'node:path'
 
 import './setup-env'
 
-const { addWorktree, fetchBranch, git, revParse } = await import('../src/lib/git')
+const { addWorktree, deleteBranch, fetchBranch, git, revParse } = await import('../src/lib/git')
 
 /**
  * The pinned contract, restated rather than imported, so a module that is not
@@ -18,6 +18,7 @@ type BaseBranchPlan =
 type PlanBaseBranch = (
   repoPath: string,
   requested: { override?: string; projectDefault: string | null },
+  options?: { fetch?: boolean },
 ) => Promise<BaseBranchPlan>
 
 const planBaseBranch: PlanBaseBranch = await import('../src/features/sessions/base-branch')
@@ -503,5 +504,92 @@ describe('revParse', () => {
   test('answers undefined for a ref that is not there, rather than throwing', async () => {
     const repo = await localOnly('revparse-missing')
     expect(await revParse(repo, 'refs/heads/nope')).toBeUndefined()
+  })
+})
+
+// --------------------------------------------------------------------------
+// fetch: false — a branch that only exists locally (compaction's source branch)
+// --------------------------------------------------------------------------
+
+describe('fetch: false', () => {
+  test('uses the local ref as it is, with no remote consulted and no note', async () => {
+    const { repo, origin } = await project('nofetch-local')
+    await git(['branch', 'agentoo/s-unpushed'], repo)
+    await commitFile(repo, 'unpushed.txt', 'only here\n', 'unpushed work')
+    await git(['branch', '-f', 'agentoo/s-unpushed', 'HEAD'], repo)
+    const tip = await sha(repo, 'refs/heads/agentoo/s-unpushed')
+
+    // Pointed at a remote that would hang, so a fetch attempt could not go
+    // unnoticed: the default 20s timeout would blow the bound below.
+    await git(['remote', 'set-url', 'origin', `git://127.0.0.1:${blackhole.port}/t.git`], repo)
+    const started = Date.now()
+    const plan = planned(
+      await planBaseBranch(repo, { override: 'agentoo/s-unpushed', projectDefault: 'main' }, { fetch: false }),
+    )
+
+    expect(Date.now() - started).toBeLessThan(2_000)
+    expect(plan.branch).toBe('agentoo/s-unpushed')
+    expect(plan.startPoint).toBe('refs/heads/agentoo/s-unpushed')
+    expect(await sha(repo, plan.startPoint ?? 'HEAD')).toBe(tip)
+    // The "may be behind" note belongs to a failed fetch; none was attempted.
+    expect(plan.note).toBeUndefined()
+    expect(origin).toBeTruthy()
+  })
+
+  test('never falls back to the remote: a branch missing locally is a hard failure', async () => {
+    const { repo } = await project('nofetch-remote-only')
+    // `main` exists on origin and locally; this name exists nowhere locally.
+    const plan = refused(await planBaseBranch(repo, { override: 'only-on-origin' }, { fetch: false }))
+    expect(plan.reason).toContain('does not exist locally')
+  })
+
+  test('the default is unchanged: with a remote it still fetches and prefers what it fetched', async () => {
+    const { seed, repo } = await project('nofetch-default')
+    await commitFile(seed, 'b.txt', 'two\n', 'second')
+    await git(['push', '-q', 'origin', 'main'], seed)
+
+    const plan = planned(await planBaseBranch(repo, { projectDefault: 'main' }, {}))
+    expect(plan.startPoint).toBe('refs/remotes/origin/main')
+    expect(await sha(repo, plan.startPoint ?? 'HEAD')).toBe(await sha(seed, 'HEAD'))
+  })
+})
+
+describe('deleteBranch', () => {
+  test('deletes a branch that has commits no other branch has', async () => {
+    const repo = await localOnly('delete-branch')
+    await git(['branch', 'agentoo/s-doomed'], repo)
+    await git(['checkout', '-q', 'agentoo/s-doomed'], repo)
+    await commitFile(repo, 'x.txt', 'x\n', 'unmerged work')
+    await git(['checkout', '-q', 'main'], repo)
+
+    const result = await deleteBranch(repo, 'agentoo/s-doomed')
+    expect(result.ok).toBe(true)
+    expect(await revParse(repo, 'refs/heads/agentoo/s-doomed')).toBeUndefined()
+    // And nothing else.
+    expect(await revParse(repo, 'refs/heads/main')).toBeDefined()
+  })
+
+  test('refuses while a worktree still has the branch checked out', async () => {
+    const repo = await localOnly('delete-branch-checked-out')
+    const worktree = join(dir, 'delete-branch-checked-out-wt')
+    expect((await addWorktree(repo, worktree, 'agentoo/s-held')).ok).toBe(true)
+
+    const result = await deleteBranch(repo, 'agentoo/s-held')
+    expect(result.ok).toBe(false)
+    expect(await revParse(repo, 'refs/heads/agentoo/s-held')).toBeDefined()
+  })
+
+  test('a branch that is not there is a plain failure, not a throw', async () => {
+    const repo = await localOnly('delete-branch-missing')
+    const result = await deleteBranch(repo, 'agentoo/s-never-existed')
+    expect(result.ok).toBe(false)
+    expect(result.stderr).toMatch(/not found/i)
+  })
+
+  test('a name that looks like an option is a branch name, not a flag', async () => {
+    const repo = await localOnly('delete-branch-option')
+    const result = await deleteBranch(repo, '--force')
+    expect(result.ok).toBe(false)
+    expect(await revParse(repo, 'refs/heads/main')).toBeDefined()
   })
 })

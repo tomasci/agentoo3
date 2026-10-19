@@ -243,3 +243,59 @@ test('a single item over DIGEST_ITEM_MAX_CHARS is truncated on its own', () => {
   // own small overhead — nowhere near the original 3x length.
   expect(text.length).toBeLessThan(huge.length)
 })
+
+// --- limits ---------------------------------------------------------------------
+//
+// Session compaction digests a whole transcript to carry across, so it hands in
+// far larger caps. The learning review, which passes none, must keep today's.
+
+test('with no limits given, an item is capped at DIGEST_ITEM_MAX_CHARS and the whole at DIGEST_SESSION_MAX_CHARS', () => {
+  const long = 'x'.repeat(DIGEST_ITEM_MAX_CHARS * 3)
+  const text = digestSession(header, [row({ type: 'prompt', payload: { text: long } })])
+  expect(text).not.toBeNull()
+  expect(text).not.toContain(long)
+  expect(text).toContain('characters omitted')
+
+  const many = Array.from({ length: 200 }, (_, i) =>
+    row({ type: 'prompt', payload: { text: `request ${i} ${'y'.repeat(400)}` } }),
+  )
+  expect((digestSession(header, many) ?? '').length).toBeLessThanOrEqual(DIGEST_SESSION_MAX_CHARS)
+})
+
+test('explicit limits equal to the defaults change nothing', () => {
+  const rows = [
+    row({ type: 'prompt', payload: { text: 'z'.repeat(2000) } }),
+    row({ payload: { message: { content: [{ type: 'text', text: 'w'.repeat(2000) }] } } }),
+  ]
+  expect(
+    digestSession(header, rows, {
+      itemMaxChars: DIGEST_ITEM_MAX_CHARS,
+      sessionMaxChars: DIGEST_SESSION_MAX_CHARS,
+    }),
+  ).toBe(digestSession(header, rows))
+})
+
+test('larger limits keep what the defaults would cut, in every kind of line', () => {
+  const long = 'q'.repeat(1900)
+  const rows = [
+    row({ type: 'prompt', payload: { text: long } }),
+    row({ payload: { message: { content: [{ type: 'text', text: long }] } } }),
+    row({ type: 'result', payload: { subtype: 'success', result: long } }),
+  ]
+  const limits = { itemMaxChars: 2000, sessionMaxChars: 300_000 }
+  const text = digestSession(header, rows, limits) ?? ''
+  expect(text.split(long).length - 1).toBe(3)
+  expect(text).not.toContain('characters omitted')
+
+  // ...and the default still cuts them.
+  expect(digestSession(header, rows)).toContain('characters omitted')
+})
+
+test('a smaller session limit bounds the whole digest', () => {
+  const rows = Array.from({ length: 50 }, (_, i) =>
+    row({ type: 'prompt', payload: { text: `request number ${i}` } }),
+  )
+  const text = digestSession(header, rows, { itemMaxChars: 500, sessionMaxChars: 300 }) ?? ''
+  expect(text.length).toBeLessThanOrEqual(300)
+  expect(text).toContain('characters omitted')
+})

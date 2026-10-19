@@ -2,10 +2,12 @@ import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import { errorSchema } from '@/features/projects/schema'
 import { AppError, errorBody, issuesFor, validationFailed } from '@/lib/errors'
 import { subscribeSession } from '@/lib/events'
+import { createSessionCompaction, getSessionCompaction } from './compaction'
 import {
   createSessionSchema,
   messagePageSchema,
   sendMessageSchema,
+  sessionCompactionSchema,
   sessionMessageSchema,
   sessionSchema,
   sessionsOverviewSchema,
@@ -316,6 +318,63 @@ sessionsRouter.openapi(
   async (c) => {
     const { text, mode } = c.req.valid('json')
     return c.json(await sendMessage(c.req.valid('param').id, text, mode), 201)
+  },
+)
+
+sessionsRouter.openapi(
+  createRoute({
+    method: 'post',
+    path: '/sessions/{id}/compactions',
+    operationId: 'createSessionCompaction',
+    tags: ['sessions'],
+    summary: 'Compact a session into a new one',
+    description:
+      "Condenses the session's whole conversation into a summary and starts a NEW session from " +
+      'it; this session is never modified. The work runs in the background: poll the returned ' +
+      'compaction until it is succeeded (resultSessionId is the new session) or failed. If a ' +
+      'compaction of this session is already pending or running, that one is returned instead ' +
+      'of starting another.',
+    request: { params: idParam },
+    responses: {
+      202: json(sessionCompactionSchema, 'Accepted: the compaction to poll'),
+      404: json(errorSchema, 'Not found'),
+      409: json(errorSchema, 'The session is running, or its project is not ready'),
+      503: json(errorSchema, 'The compaction could not be queued'),
+    },
+  }),
+  async (c) => c.json(await createSessionCompaction(c.req.valid('param').id), 202),
+)
+
+sessionsRouter.openapi(
+  createRoute({
+    method: 'get',
+    path: '/sessions/{id}/compactions/{compactionId}',
+    operationId: 'getSessionCompaction',
+    tags: ['sessions'],
+    summary: 'Read one compaction of a session',
+    description:
+      'Not found unless the compaction exists and belongs to this session. A compaction whose ' +
+      'worker died is reported as failed rather than running forever.',
+    request: {
+      params: z.object({
+        id: z
+          .string()
+          .uuid()
+          .openapi({ param: { name: 'id', in: 'path' } }),
+        compactionId: z
+          .string()
+          .uuid()
+          .openapi({ param: { name: 'compactionId', in: 'path' } }),
+      }),
+    },
+    responses: {
+      200: json(sessionCompactionSchema, 'The compaction'),
+      404: json(errorSchema, 'Not found'),
+    },
+  }),
+  async (c) => {
+    const { id, compactionId } = c.req.valid('param')
+    return c.json(await getSessionCompaction(id, compactionId), 200)
   },
 )
 

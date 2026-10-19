@@ -474,6 +474,116 @@ registered outside the OpenAPI router and absent from `backend/openapi.json`:
 it's a download the browser navigates to, not a JSON fetch a generated client
 should wrap.
 
+### Compacting a session
+
+`POST /sessions/{id}/compactions` condenses a session's whole conversation into
+a summary and starts a **new** session from it, for when a long conversation has
+outgrown being worth resuming. It answers `202` with a `SessionCompaction`
+(`pending`); the work runs on the worker, and `GET
+/sessions/{id}/compactions/{compactionId}` is what the UI polls until it reads
+`succeeded` (`resultSessionId` is the new session) or `failed` (`error` says why).
+A second request while one is `pending` or `running` returns that same row rather
+than starting another: `session_compactions_active_key` is a partial unique index
+on the source, so the database decides it, not a read beforehand. A source that is
+`queued` or `running` is a `409` (the summary would be of a half-written turn), as
+is a project that is not `ready`; a queue that is down is a `503`, with the row
+marked failed so it does not hold the slot.
+
+**The source is only ever read.** Nothing writes its `sessions` row (not even
+`updatedAt`), inserts, updates or deletes one of its `messages`, or resumes,
+appends to or compacts its Claude Code conversation in place. A compaction that
+fails leaves no new session behind, and that is the whole reason for the next
+choice.
+
+**Why a fork, and why `/compact`.** Claude Code's built-in compaction is the best
+summary available: it is what Claude Code itself would carry forward. But `/compact`
+rewrites the conversation it runs in, so it runs on a fork. `forkSession` copies the
+source's transcript file (under `~/.claude/projects/`) to a new one with fresh
+UUIDs and never writes the source's; `query({ prompt: '/compact' })` resumes the
+**fork's** id, never the source's, with no tools, no project settings (so no repo
+hooks or CLAUDE.md act from this call) and a `PostCompact` callback hook that
+captures `compact_summary` — the one place the text is handed over, since the stream
+carries only a boundary marker. The fork is deleted afterwards, whatever happened.
+The summary has Claude Code's `<analysis>` scratchpad stripped and its `<summary>`
+unwrapped. A manual `/compact` keeps the last round verbatim and summarizes only what
+came before it, so when the boundary says messages were preserved, the operator's last
+request and the agent's final reply are read from the database and appended — the new
+session does not inherit the fork's conversation, so they would otherwise be lost.
+
+**When it falls back, and when it must not.** Only "there is nothing to fork" falls
+back to a one-shot summary of the transcript stored in the database
+(`method: 'transcript_summary'`): the source has no `sdkSessionId`, its directory is
+gone, `forkSession` says the session is not found / has no messages / has an invalid
+id, or `/compact` itself answers "Not enough messages to compact." Everything else
+that is not a captured summary — an error result, an `error_*` subtype, a throw, the
+timeout, a boundary with no summary, wording this code does not recognise — fails the
+compaction with its reason and what it cost. Falling back there would silently spend
+more money on a path the operator did not choose, and the check fails closed if Claude
+Code ever rewords its own message. The fallback is a `runOneShotQuery` call (the one
+the learning review uses), governed by `SESSION_COMPACTION_*` rather than `LEARNING_*`,
+over a digest with larger caps (2000 characters an item, 300000 in all). A session that
+was itself started from a compaction has its earlier summary prepended, so compacting
+twice does not lose everything before the first.
+
+**Seeding the new session, once.** The summary lands as a `compact_context` message
+(ours, like `prompt`) at seq 0, never pending, with `{ summary, sourceSessionId,
+sourceTitle, sourceTotalCostUsd, sourceBranch, method }`, and the session's `nextSeq`
+is set to 1 in the same transaction so the first prompt does not collide with it. The
+worker only claims pending prompts, so the context is never mistaken for one. It
+reaches the model as a framed block in front of the first prompt
+(`withCompactedContext`, features/sessions/turn-mode.ts), and only while the session
+has no SDK session yet: once the first turn's `init` persists `sdkSessionId`, `resume`
+carries the summary with the rest of the conversation, and sending it again would pay
+for it on every turn. A first turn that died before `init` leaves no SDK session, so
+the next turn seeds again, which is what that session needs. It is never written into
+the stored prompt row — the transcript shows only what the operator typed — and the
+payload is parsed when read, so a malformed row means no seed rather than an error in
+the middle of a claim.
+
+**The base branch.** When the source has its own worktree branch (`agentoo/s-<id>`),
+the new worktree is cut from that branch's **local** ref with no fetch (an internal
+option to `createSession` and `planBaseBranch`; nothing on the HTTP surface sets it).
+That branch is usually unpushed, so a fetch would fail, cost up to 20 seconds, and
+leave a misleading "may be behind" note. Uncommitted changes in the source's
+worktree are not carried over, and the framed context says so. A source with no
+branch (a shared checkout, or no git at all) gets an ordinary session; so does one
+whose branch no longer exists, in which case `sourceBranch` is recorded as null so the
+context does not claim a branch the worktree was not cut from.
+
+**Cost.** The new session pays: the compaction's cost is added to its `totalCostUsd`,
+because it exists because of that spend. A failed attempt creates no session to carry
+it, so it is recorded on the compaction row's `costUsd` and nowhere else. The source's
+total never changes.
+
+**When something goes wrong after the new session exists** (`createSession` itself
+failing once its row is inserted, the context insert, the final status write), the
+session is deleted and so is its worktree and its branch, `agentoo/s-<new id>`. This is
+the one place a session's branch is deleted: ordinarily deleting a session keeps it,
+because it holds the session's work, but this one was cut from the source's tip and
+never ran a turn, so it holds nothing the source branch does not. `createSession`
+records the worktree on the row only after `git worktree add`, so a failure in between
+leaves a worktree the row does not name; the cleanup removes it at its deterministic
+path (`worktrees/<new id>`) before deleting the branch, which git would refuse while the
+worktree has it checked out. Anything that could not be cleaned up (the session, the
+worktree, the branch) is named in the row's `error`.
+
+**A worker that died.** The queue has `attempts: 1` (a retry would spend the model call
+again), so nothing re-drives a row whose worker was killed. Instead any request for the
+source — the next `POST`, or a poll of the row — first fails every `pending`/`running`
+compaction older than `SESSION_COMPACTION_TIMEOUT_MS` plus five minutes (measured from
+`startedAt`, else `createdAt`), so a polling UI terminates and the source can be
+compacted again. A duplicate delivery of a job is harmless for the same reason the turn
+claim is: the `pending` to `running` update finds nothing.
+
+`session_compactions` is deliberately not behind the bulk-delete guard (migration
+0015): its rows are derived and cheap to lose, and the only way one is deleted is its
+session going away.
+
+Configured by `SESSION_COMPACTION_CONCURRENCY` (default 2: each is a Claude Code
+subprocess reading a whole conversation), `SESSION_COMPACTION_TIMEOUT_MS` (900000) and
+`SESSION_COMPACTION_MAX_BUDGET_USD` (25, passed as `maxBudgetUsd` to both the `/compact`
+query and the fallback call).
+
 ### Git over ssh inside a session
 
 The app injects `GIT_SSH_COMMAND` into the git commands it spawns itself, which

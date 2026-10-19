@@ -9,11 +9,18 @@
 import { expect, test } from 'bun:test'
 import './setup-env'
 import { qaReadOnlyHook } from '../src/features/sessions/runner-options'
-import { sendMessageSchema, turnModeSchema } from '../src/features/sessions/schema'
 import {
+  compactContextPayloadSchema,
+  sendMessageSchema,
+  turnModeSchema,
+} from '../src/features/sessions/schema'
+import {
+  COMPACT_CONTEXT_TYPE,
+  compactContextOf,
   composeTurnPrompt,
   QA_MODE_INSTRUCTION,
   turnModeOf,
+  withCompactedContext,
 } from '../src/features/sessions/turn-mode'
 
 // --- turnModeOf ---------------------------------------------------------------
@@ -177,4 +184,128 @@ test('it is silent for every event that is not a PreToolUse', async () => {
 test('the matcher names exactly the tools the hook refuses', () => {
   const { matcher } = qaReadOnlyHook()
   expect(matcher?.split('|').sort()).toEqual(['Edit', 'MultiEdit', 'NotebookEdit', 'Write'])
+})
+
+// --- withCompactedContext -----------------------------------------------------
+
+const CONTEXT = {
+  summary: '1. Goal: dark mode\n2. Done: toggle in Settings',
+  sourceSessionId: '11111111-1111-4111-8111-111111111111',
+  sourceTitle: 'Add dark mode',
+  sourceBranch: 'agentoo/s-11111111',
+}
+
+test('no context leaves the prompt exactly as it was, whatever it is', () => {
+  for (const prompt of ['fix the bug', '', ' padded\nand multiline ', `${QA_MODE_INSTRUCTION}\n\nwhy?`]) {
+    expect(withCompactedContext(prompt, null)).toBe(prompt)
+  }
+})
+
+test('a context frames the summary as background, then ends with the prompt untouched', () => {
+  const prompt = composeTurnPrompt({ announcement: '', text: 'now add a contrast option', mode: 'code' })
+  const seeded = withCompactedContext(prompt, CONTEXT)
+
+  const lines = seeded.split('\n')
+  expect(lines[0]).toBe('[Compacted context from previous session]')
+  expect(lines[1]).toBe(
+    'This conversation continues work from an earlier session ("Add dark mode", id 11111111-1111-4111-8111-111111111111) whose history was compacted into the summary below. It is background context, not a new request.',
+  )
+  expect(lines[2]).toBe(
+    'This session\'s worktree was cut from the last commit of branch "agentoo/s-11111111"; uncommitted changes from the previous session are not present.',
+  )
+  expect(seeded).toContain(`<summary>\n${CONTEXT.summary}\n</summary>`)
+  expect(seeded.endsWith('[End of compacted context]\n\nnow add a contrast option')).toBe(true)
+  // In that order: heading, framing, summary, end marker, prompt.
+  const order = [
+    '[Compacted context from previous session]',
+    'background context, not a new request',
+    '<summary>',
+    '</summary>',
+    '[End of compacted context]',
+    'now add a contrast option',
+  ].map((part) => seeded.indexOf(part))
+  expect(order).toEqual([...order].sort((a, b) => a - b))
+  expect(order.every((i) => i >= 0)).toBe(true)
+})
+
+test('without a source branch the worktree sentence is left out', () => {
+  const seeded = withCompactedContext('go', { ...CONTEXT, sourceBranch: null })
+  expect(seeded).not.toContain('worktree')
+  expect(seeded).not.toContain('uncommitted')
+  expect(seeded).toContain('<summary>')
+})
+
+test('a source with no title is named for what it is', () => {
+  expect(withCompactedContext('go', { ...CONTEXT, sourceTitle: null })).toContain(
+    '("Untitled session", id 11111111-1111-4111-8111-111111111111)',
+  )
+})
+
+test('it wraps a Q&A prompt too: the context first, then the instruction and the question', () => {
+  const prompt = composeTurnPrompt({ announcement: '', text: 'why?', mode: 'qa' })
+  const seeded = withCompactedContext(prompt, CONTEXT)
+  expect(seeded.endsWith(`[End of compacted context]\n\n${QA_MODE_INSTRUCTION}\n\nwhy?`)).toBe(true)
+})
+
+// --- the stored compact_context payload ----------------------------------------
+
+test('the message type is the agreed string', () => {
+  expect(COMPACT_CONTEXT_TYPE).toBe('compact_context')
+})
+
+test('compactContextOf reads a well-formed payload as the context it carries', () => {
+  expect(
+    compactContextOf({
+      ...CONTEXT,
+      sourceTotalCostUsd: 1.5,
+      method: 'sdk_compact',
+    }),
+  ).toEqual(CONTEXT)
+})
+
+test('anything that is not a payload with a summary and a source degrades to no context, never throws', () => {
+  // JSON read back from the database: a malformed row must mean "no seed", not
+  // an exception in the middle of claiming a turn.
+  for (const garbage of [
+    undefined,
+    null,
+    'summary',
+    42,
+    [],
+    {},
+    { summary: '' },
+    { summary: 5, sourceSessionId: 'x' },
+    { summary: 'x' },
+    { summary: 'x', sourceSessionId: '' },
+    { text: 'a prompt row, not a context' },
+  ]) {
+    expect(compactContextOf(garbage)).toBeNull()
+  }
+})
+
+test('a malformed framing field costs the framing, not the summary', () => {
+  const read = compactContextOf({
+    summary: 'KEEP ME',
+    sourceSessionId: 'abc',
+    sourceTitle: 7,
+    sourceBranch: { not: 'a string' },
+    sourceTotalCostUsd: 'lots',
+    method: 'telepathy',
+  })
+  expect(read).toEqual({
+    summary: 'KEEP ME',
+    sourceSessionId: 'abc',
+    sourceTitle: null,
+    sourceBranch: null,
+  })
+  expect(
+    compactContextPayloadSchema.parse({ summary: 'KEEP ME', sourceSessionId: 'abc' }),
+  ).toEqual({
+    summary: 'KEEP ME',
+    sourceSessionId: 'abc',
+    sourceTitle: null,
+    sourceTotalCostUsd: 0,
+    sourceBranch: null,
+    method: 'transcript_summary',
+  })
 })

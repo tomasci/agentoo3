@@ -35,8 +35,9 @@ export interface OneShotCallResult {
 /** Whichever of the two credential env vars is actually set — identical to
  * prompt-service.ts's own credentialEnv, duplicated rather than imported
  * because that module's copy is not exported and this one lives in a
- * different feature entirely. */
-function credentialEnv(): Record<string, string> {
+ * different feature entirely. Exported for session compaction, which makes the
+ * same kind of call and must authenticate the same way. */
+export function credentialEnv(): Record<string, string> {
   const out: Record<string, string> = {}
   if (env.ANTHROPIC_API_KEY) out.ANTHROPIC_API_KEY = env.ANTHROPIC_API_KEY
   if (env.CLAUDE_CODE_OAUTH_TOKEN) out.CLAUDE_CODE_OAUTH_TOKEN = env.CLAUDE_CODE_OAUTH_TOKEN
@@ -79,9 +80,22 @@ export async function runOneShotQuery(args: {
   systemPrompt: string
   prompt: string
   outputJsonSchema: Record<string, unknown>
+  /**
+   * Per-call replacements for what `LEARNING_*` would otherwise decide, for a
+   * caller whose work is not a learning call — session compaction summarizes a
+   * whole conversation, which needs far more time and money than a review batch,
+   * and its own knobs. Each is independent, and omitting all of them is exactly
+   * the behaviour this function had before they existed.
+   *
+   * `model: null` means "the SDK's own default", which is not the same as
+   * leaving it out: left out, `LEARNING_MODEL` applies.
+   */
+  overrides?: { timeoutMs?: number; maxBudgetUsd?: number; model?: string | null }
 }): Promise<OneShotCallResult> {
+  const timeoutMs = args.overrides?.timeoutMs ?? env.LEARNING_CALL_TIMEOUT_MS
+  const model = args.overrides?.model === undefined ? env.LEARNING_MODEL : args.overrides.model
   const abortController = new AbortController()
-  const timeout = setTimeout(() => abortController.abort(), env.LEARNING_CALL_TIMEOUT_MS)
+  const timeout = setTimeout(() => abortController.abort(), timeoutMs)
 
   // Declared outside the try so the catch block can still read whatever
   // result this run did capture before the SDK threw past it — the identical
@@ -95,12 +109,12 @@ export async function runOneShotQuery(args: {
       abortController,
       persistSession: false,
       maxTurns: env.LEARNING_MAX_TURNS,
-      maxBudgetUsd: env.LEARNING_CALL_BUDGET_USD,
+      maxBudgetUsd: args.overrides?.maxBudgetUsd ?? env.LEARNING_CALL_BUDGET_USD,
       settingSources: [],
       tools: [],
       systemPrompt: args.systemPrompt,
       outputFormat: { type: 'json_schema', schema: args.outputJsonSchema },
-      ...(env.LEARNING_MODEL !== undefined && { model: env.LEARNING_MODEL }),
+      ...(model != null && { model }),
       // Options.env REPLACES the subprocess environment entirely — see
       // prompt-service.ts's identical comment. This call spawns no tool that
       // could ever need anything beyond PATH/HOME/the credential.
@@ -149,7 +163,7 @@ export async function runOneShotQuery(args: {
     if (abortController.signal.aborted) {
       return {
         ok: false,
-        reason: `Call exceeded its ${env.LEARNING_CALL_TIMEOUT_MS}ms timeout and was aborted: ${reason}`,
+        reason: `Call exceeded its ${timeoutMs}ms timeout and was aborted: ${reason}`,
         costUsd,
       }
     }

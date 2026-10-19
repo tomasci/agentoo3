@@ -270,6 +270,28 @@ const schema = z.object({
   // caps for where an oversized digest's size is actually bounded in the first
   // place.
   LEARNING_BATCH_CHARS: z.coerce.number().int().positive().default(60_000),
+
+  // Compact session (backend/README.md's "Compacting a session"): condensing
+  // one session's whole conversation into the summary a new session starts
+  // from. A model call over a long conversation, nothing like an idea prompt or
+  // a learning batch, so it has its own knobs rather than borrowing theirs.
+  //
+  // How many may run at once. Each one is a Claude Code subprocess reading a
+  // whole conversation, so this is deliberately small, and independent of
+  // WORKER_CONCURRENCY for the reason IDEA_PROMPT_CONCURRENCY is: neither
+  // shares a resource with a session turn.
+  SESSION_COMPACTION_CONCURRENCY: z.coerce.number().int().positive().default(2),
+  // The abort deadline for one compaction. The SDK's only timeout is an
+  // AbortController (see IDEA_PROMPT_TIMEOUT_MS), and the call has to read and
+  // summarize an entire conversation, so this is far longer than the others.
+  // It is also what the API uses to decide a pending/running row's worker died
+  // (the row's age past this plus a margin): see features/sessions/compaction.ts.
+  SESSION_COMPACTION_TIMEOUT_MS: z.coerce.number().int().positive().default(900_000),
+  // Ceiling for a compaction's model spend, in USD. Sized for a very long
+  // conversation, not the ordinary one: unlike IDEA_PROMPT_MAX_BUDGET_USD this
+  // reads the whole transcript, and exists to stop a runaway rather than to be
+  // brushed against.
+  SESSION_COMPACTION_MAX_BUDGET_USD: z.coerce.number().positive().default(25),
 })
 
 const parsed = schema.safeParse(process.env)

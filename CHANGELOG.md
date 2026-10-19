@@ -2,6 +2,12 @@
 
 The What's new screen inside agentoo shows this same list after each update — reopen it any time via the version number in the status bar. Newest release first. Also available in [Russian](CHANGELOG.ru.md).
 
+## 1.4.178 — 2026-10-19
+
+### New
+- A Compact session button in a session's header summarizes the whole conversation and opens a new session that starts from that summary, with a link back to the original, which stays untouched.
+- Once a session has cost more than $1000, a banner above its history offers the same Compact session and start new one.
+
 ## 1.4.177 — 2026-10-15
 
 ### New

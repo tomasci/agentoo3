@@ -5,8 +5,11 @@
 // Q&A messages interleave freely in one conversation. The permission half of
 // Q&A (read-only tool use) lives in runner-options.ts; this file is only the
 // words and the decision of which mode a stored payload means.
+//
+// The same goes for the one other thing a prompt can be wrapped in: the summary
+// a compacted session starts from (withCompactedContext, below).
 
-import type { TurnMode } from './schema'
+import { type CompactContextPayload, compactContextPayloadSchema, type TurnMode } from './schema'
 
 /**
  * Prepended to a Q&A turn's prompt, never to the stored message: the
@@ -59,4 +62,66 @@ export function composeTurnPrompt({
     return `${announcement ? `${announcement}\n` : ''}${QA_MODE_INSTRUCTION}\n\n${text}`
   }
   return announcement ? `${announcement}\n${text}` : text
+}
+
+/**
+ * `messages.type` of the row a compacted session starts from. Ours, like
+ * 'prompt': the SDK never emits it. Always seq 0 and never pending, so the turn
+ * worker, which only claims pending prompts, can never mistake it for one.
+ */
+export const COMPACT_CONTEXT_TYPE = 'compact_context'
+
+/** What the framing below needs from a `compact_context` payload. */
+export type CompactedContext = Pick<
+  CompactContextPayload,
+  'summary' | 'sourceSessionId' | 'sourceTitle' | 'sourceBranch'
+>
+
+/**
+ * A stored `compact_context` payload as the context it means, or null when it
+ * is not one. The payload is JSON read back from the database, so a malformed
+ * row degrades to "no seed" instead of throwing mid-claim — the same stance as
+ * turnModeOf.
+ */
+export function compactContextOf(payload: unknown): CompactedContext | null {
+  const parsed = compactContextPayloadSchema.safeParse(payload)
+  if (!parsed.success) return null
+  const { summary, sourceSessionId, sourceTitle, sourceBranch } = parsed.data
+  return { summary, sourceSessionId, sourceTitle, sourceBranch }
+}
+
+/**
+ * The prompt for a compacted session's first turn: the summary of the
+ * conversation it continues, framed as background, then the operator's message.
+ *
+ * Never stored — the prompt row keeps only what the operator typed, so the
+ * transcript shows that and nothing else. The worker applies this only while
+ * the session has no SDK session yet: once the first turn's `init` persists one,
+ * `resume` carries this text with the rest of the conversation, and repeating it
+ * would pay for the summary again on every turn. A first turn that died before
+ * `init` leaves no SDK session, so the next one re-seeds, which is correct.
+ *
+ * The framing says what the block is, because a model handed a wall of prior
+ * work as the opening of a user message will otherwise take it for the request.
+ * The branch sentence is there because the new worktree starts from the source
+ * branch's last commit, not from the source's working tree: edits the source
+ * had not committed are not here, and an agent that assumes they are will
+ * report work it cannot find.
+ */
+export function withCompactedContext(prompt: string, context: CompactedContext | null): string {
+  if (!context) return prompt
+  const title = context.sourceTitle ?? 'Untitled session'
+  return [
+    '[Compacted context from previous session]',
+    `This conversation continues work from an earlier session ("${title}", id ${context.sourceSessionId}) whose history was compacted into the summary below. It is background context, not a new request.`,
+    ...(context.sourceBranch
+      ? [
+          `This session's worktree was cut from the last commit of branch "${context.sourceBranch}"; uncommitted changes from the previous session are not present.`,
+        ]
+      : []),
+    `<summary>\n${context.summary}\n</summary>`,
+    '[End of compacted context]',
+    '',
+    prompt,
+  ].join('\n')
 }

@@ -1,7 +1,9 @@
+import { Link } from '@tanstack/react-router'
 import {
   ChevronRightIcon,
   FileIcon,
   FileXIcon,
+  FoldVerticalIcon,
   MessageSquareIcon,
   OctagonXIcon,
   TriangleAlertIcon,
@@ -65,6 +67,15 @@ const TASK_TONE: Record<TaskStatus, Tone> = {
  * can return megabytes; showing none of it was the bug this fixes, but
  * showing all of it inline would trade one unreadable row for another. */
 const RESULT_CLAMP = 4000
+
+/** How long a compacted-context summary may be before it is folded to a few
+ * screen lines behind a "Show more". Counted in characters, like
+ * `RESULT_CLAMP`, but the fold itself is a height cap (`max-h-80` below)
+ * rather than a slice of the text: this is markdown, and cutting it mid-list
+ * or mid-fence would render something other than what the summary says. A
+ * summary just over the limit that fits the cap anyway shows an idle button —
+ * the cheaper mistake than measuring the rendered height on every render. */
+const SUMMARY_CLAMP = 1500
 
 /**
  * A row that is a heading until you open it — every task/event node in the
@@ -437,7 +448,101 @@ function PromptAttachments({ sessionId, files }: { sessionId: string; files: Mes
   )
 }
 
-function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) {
+/**
+ * The summary a compacted session starts from (`compactContext` node).
+ *
+ * Visually apart from a prompt or a reply — dashed outline, muted surface —
+ * because it is neither: nobody typed it and the agent did not say it in this
+ * session, it is the previous session's conversation, condensed, handed to
+ * the agent once at the start. The note at the bottom says exactly that, since
+ * "why did the agent know all this" is the question the card exists to answer.
+ *
+ * The source link is only a link when the payload named a session and the
+ * page supplied a project to resolve it in; otherwise the label is plain text
+ * rather than an anchor to nowhere.
+ */
+function CompactContextCard({
+  node,
+  projectId,
+}: {
+  node: Extract<TranscriptNode, { kind: 'compactContext' }>
+  projectId: string
+}) {
+  const { t } = useTranslation()
+  const [expanded, setExpanded] = useState(false)
+  const folded = node.summary.length > SUMMARY_CLAMP && !expanded
+  const time = formatTime(node.createdAt) && (
+    <Timestamp
+      createdAt={node.createdAt}
+      className="text-[0.6875rem] text-muted-foreground tabular-nums"
+    />
+  )
+  const sourceLabel =
+    node.sourceTitle ??
+    (node.sourceSessionId
+      ? t('sessions.untitled', { id: node.sourceSessionId.slice(0, 8) })
+      : t('sessions.compact.contextSourceFallback'))
+
+  return (
+    <div className="grid grid-cols-1 gap-2 rounded-lg border border-dashed bg-muted/40 px-3 py-2">
+      <div className="flex items-center gap-2">
+        <FoldVerticalIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+        <h2 className="min-w-0 flex-1 text-sm font-medium wrap-anywhere">
+          {t('sessions.compact.contextHeading')}
+        </h2>
+        {time}
+        {node.summary && <CopyButton value={node.summary} compact />}
+      </div>
+      <p className="m-0 text-xs text-muted-foreground wrap-anywhere">
+        {t('sessions.compact.contextSource')}:{' '}
+        {projectId && node.sourceSessionId ? (
+          <Link
+            to="/projects/$projectId/sessions/$sessionId"
+            params={{ projectId, sessionId: node.sourceSessionId }}
+            className="font-medium text-primary underline underline-offset-4 hover:no-underline"
+          >
+            {sourceLabel}
+          </Link>
+        ) : (
+          <span className="font-medium text-foreground">{sourceLabel}</span>
+        )}
+      </p>
+      {node.summary ? (
+        <>
+          <div className={folded ? 'min-w-0 max-h-80 overflow-y-hidden' : 'min-w-0'}>
+            <Markdown compact>{node.summary}</Markdown>
+          </div>
+          {node.summary.length > SUMMARY_CLAMP && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="justify-self-start"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((v) => !v)}
+            >
+              {expanded ? t('sessions.transcript.showLess') : t('sessions.transcript.showMore')}
+            </Button>
+          )}
+        </>
+      ) : (
+        <p className="m-0 text-sm text-muted-foreground italic">
+          {t('sessions.compact.contextEmpty')}
+        </p>
+      )}
+      <p className="m-0 text-xs text-muted-foreground">{t('sessions.compact.contextNote')}</p>
+    </div>
+  )
+}
+
+function Node({
+  node,
+  sessionId,
+  projectId,
+}: {
+  node: TranscriptNode
+  sessionId: string
+  projectId: string
+}) {
   const { t } = useTranslation()
 
   if (node.kind === 'prompt') {
@@ -521,6 +626,10 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
     )
   }
 
+  if (node.kind === 'compactContext') {
+    return <CompactContextCard node={node} projectId={projectId} />
+  }
+
   // The disclosure only renders its meta slot when this is truthy, so an
   // unparsable createdAt must produce undefined here, not an element that
   // renders empty.
@@ -596,7 +705,7 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
       {node.children.length > 0 && (
         <div className="ml-2 grid grid-cols-1 gap-2 border-l-2 pl-3">
           {node.children.map((child) => (
-            <Node key={child.id} node={child} sessionId={sessionId} />
+            <Node key={child.id} node={child} sessionId={sessionId} projectId={projectId} />
           ))}
         </div>
       )}
@@ -607,9 +716,13 @@ function Node({ node, sessionId }: { node: TranscriptNode; sessionId: string }) 
 function TranscriptView({
   messages,
   sessionId = '',
+  projectId = '',
 }: {
   messages: SessionMessage[]
   sessionId?: string
+  /** Only a compacted-context card needs it, to link back to the source
+   * session; without one that card shows the source's name as plain text. */
+  projectId?: string
 }) {
   const { t } = useTranslation()
   // Keyed on the array identity, which React Query keeps stable between
@@ -649,7 +762,7 @@ function TranscriptView({
         // container, one per top-level node, in document order, and only a
         // top-level node ever carries it.
         <div key={node.id} data-transcript-row="">
-          <Node node={node} sessionId={sessionId} />
+          <Node node={node} sessionId={sessionId} projectId={projectId} />
         </div>
       ))}
     </div>

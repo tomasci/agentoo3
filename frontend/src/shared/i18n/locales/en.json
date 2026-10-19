@@ -348,6 +348,23 @@
       "codeTooltip": "The agent works on the task and can change files",
       "qaTooltip": "The agent only answers, in this same session, and won't change anything"
     },
+    "compact": {
+      "action": "Compact session",
+      "actionTooltip": "Summarize this whole conversation and continue in a new session that starts from the summary. This session stays as it is.",
+      "inProgress": "Compacting…",
+      "inProgressTooltip": "Compacting this session — you will be taken to the new one when it is ready",
+      "busyTooltip": "Wait for the current turn to finish, or stop it, before compacting",
+      "failed": "Could not compact the session",
+      "statusFailed": "Could not check on the compaction",
+      "bannerTitle": "This session is getting expensive",
+      "bannerBody": "It has cost {{cost}} so far, and every new message carries the whole history. Compact it into a summary and carry on in a new session — this one stays as it is.",
+      "bannerAction": "Compact session and start new one",
+      "contextHeading": "Compacted context from previous session",
+      "contextSource": "Source session",
+      "contextSourceFallback": "Previous session",
+      "contextEmpty": "The summary is empty or could not be read.",
+      "contextNote": "The agent was given this context once, at the start of this session. It is not sent again with each message."
+    },
     "sendFailed": "Could not send the message",
     "stopFailed": "Could not stop the session",
     "pendingPrompts_one": "{{count}} message waiting",

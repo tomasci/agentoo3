@@ -254,7 +254,12 @@ export const sessionMessageSchema = z.object({
   // reconnecting client asks for everything after the last seq it holds.
   seq: z.number().int(),
   type: z.string().openapi({
-    description: "SDK message type, or 'prompt' for a message the human typed",
+    description:
+      "SDK message type, or one of ours: 'prompt' for a message the human typed, and " +
+      "'compact_context' for the summary a compacted session starts from. A compact_context " +
+      'message is always seq 0 and never pending, and its payload is { summary, ' +
+      'sourceSessionId, sourceTitle, sourceTotalCostUsd, sourceBranch, method } — see ' +
+      'POST /sessions/{id}/compactions.',
   }),
   // Set when the message came from inside a subagent, and equal to the
   // tool_use id of the Task call that started it. This is what nests the
@@ -308,6 +313,70 @@ export const sendMessageSchema = z.object({
   mode: turnModeSchema.default('code'),
 })
 export type SendMessageInput = z.infer<typeof sendMessageSchema>
+
+// --- compaction ----------------------------------------------------------------
+
+export const sessionCompactionStatusSchema = z.enum(['pending', 'running', 'succeeded', 'failed'])
+
+/**
+ * How a compaction's summary was produced: Claude Code's own `/compact` run on
+ * a fork of the source conversation, or a one-shot summary of the transcript
+ * stored in the database (what is used when there is no conversation to fork).
+ */
+export const compactionMethodSchema = z.enum(['sdk_compact', 'transcript_summary'])
+export type CompactionMethod = z.infer<typeof compactionMethodSchema>
+
+export const sessionCompactionSchema = z
+  .object({
+    id: z.string().uuid(),
+    sourceSessionId: z.string(),
+    status: sessionCompactionStatusSchema,
+    method: compactionMethodSchema.nullable().openapi({
+      description: 'How the summary was made. Null until a summary exists.',
+    }),
+    resultSessionId: z
+      .string()
+      .nullable()
+      .openapi({
+        description:
+          'The new session, set once the compaction has succeeded. Null otherwise, and again ' +
+          'if that session is later deleted.',
+      }),
+    error: z.string().nullable().openapi({ description: "Why it failed, when status is 'failed'" }),
+    costUsd: z.number().openapi({
+      description:
+        'What the summarizing model calls cost, whether or not they succeeded. On success the ' +
+        "same amount is also added to the new session's totalCostUsd; on failure this is the " +
+        'only place it is recorded.',
+    }),
+    createdAt: z.string(),
+    startedAt: z.string().nullable(),
+    finishedAt: z.string().nullable(),
+  })
+  .openapi('SessionCompaction')
+export type SessionCompactionDto = z.infer<typeof sessionCompactionSchema>
+
+/**
+ * The payload of a `compact_context` message: what a compacted session starts
+ * from. Written by the compaction worker, read back by the session worker on a
+ * session's first turn to seed the conversation (turn-mode.ts's
+ * withCompactedContext).
+ *
+ * Parsed when read, not cast: it is JSON from the database, and a row this
+ * cannot make sense of must mean "no seed", not an exception in the middle of
+ * claiming a turn. Only `summary` and `sourceSessionId` are required for that
+ * reason — the rest is framing, and `.catch` keeps a malformed framing field
+ * from discarding a perfectly good summary.
+ */
+export const compactContextPayloadSchema = z.object({
+  summary: z.string().min(1),
+  sourceSessionId: z.string().min(1),
+  sourceTitle: z.string().nullable().catch(null),
+  sourceTotalCostUsd: z.number().catch(0),
+  sourceBranch: z.string().nullable().catch(null),
+  method: compactionMethodSchema.catch('transcript_summary'),
+})
+export type CompactContextPayload = z.infer<typeof compactContextPayloadSchema>
 
 // No zod schema for these: the export is assembled from already-parsed
 // SessionDto/SessionMessageDto values, so a validation pass here would just be
