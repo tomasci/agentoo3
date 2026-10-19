@@ -169,7 +169,11 @@ export type SessionsOverviewDto = z.infer<typeof sessionsOverviewSchema>
 export const orchestratorName = z.string().trim().min(1).max(64)
 
 export const createSessionSchema = z.object({
-  title: z.string().min(1).max(200).optional(),
+  // `.trim()` runs before the length checks, for the same reason as
+  // orchestratorName above: "   " fails `.min(1)` instead of being stored as a
+  // blank title, and "  Fix login  " persists as "Fix login". The 200 limit
+  // therefore applies to the trimmed value.
+  title: z.string().trim().min(1).max(200).optional(),
   // Required, not optional: a session with no orchestrator can never run a
   // turn (sendMessage's own guard, service.ts), so refusing to create one is
   // cheaper than creating a session that can only ever 400 on its first
@@ -208,7 +212,9 @@ export type CreateSessionInput = z.infer<typeof createSessionSchema>
 
 export const updateSessionSchema = z
   .object({
-    title: z.string().min(1).max(200).optional(),
+    // Trimmed like createSessionSchema.title (see there): a rename to
+    // whitespace is a 400 rather than a blank title.
+    title: z.string().trim().min(1).max(200).optional(),
     // Optional (may be left unchanged) but, unlike create, not nullable: a
     // session that already has an orchestrator must not be able to lose it
     // through an update, only swap it for another one.

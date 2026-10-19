@@ -2,6 +2,11 @@
 
 The What's new screen inside agentoo shows this same list after each update — reopen it any time via the version number in the status bar. Newest release first. Also available in [Russian](CHANGELOG.ru.md).
 
+## 1.4.179 — 2026-10-19
+
+### New
+- A session can be renamed: pick Rename in a project's session list, or click the session's title at the top of its page.
+
 ## 1.4.178 — 2026-10-19
 
 ### New

@@ -16,8 +16,8 @@
 //      page — is pinned to the location it should stay on;
 //   2. the list is a four-column table (Title link, Last updated, Status,
 //      actions) with none of the old card's extra fields, ordered by last
-//      activity, and an Open/Delete menu whose Delete confirms first and
-//      toasts a failure;
+//      activity, and an Open/Rename/Delete menu whose Delete confirms first
+//      and toasts a failure;
 //   3. a search box filters on the *displayed* title, says so when nothing
 //      matches, and is absent (with the table) when there are no sessions.
 //
@@ -907,12 +907,14 @@ test('rows are ordered by last activity, not by the order the API answered in or
   expect(rowTitles()).toEqual(['Mike', 'Zulu', 'Alpha'])
 })
 
-test('the actions menu has exactly Open and Delete', async () => {
+test('the actions menu has exactly Open, Rename and Delete, in that order', async () => {
+  // Was exactly Open and Delete; the rename feature put Rename between them
+  // (spec change). Rename's own behaviour is in tests/sessions-table-rename.test.tsx.
   sessions = [session()]
   await mount()
   expect(menuTriggers().length).toBe(1)
   await click(menuTriggers()[0], 'menu trigger')
-  expect(menuItemLabels()).toEqual(['Open', 'Delete'])
+  expect(menuItemLabels()).toEqual(['Open', 'Rename', 'Delete'])
 })
 
 test('Open navigates to the session page', async () => {
